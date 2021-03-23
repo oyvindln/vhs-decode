@@ -38,15 +38,19 @@ def chroma_to_u16(chroma):
 
 
 @njit(cache=True)
-def replace_spikes(demod, demod_diffed, max_value):
+def replace_spikes(demod, demod_diffed, max_value, replace_span=4):
+    """Go through and replace spikes and some samples after them with data
+    from the diff demod pass"""
+    assert len(demod) == len(demod_diffed), "diff demod length doesn't match demod length"
     too_high = max_value
-    to_fix = np.argwhere(demod[:-20] > too_high)
+    to_fix = np.where(demod > too_high)[0]
 
     for i in to_fix:
-        start = min(i[0] - 4, 0)
-        end = i[0] + 20
+        start = max(i - replace_span, 0)
+        end = min(i + replace_span, len(demod_diffed) -1)
         demod[start:end] = demod_diffed[start:end]
 
+    return demod
 
 @njit(cache=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
@@ -78,30 +82,43 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
 
 
 # stores the last valid blacklevel, synclevel and vsynclocs state
-# preliminary solution to fix spurious decoding halts (chewed tape case)
+# preliminary solution to fix spurious decoding halts (numpy error case)
 class FieldState:
     def __init__(self):
-        self.blacklevel = None
-        self.synclevel = None
+        self.blanklevels = np.array([])
+        self.synclevels = np.array([])
         self.locs = None
-
-    def setLevels(self, black, sync):
-        self.blacklevel, self.synclevel = black, sync
-
-    def getLevels(self):
-        return self.blacklevel, self.synclevel
+        self.field_average = 30
 
     def setSyncLevel(self, level):
-        self.synclevel = level
+        self.synclevels = np.append(self.synclevels, level)
+
+    def setLevels(self, blank, sync):
+        self.blanklevels = np.append(self.blanklevels, blank)
+        self.setSyncLevel(sync)
 
     def getSyncLevel(self):
-        return self.synclevel
+        if np.size(self.synclevels) > 0:
+            synclevel, self.synclevels = utils.moving_average(self.synclevels, window=self.field_average)
+            return synclevel
+        else:
+            return None
+
+    def getLevels(self):
+        if np.size(self.blanklevels) > 0:
+            blacklevel, self.blanklevels = utils.moving_average(self.blanklevels, window=self.field_average)
+            return blacklevel, self.getSyncLevel()
+        else:
+            return None, None
 
     def setLocs(self, locs):
         self.locs = locs
 
     def getLocs(self):
         return self.locs
+
+    def hasLevels(self):
+        return np.size(self.blanklevels) > 0 and np.size(self.synclevels) > 0
 
 
 field_state = FieldState()
@@ -112,11 +129,21 @@ def getpulses_override(field):
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
-    # pass one using standard levels
 
-    # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-    pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
-    pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
+    if field_state.hasLevels():
+        blank, sync = field_state.getLevels()
+        dc_offset = field.rf.SysParams["ire0"] - blank
+        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
+        if not field.rf.disable_dc_offset:
+            field.data["video"]["demod"] += dc_offset
+        sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+        pulse_hz_min = field.rf.iretohz(sync_ire - 10)
+        pulse_hz_max = field.rf.iretohz(sync_ire / 2)
+    else:
+        # pass one using standard levels
+        # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
+        pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+        pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
 
     pulses = lddu.findpulses(
         field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
@@ -190,7 +217,8 @@ def getpulses_override(field):
                 )
             )
 
-    blacklevel = np.median(black_means)
+    # Set to nan if empty to avoid warning.
+    blacklevel = math.nan if len(black_means) == 0 else np.median(black_means)
 
     if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
         # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
@@ -1173,6 +1201,14 @@ class FieldNTSCUMatic(ldd.FieldNTSC):
         return baserr
 
 
+def parent_system(system):
+    if system == "MPAL":
+        parent_system = "NTSC"
+    else:
+        parent_system = system
+    return parent_system
+
+
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
 # We do this simply by using inheritance and overriding functions. This results in some redundant
@@ -1200,7 +1236,7 @@ class VHSDecode(ldd.LDdecode):
             freader,
             logger,
             analog_audio=False,
-            system=system,
+            system=parent_system(system),
             doDOD=doDOD,
             threads=threads,
             extra_options=extra_options,
@@ -1217,12 +1253,12 @@ class VHSDecode(ldd.LDdecode):
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
-        if system == "PAL":
+        if parent_system(system) == "PAL":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldPALUMatic
             else:
                 self.FieldClass = FieldPALVHS
-        elif system == "NTSC":
+        elif parent_system(system) == "NTSC":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldNTSCUMatic
             else:
@@ -1371,7 +1407,10 @@ class VHSRFDecode(ldd.RFDecode):
 
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
-            inputfreq, system, decode_analog_audio=False, has_analog_audio=False
+            inputfreq,
+            parent_system(system),
+            decode_analog_audio=False,
+            has_analog_audio=False,
         )
 
         # controls the sharpness EQ gain
@@ -1391,6 +1430,12 @@ class VHSRFDecode(ldd.RFDecode):
         high_boost = rf_options.get("high_boost", None)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
+        self.disable_diff_demod = (
+            rf_options.get("disable_diff_demod", False)
+        )
+        self.disable_dc_offset = (
+            rf_options.get("disable_dc_offset", False)
+        )
 
         if track_phase is None:
             self.track_phase = 0
@@ -1423,6 +1468,9 @@ class VHSRFDecode(ldd.RFDecode):
             else:
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_VHS)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_VHS)
+        elif system == "MPAL":
+            self.SysParams = copy.deepcopy(vhs_formats.SysParams_MPAL_VHS)
+            self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_MPAL_VHS)
         else:
             raise Exception("Unknown video system! ", system)
 
@@ -1774,12 +1822,16 @@ class VHSRFDecode(ldd.RFDecode):
         # Applies RF filters
         indata_fft_filt = indata_fft * self.Filters["RFVideo"]
         data_filtered = npfft.ifft(indata_fft_filt)
+
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
-        high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
-            (env_mean * 0.9) / env
-        )
-        indata_fft_filt += npfft.fft(high_part * self.high_boost)
+        if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
+            high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
+                (env_mean * 0.9) / env
+            )
+            indata_fft_filt += npfft.fft(high_part * self.high_boost)
+        else:
+            print('WARN: RF signal is weak. Is your deck tracking properly?')
 
         hilbert = npfft.ifft(indata_fft_filt * self.Filters["hilbert"])
 
@@ -1795,15 +1847,16 @@ class VHSRFDecode(ldd.RFDecode):
             # applies the video EQ
             demod = self.video_EQ(demod)
 
-        check_value = self.iretohz(100) * 2
-
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
         # replace the spikes with data from the diffed demod.
-        if np.max(demod[20:-20]) > check_value:
-            demod_b = unwrap_hilbert(
-                np.pad(np.diff(hilbert), (1, 0), mode="constant"), self.freq_hz
-            ).real
-            replace_spikes(demod, demod_b, check_value)
+        if not self.disable_diff_demod:
+            check_value = self.iretohz(100) * 2
+
+            if np.max(demod[20:-20]) > check_value:
+                demod_b = unwrap_hilbert(
+                    np.pad(np.diff(hilbert), (1, 0), mode="constant"), self.freq_hz
+                ).real
+                demod = replace_spikes(demod, demod_b, check_value)
 
         # applies main deemphasis filter
         demod_fft = npfft.rfft(demod)
@@ -1852,7 +1905,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
             ax1.plot(demod)
-            ax1.plot(demod_b, color="#000000")
+            # ax1.plot(demod_b, color="#000000")
             ax2.plot(out_video)
 
             # ax3.plot(hilbert)
@@ -1864,7 +1917,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            crossings = find_crossings(env, 700)
             #            ax3.plot(crossings, color="#0000FF")
             plt.show()
-            exit(0)
+            # exit(0)
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
         video_out = np.rec.array(

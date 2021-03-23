@@ -79,7 +79,7 @@ bool SourceVideo::open(QString filename, qint32 _fieldLength, qint32 _fieldLineL
     } else {
         if (!inputFile.open(QIODevice::ReadOnly)) {
             // Failed to open named input file
-            qWarning() << "Could not open " << filename << "as source video input file";
+            qWarning() << "Could not open" << filename << "as source video input file";
             return false;
         }
 

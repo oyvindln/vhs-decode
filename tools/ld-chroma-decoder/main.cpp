@@ -4,7 +4,9 @@
 
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018-2020 Simon Inns
-    Copyright (C) 2019-2020 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
+    Copyright (C) 2021 Chad Page
+    Copyright (C) 2021 Phillip Blucas
 
     This file is part of ld-decode-tools.
 
@@ -148,7 +150,7 @@ int main(int argc, char *argv[])
 
     // Option to specify chroma gain
     QCommandLineOption chromaGainOption(QStringList() << "chroma-gain",
-                                        QCoreApplication::translate("main", "Gain factor applied to chroma components (default 1.0 NTSC, 0.5 PAL)"),
+                                        QCoreApplication::translate("main", "Gain factor applied to chroma components (default 1.0)"),
                                         QCoreApplication::translate("main", "number"));
     parser.addOption(chromaGainOption);
 
@@ -356,7 +358,7 @@ int main(int argc, char *argv[])
         monoConfig.outputYCbCr = true;
         monoConfig.pixelFormat = Decoder::PixelFormat::GRAY16;
     } else if (outputFormatName != "rgb") {
-        qCritical() << "Unknown output format " << outputFormatName;
+        qCritical() << "Unknown output format" << outputFormatName;
         return -1;
     }
 
@@ -398,7 +400,7 @@ int main(int argc, char *argv[])
             palConfig.transformMode = TransformPal::thresholdMode;
         } else {
             // Quit with error
-            qCritical() << "Unknown Transform mode " << name;
+            qCritical() << "Unknown Transform mode" << name;
             return -1;
         }
     }
@@ -511,7 +513,7 @@ int main(int argc, char *argv[])
     } else if (decoderName == "mono") {
         decoder.reset(new MonoDecoder(monoConfig));
     } else {
-        qCritical() << "Unknown decoder " << decoderName;
+        qCritical() << "Unknown decoder" << decoderName;
         return -1;
     }
 

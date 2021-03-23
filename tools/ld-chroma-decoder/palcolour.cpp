@@ -8,6 +8,8 @@
     Copyright (C) 2018  William Andrew Steer
     Copyright (C) 2018-2019 Simon Inns
     Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2021 Chad Page
+    Copyright (C) 2021 Phillip Blucas
 
     This file is part of ld-decode-tools.
 
@@ -71,8 +73,8 @@
 constexpr qint32 PalColour::MAX_WIDTH;
 constexpr qint32 PalColour::FILTER_SIZE;
 
-PalColour::PalColour(QObject *parent)
-    : QObject(parent), configurationSet(false)
+PalColour::PalColour()
+    : configurationSet(false)
 {
 }
 

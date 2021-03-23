@@ -4,6 +4,7 @@
 
     ld-decode-tools TBC library
     Copyright (C) 2018-2020 Simon Inns
+    Copyright (C) 2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -45,31 +46,30 @@ void debugOutputHandler(QtMsgType type, const QMessageLogContext &context, const
     // context.line - to show the line number
     // context.function - to show the function name
 
-    QByteArray localMsg = msg.toLocal8Bit();
     QString outputMessage;
-
     switch (type) {
     case QtDebugMsg: // These are debug messages meant for developers
-        // If the code was compiled as 'release' the context.file will be NULL
-        if (context.file != nullptr) outputMessage.sprintf("Debug: [%s:%d] %s\n", context.file, context.line, localMsg.constData());
-        else outputMessage.sprintf("Debug: %s\n", localMsg.constData());
+        outputMessage = "Debug";
         break;
     case QtInfoMsg: // These are information messages meant for end-users
-        if (context.file != nullptr) outputMessage.sprintf("Info: [%s:%d] %s\n", context.file, context.line, localMsg.constData());
-        else outputMessage.sprintf("Info: %s\n", localMsg.constData());
+        outputMessage = "Info";
         break;
     case QtWarningMsg:
-        if (context.file != nullptr) outputMessage.sprintf("Warning: [%s:%d] %s\n", context.file, context.line, localMsg.constData());
-        else outputMessage.sprintf("Warning: %s\n", localMsg.constData());
+        outputMessage = "Warning";
         break;
     case QtCriticalMsg:
-        if (context.file != nullptr) outputMessage.sprintf("Critical: [%s:%d] %s\n", context.file, context.line, localMsg.constData());
-        else outputMessage.sprintf("Critical: %s\n", localMsg.constData());
+        outputMessage = "Critical";
         break;
     case QtFatalMsg:
-        if (context.file != nullptr) outputMessage.sprintf("Fatal: [%s:%d] %s\n", context.file, context.line, localMsg.constData());
-        else outputMessage.sprintf("Fatal: %s\n", localMsg.constData());
+        outputMessage = "Fatal";
         break;
+    }
+
+    // If the code was compiled as 'release' the context.file will be NULL
+    if (context.file != nullptr) {
+        outputMessage += QString(": [%1:%2] %3\n").arg(context.file).arg(context.line).arg(msg);
+    } else {
+        outputMessage += QString(": %1\n").arg(msg);
     }
 
     // If quiet mode is set, suppress all output
@@ -100,7 +100,7 @@ void openDebugFile(QString filename)
     debugFile = new QFile(filename);
     if (!debugFile->open(QIODevice::WriteOnly)) {
         // Failed to open source sample file
-        qDebug() << "Could not open " << filename << "as debug output file";
+        qDebug() << "Could not open" << filename << "as debug output file";
     } else saveDebug = true;
 }
 

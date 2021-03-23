@@ -137,11 +137,11 @@ void DropOuts::concatenate()
 // Custom debug streaming operator
 QDebug operator<<(QDebug dbg, DropOuts &dropOuts)
 {
-    dbg.nospace() << "Dropout object contains " << dropOuts.size() << " entries:" << endl;
+    dbg.nospace() << "Dropout object contains " << dropOuts.size() << " entries:\n";
 
     for (qint32 i = 0; i < dropOuts.size(); i++) {
         dbg.nospace() << "  [" << i << "] startx = " << dropOuts.startx(i) <<
-                         " - endx = " << dropOuts.endx(i) << " - line = " << dropOuts.fieldLine(i) << endl;
+                         " - endx = " << dropOuts.endx(i) << " - line = " << dropOuts.fieldLine(i) << "\n";
     }
 
     return dbg.maybeSpace();

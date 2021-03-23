@@ -2,81 +2,22 @@
 import os
 import sys
 import signal
-import argparse
 import json
 import traceback
-
 import lddecode.utils as lddu
 from lddecode.utils_logging import init_logging
 from vhsdecode.process import VHSDecode
 import vhsdecode.formats as f
+from vhsdecode.cmdcommons import (
+    common_parser,
+    select_sample_freq,
+    select_system,
+    get_basics,
+    get_rf_options,
+    get_extra_options,
+)
 
-CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
-CXADC_FREQ_HIGH = 3150.0 / 88.0  # 35.795454545
-CXADC_TENBIT_FREQ = (8 * 315.0) / 88.0 / 2.0  # 14.318181818
-CXADC_TENBIT_FREQ_HIGH = 3150.0 / 88.0 / 2.0  # 17.897727272
-
-parser = argparse.ArgumentParser(description="Extracts video from raw VHS rf captures")
-parser.add_argument("infile", metavar="infile", type=str, help="source file")
-parser.add_argument(
-    "outfile", metavar="outfile", type=str, help="base name for destination files"
-)
-parser.add_argument(
-    "-s",
-    "--start",
-    metavar="start",
-    type=int,
-    default=0,
-    help="rough jump to frame n of capture (default is 0)",
-)
-parser.add_argument(
-    "--start_fileloc",
-    metavar="start_fileloc",
-    type=float,
-    default=-1,
-    help="jump to precise sample # in the file",
-)
-# parser.add_argument('-E', '--end', metavar='end', type=int, default=-1, help='cutting: last frame')
-parser.add_argument(
-    "-l",
-    "--length",
-    metavar="length",
-    type=int,
-    default=99999999,
-    help="limit length to n frames",
-)
-parser.add_argument(
-    "-p", "--pal", dest="pal", action="store_true", help="source is in PAL format"
-)
-parser.add_argument(
-    "-n", "--ntsc", dest="ntsc", action="store_true", help="source is in NTSC format"
-)
-parser.add_argument(
-    "-t",
-    "--threads",
-    metavar="threads",
-    type=int,
-    default=1,
-    help="number of CPU threads to use",
-)
-parser.add_argument(
-    "-f",
-    "--frequency",
-    dest="inputfreq",
-    metavar="FREQ",
-    type=lddu.parse_frequency,
-    default=None,
-    help="RF sampling frequency in source file (default is 40MHz)",
-)
-# parser.add_argument('-c', '--cut', dest='cut', action='store_true', help='cut (to r16) instead of decode')
-# parser.add_argument('-m', '--MTF', metavar='mtf', type=float, default=None, help='mtf compensation multiplier')
-# parser.add_argument('--MTF_offset', metavar='mtf_offset', type=float, default=None, help='mtf compensation offset')
-parser.add_argument(
-    "--NTSCJ",
-    dest="ntscj",
-    action="store_true",
-    help="source is in NTSC-J (IRE 0 black) format (untested)",
-)
+parser = common_parser("Extracts video from raw VHS rf captures")
 parser.add_argument(
     "--doDOD",
     dest="dodod",
@@ -121,38 +62,6 @@ parser.add_argument(
     default=0.1,
     help="Multiply top/bottom IRE in json by 1 +/- this value (used to avoid clipping on RGB conversion in chroma decoder).",
 )
-# parser.add_argument('--noDOD', dest='nodod', action='store_true', default=False,
-#                    help='disable dropout detector (Currently disabled for vhs)')
-# parser.add_argument('--EFM', dest='efm', action='store_true', default=False, help='Filter EFM output (WIP!)')
-# parser.add_argument('--daa', dest='daa', action='store_true', default=False, help='Disable analog audio decoding')
-parser.add_argument(
-    "--cxadc",
-    dest="cxadc",
-    action="store_true",
-    default=False,
-    help="Use cxadc input frequency (~28,63 Mhz)",
-)
-parser.add_argument(
-    "--cxadc3",
-    dest="cxadc3",
-    action="store_true",
-    default=False,
-    help="Use cxadc ten fsc input frequency (~35,79 Mhz)",
-)
-parser.add_argument(
-    "--10cxadc",
-    dest="cxadc_tenbit",
-    action="store_true",
-    default=False,
-    help="Use cxadc input frequency in ten bit mode (~14,31 Mhz)",
-)
-parser.add_argument(
-    "--10cxadc3",
-    dest="cxadc3_tenbit",
-    action="store_true",
-    default=False,
-    help="Use cxadc ten fsc input frequency in ten bit mode (~17,89 Mhz)",
-)
 parser.add_argument(
     "-T",
     "--track_phase",
@@ -161,7 +70,6 @@ parser.add_argument(
     default=None,
     help="If set to 0 or 1, force use of video track phase.",
 )
-
 parser.add_argument(
     "-U",
     "--u-matic",
@@ -170,11 +78,6 @@ parser.add_argument(
     default=False,
     help="Decode u-matic",
 )
-
-parser.add_argument(
-    "--noAGC", dest="noAGC", action="store_true", default=False, help="Disable AGC"
-)
-
 parser.add_argument(
     "--high_boost",
     metavar="high_boost",
@@ -182,66 +85,23 @@ parser.add_argument(
     default=None,
     help="Multiplier for boost to high rf frequencies, uses default if not specified. Subject to change.",
 )
-
 parser.add_argument(
-    "-ct",
-    "--chroma_trap",
-    dest="chroma_trap",
+    "-nodd",
+    "--no_diff_demod",
+    dest="disable_diff_demod",
     action="store_true",
     default=False,
-    help="Enable filter to reduce chroma interference on luma.",
+    help="Disable diff demod",
 )
 
-parser.add_argument(
-    "-sl",
-    "--sharpness",
-    metavar="sharpness",
-    type=int,
-    default=0,
-    help="Sharpness level (0~100)",
-)
-
-parser.add_argument(
-    "--notch",
-    dest="notch",
-    metavar="notch",
-    type=lddu.parse_frequency,
-    default=None,
-    help="Center frequency of optional notch filter on rf and chroma.",
-)
-
-parser.add_argument(
-    "--notch_q",
-    dest="notch_q",
-    metavar="notch_q",
-    type=float,
-    default=10.0,
-    help="Q factor for notch filter",
-)
 
 args = parser.parse_args()
-filename = args.infile
-outname = args.outfile
-firstframe = args.start
-req_frames = args.length
+
+filename, outname, firstframe, req_frames = get_basics(args)
 tape_format = "UMATIC" if args.umatic else "VHS"
-system = "PAL" if args.pal else "NTSC"
 
-if args.pal and args.ntsc:
-    print("ERROR: Can only be PAL or NTSC")
-    exit(1)
-
-sample_freq = (
-    CXADC_FREQ
-    if args.cxadc
-    else CXADC_FREQ_HIGH
-    if args.cxadc3
-    else CXADC_TENBIT_FREQ
-    if args.cxadc_tenbit
-    else CXADC_TENBIT_FREQ_HIGH
-    if args.cxadc3_tenbit
-    else args.inputfreq
-)
+system = select_system(args)
+sample_freq = select_sample_freq(args)
 
 try:
     loader = lddu.make_loader(filename, sample_freq)
@@ -253,21 +113,16 @@ dod_threshold_p = f.DEFAULT_THRESHOLD_P_DDD
 if args.cxadc or args.cxadc3 or args.cxadc_tenbit or args.cxadc3_tenbit:
     dod_threshold_p = f.DEFAULT_THRESHOLD_P_CXADC
 
-rf_options = {
-    "dod_threshold_p": dod_threshold_p,
-    "dod_threshold_a": args.dod_threshold_a,
-    "dod_hysteresis": args.dod_hysteresis,
-    "track_phase": args.track_phase,
-    "high_boost": args.high_boost,
-    "chroma_trap": args.chroma_trap,
-    "sharpness": args.sharpness,
-    "notch": args.notch,
-    "notch_q": args.notch_q,
-}
+rf_options = get_rf_options(args)
+rf_options["dod_threshold_p"] = dod_threshold_p
+rf_options["dod_threshold_a"] = args.dod_threshold_a
+rf_options["dod_hysteresis"] = args.dod_hysteresis
+rf_options["track_phase"] = args.track_phase
+rf_options["high_boost"] = args.high_boost
+rf_options["disable_diff_demod"] = args.disable_diff_demod
+rf_options["disable_dc_offset"] = args.disable_dc_offset
 
-extra_options = {
-    "useAGC": not args.noAGC,
-}
+extra_options = get_extra_options(args)
 
 # Wrap the LDdecode creation so that the signal handler is not taken by sub-threads,
 # allowing SIGINT/control-C's to be handled cleanly
