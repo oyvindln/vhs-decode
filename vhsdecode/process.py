@@ -1671,7 +1671,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
         #FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
-        self.DCrestore = DCrestore(self.freq_hz, DP["deemph_tau"], self.SysParams)
+        self.DCrestore = DCrestore(self.freq_hz, DP["deemph_tau"], self.SysParams, self.blockcut_end, self.iretohz)
 
 
     def computedelays(self, mtf_level=0):
@@ -1742,6 +1742,8 @@ class VHSRFDecode(ldd.RFDecode):
 
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
+
+        self.DCrestore.work(demod)
 
         if self.chroma_trap:
             # applies the Subcarrier trap
