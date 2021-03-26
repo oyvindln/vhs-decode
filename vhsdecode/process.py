@@ -13,6 +13,7 @@ import vhsdecode.utils as utils
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
+from vhsdecode.addons.resync import DCrestore
 
 from numba import njit
 
@@ -1669,6 +1670,10 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
+        #FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
+        self.DCrestore = DCrestore(self.freq_hz, DP["deemph_tau"], self.SysParams)
+
+
     def computedelays(self, mtf_level=0):
         """Override computedelays
         It's normally used for dropout compensation, but the dropout compensation implementation
@@ -1710,6 +1715,8 @@ class VHSRFDecode(ldd.RFDecode):
 
         if self.notch is not None:
             indata_fft = indata_fft * self.Filters["FVideoNotchF"]
+
+
 
         raw_filtered = npfft.ifft(
             indata_fft * self.Filters["RFVideoRaw"] * self.Filters["hilbert"]
