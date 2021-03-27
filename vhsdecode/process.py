@@ -1709,8 +1709,6 @@ class VHSRFDecode(ldd.RFDecode):
         if self.notch is not None:
             indata_fft = indata_fft * self.Filters["FVideoNotchF"]
 
-
-
         raw_filtered = npfft.ifft(
             indata_fft * self.Filters["RFVideoRaw"] * self.Filters["hilbert"]
         ).real
@@ -1736,7 +1734,7 @@ class VHSRFDecode(ldd.RFDecode):
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
 
-        self.DCrestore.work(demod)
+        #self.DCrestore.work(demod)
 
         if self.chroma_trap:
             # applies the Subcarrier trap
@@ -1825,11 +1823,13 @@ class VHSRFDecode(ldd.RFDecode):
         data = npfft.ifft(fftdata).real
 
         rv = {}
-
+        print('Deprecation warning: this will be moved into cvbs-decode')
         # applies the Subcarrier trap
         # (this will remove most chroma info)
-        # luma = self.chromaTrap.work(data)
-        luma = data
+        if self.chroma_trap:
+            luma = self.chromaTrap.work(data)
+        else:
+            luma = data
 
         luma += 0xFFFF / 2
         luma /= 4 * 0xFFFF
@@ -1843,7 +1843,7 @@ class VHSRFDecode(ldd.RFDecode):
         luma05 = npfft.irfft(luma05_fft)
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
 
-        if False:
+        if True:
             import matplotlib.pyplot as plt
 
             fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)

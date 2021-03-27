@@ -662,8 +662,10 @@ class VHSDecodeInner(ldd.RFDecode):
 
         # applies the Subcarrier trap
         # (this will remove most chroma info)
-        # luma = self.chromaTrap.work(data)
-        luma = data
+        if self.chroma_trap:
+            luma = self.chromaTrap.work(data)
+        else:
+            luma = data
 
         if not self.auto_sync:
             luma += 0xFFFF / 2
