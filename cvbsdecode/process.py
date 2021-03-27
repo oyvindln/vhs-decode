@@ -7,14 +7,11 @@ import itertools
 
 import lddecode.core as ldd
 import lddecode.utils as lddu
-from lddecode.utils import unwrap_hilbert, inrange
-import vhsdecode.utils as utils
+from lddecode.utils import inrange
+from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
-from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
-
-from numba import njit
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -36,11 +33,118 @@ def chroma_to_u16(chroma):
     return np.uint16(chroma + S16_ABS_MAX)
 
 
+def find_sync_levels(field):
+    """Very crude sync level detection"""
+    # Skip a few samples to avoid any possible edge distortion.
+    data = field.data["video"]["demod_05"][10:]
+
+    # Start with finding the minimum value of the input.
+    sync_min = min(data)
+    max_val = max(data)
+
+    # Use the max for a temporary reference point which may be max ire or not.
+    difference = max_val - sync_min
+
+    # Find approximate sync areas.
+    on_sync = data < (sync_min + (difference / 15))
+
+    found_porch = False
+
+    offset = 0
+    blank_level = None
+
+    while not found_porch:
+        # Look for when we leave the approximate sync area next...
+        search_start = np.argwhere(on_sync[offset:])[0][0]
+        next_cross_raw = np.argwhere(1 - on_sync[search_start:])[0][0] + search_start
+        # and a bit past that we ought to be in the back porch for blanking level.
+        next_cross = next_cross_raw + int(field.usectoinpx(1.5))
+        blank_level = data[next_cross] + offset
+        if blank_level > sync_min + (difference / 15):
+            found_porch = True
+        else:
+            # We may be in vsync, try to skip ahead a bit
+            # TODO: This may not work yet.
+            offset += field.usectoinpx(50)
+            if offset > len(data) - 10:
+                # Give up
+                return None, None
+
+    if False:
+        import matplotlib.pyplot as plt
+
+        data = field.data["video"]["demod_05"]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
+        #        ax1.plot(hilbert, color='#FF0000')
+        # ax1.plot(data, color="#00FF00")
+        ax1.axhline(sync_min, color="#0000FF")
+#        ax1.axhline(blank_level, color="#000000")
+        ax1.axvline(search_start, color="#FF0000")
+        ax1.axvline(next_cross_raw, color="#00FF00")
+        ax1.axvline(next_cross, color="#0000FF")
+        ax1.axhline(blank_level, color="#000000")
+        #            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+        #            ax1.axhline(self.iretohz(7.5))
+        #            ax1.axhline(self.iretohz(100))
+        # print("Vsync IRE", self.SysParams["vsync_ire"])
+        #            ax2 = ax1.twinx()
+        #            ax3 = ax1.twinx()
+        ax1.plot(data)
+        ax2.plot(on_sync)
+        #            ax2.plot(luma05[:2048])
+        #            ax4.plot(env, color="#00FF00")
+        #            ax3.plot(np.angle(hilbert))
+        #            ax4.plot(hilbert.imag)
+        #            crossings = find_crossings(env, 700)
+        #            ax3.plot(crossings, color="#0000FF")
+        plt.show()
+        #            exit(0)
+
+    return sync_min, blank_level
+
 def getpulses_override(field):
     """Find sync pulses in the demodulated video sigal
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
+
+    if field.rf.auto_sync:
+        sync_level, blank_level = find_sync_levels(field)
+
+        if sync_level is not None and blank_level is not None:
+            field.rf.SysParams["ire0"] = blank_level
+            field.rf.SysParams["hz_ire"] = (blank_level - sync_level) / (-field.rf.SysParams["vsync_ire"])
+
+        if False:
+            import matplotlib.pyplot as plt
+
+            data = field.data["video"]["demod_05"]
+
+            fig, ax1 = plt.subplots(1, 1, sharex=True)
+            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
+            #        ax1.plot(hilbert, color='#FF0000')
+            # ax1.plot(data, color="#00FF00")
+            ax1.axhline(field.rf.iretohz(0), color="#000000")
+            #        ax1.axhline(blank_level, color="#000000")
+            ax1.axhline(field.rf.iretohz(-40))
+            #            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+            #            ax1.axhline(self.iretohz(7.5))
+            #            ax1.axhline(self.iretohz(100))
+            # print("Vsync IRE", self.SysParams["vsync_ire"])
+            #            ax2 = ax1.twinx()
+            #            ax3 = ax1.twinx()
+            ax1.plot(data)
+            #            ax2.plot(luma05[:2048])
+            #            ax4.plot(env, color="#00FF00")
+            #            ax3.plot(np.angle(hilbert))
+            #            ax4.plot(hilbert.imag)
+            #            crossings = find_crossings(env, 700)
+            #            ax3.plot(crossings, color="#0000FF")
+            plt.show()
+            #            exit(0)
+
     # pass one using standard levels
 
     # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
@@ -116,20 +220,11 @@ def getpulses_override(field):
     return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
 
 
-def filter_simple(data, filter_coeffs):
-    return sps.sosfiltfilt(filter_coeffs, data, padlen=150)
-
-
 def get_burst_area(field):
     return (
         math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0])),
         math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])),
     )
-
-
-@njit
-def get_line(data, line_length, line):
-    return data[line * line_length : (line + 1) * line_length]
 
 
 class LineInfo:
@@ -284,97 +379,6 @@ def detect_burst_pal_line(
     line.bq /= burst_norm
 
     return line
-
-
-@njit
-def detect_burst_ntsc(
-    chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
-):
-    """Check the phase of the color burst."""
-
-    # Ignore the first and last 16 lines of the field.
-    # first ones contain sync and often doesn't have color burst,
-    # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 16
-    odd_i_acc = 0
-    even_i_acc = 0
-
-    for linenumber in range(IGNORED_LINES, lines - IGNORED_LINES):
-        bi, _, _ = detect_burst_ntsc_line(
-            chroma_data, sine_wave, cosine_wave, burst_area, line_length, linenumber
-        )
-        #        line_data.append((bi, bq, linenumber))
-        if linenumber % 2 == 0:
-            even_i_acc += bi
-        else:
-            odd_i_acc += bi
-
-    num_lines = lines - (IGNORED_LINES * 2)
-
-    return even_i_acc / num_lines, odd_i_acc / num_lines
-
-
-@njit
-def detect_burst_ntsc_line(
-    chroma_data, sine, cosine, burst_area, line_length, line_number
-):
-    bi = 0
-    bq = 0
-    # TODO:
-    sine = sine[burst_area[0] :]
-    cosine = cosine[burst_area[0] :]
-    line = get_line(chroma_data, line_length, line_number)
-    for i in range(burst_area[0], burst_area[1]):
-        bi += line[i] * sine[i]
-        bq += line[i] * cosine[i]
-
-    burst_length = burst_area[1] - burst_area[0]
-
-    bi /= burst_length
-    bq /= burst_length
-
-    burst_norm = max(math.sqrt(bi * bi + bq * bq), 130000.0 / 128)
-    bi /= burst_norm
-    bq /= burst_norm
-    return bi, bq, burst_norm
-
-
-def get_field_phase_id(field):
-    """Try to determine which of the 4 NTSC phase cycles the field is.
-    For tapes the result seem to not be cyclical at all, not sure if that's normal
-    or if something is off.
-    The most relevant thing is which lines the burst phase is positive or negative on.
-    """
-    burst_area = get_burst_area(field)
-
-    sine_wave = field.rf.fsc_wave
-    cosine_wave = field.rf.fsc_cos_wave
-
-    # Try to detect the average burst phase of odd and even lines.
-    even, odd = detect_burst_ntsc(
-        field.uphet_temp,
-        sine_wave,
-        cosine_wave,
-        burst_area,
-        field.outlinelen,
-        field.outlinecount,
-    )
-
-    # This map is based on (first field, field14)
-    map4 = {
-        (True, True): 1,
-        (False, False): 2,
-        (True, False): 3,
-        (False, True): 4,
-    }
-
-    phase_id = map4[(field.isFirstField, even < odd)]
-
-    # ldd.logger.info("Field: %i, Odd I %f , Even I %f, phase id %i, field first %i",
-    #                field.rf.field_number, even, odd, phase_id, field.isFirstField)
-
-    return phase_id
-
 
 def check_increment_field_no(rf):
     """Increment field number if the raw data location moved significantly since the last call"""
@@ -565,6 +569,7 @@ class VHSDecodeInner(ldd.RFDecode):
         self.chroma_trap = rf_options.get("chroma_trap", False)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
+        self.auto_sync = rf_options.get("auto_sync", False)
 
         self.hsync_tolerance = 0.8
 
@@ -660,10 +665,11 @@ class VHSDecodeInner(ldd.RFDecode):
         # luma = self.chromaTrap.work(data)
         luma = data
 
-        luma += 0xFFFF / 2
-        luma /= 4 * 0xFFFF
-        luma *= self.iretohz(100)
-        luma += self.iretohz(self.SysParams["vsync_ire"])
+        if not self.auto_sync:
+            luma += 0xFFFF / 2
+            luma /= 4 * 0xFFFF
+            luma *= self.iretohz(100)
+            luma += self.iretohz(self.SysParams["vsync_ire"])
 
         if self.notch is not None:
             luma = sps.filtfilt(

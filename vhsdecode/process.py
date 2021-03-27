@@ -9,6 +9,7 @@ import lddecode.core as ldd
 import lddecode.utils as lddu
 from lddecode.utils import unwrap_hilbert, inrange
 import vhsdecode.utils as utils
+from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
@@ -144,10 +145,6 @@ def getpulses_override(field):
     pulse_hz_max = (blacklevel + synclevel) / 2
 
     return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
-
-
-def filter_simple(data, filter_coeffs):
-    return sps.sosfiltfilt(filter_coeffs, data, padlen=150)
 
 
 @njit
@@ -296,7 +293,7 @@ def process_chroma(field, track_phase, disable_deemph=False):
     # frequencies. We only want the difference wave which is at the correct color
     # carrier frequency here.
     # We do however want to be careful to avoid filtering out too much of the sideband.
-    uphet = filter_simple(uphet, field.rf.Filters["FChromaFinal"])
+    uphet = utils.filter_simple(uphet, field.rf.Filters["FChromaFinal"])
 
     # Basic comb filter for NTSC to calm the color a little.
     if field.rf.system == "NTSC":
@@ -365,11 +362,6 @@ def get_burst_area(field):
         math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0])),
         math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])),
     )
-
-
-@njit
-def get_line(data, line_length, line):
-    return data[line * line_length : (line + 1) * line_length]
 
 
 class LineInfo:
@@ -584,6 +576,7 @@ def get_field_phase_id(field):
     For tapes the result seem to not be cyclical at all, not sure if that's normal
     or if something is off.
     The most relevant thing is which lines the burst phase is positive or negative on.
+    TODO: Current code does not give the correct result!!!!
     """
     burst_area = get_burst_area(field)
 
@@ -1596,7 +1589,7 @@ class VHSRFDecode(ldd.RFDecode):
             1,
             [
                 (fsc_mhz - 0.64) / out_frequency_half,
-                (fsc_mhz + 0.24) / out_frequency_half,
+                (fsc_mhz + 0.34) / out_frequency_half,
             ],
             btype="bandpass",
             output="sos",
@@ -1725,7 +1718,7 @@ class VHSRFDecode(ldd.RFDecode):
         # Calculate an evelope with signal strength using absolute of hilbert transform.
         # Roll this a bit to compensate for filter delay, value eyballed for now.
         raw_env = np.roll(np.abs(raw_filtered), 4)
-        env = filter_simple(raw_env, self.Filters["FEnvPost"])
+        env = utils.filter_simple(raw_env, self.Filters["FEnvPost"])
         env_mean = np.mean(env)
 
         # Applies RF filters
@@ -1733,7 +1726,7 @@ class VHSRFDecode(ldd.RFDecode):
         data_filtered = npfft.ifft(indata_fft_filt)
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
-        high_part = filter_simple(data_filtered, self.Filters["RFTop"]) * (
+        high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
             (env_mean * 0.9) / env
         )
         indata_fft_filt += npfft.fft(high_part * self.high_boost)
@@ -1766,7 +1759,7 @@ class VHSRFDecode(ldd.RFDecode):
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
         # Filter out the color-under signal from the raw data.
-        out_chroma = filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])
+        out_chroma = utils.filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])
 
         if self.notch is not None:
             out_chroma = sps.filtfilt(

@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
+from numba import njit
 
 
 def gen_wave_at_frequency(frequency, sample_frequency, num_samples, gen_func=np.sin):
@@ -15,6 +16,15 @@ def gen_compl_wave_at_frequency(frequency, sample_frequency, num_samples):
     samples = np.arange(num_samples)
     wave_scale = frequency / sample_frequency
     return np.exp(-2 * np.pi * wave_scale * samples * 1j)
+
+
+def filter_simple(data, filter_coeffs):
+    return signal.sosfiltfilt(filter_coeffs, data, padlen=150)
+
+
+@njit
+def get_line(data, line_length, line):
+    return data[line * line_length : (line + 1) * line_length]
 
 
 # returns the indexes where the signal crosses zero
@@ -159,4 +169,3 @@ class FiltersClass:
     def lfilt(self, data):
         output, self.z = signal.lfilter(self.iir_b, self.iir_a, data, zi=self.z)
         return output
-

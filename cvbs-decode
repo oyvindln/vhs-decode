@@ -150,6 +150,14 @@ parser.add_argument(
     default=10.0,
     help="Q factor for notch filter",
 )
+parser.add_argument(
+    "-A",
+    "--auto_sync",
+    dest="auto_sync",
+    action="store_true",
+    default=False,
+    help="Enable auto sync level detection.",
+)
 
 args = parser.parse_args()
 filename = args.infile
@@ -184,6 +192,7 @@ rf_options = {
     "chroma_trap": args.chroma_trap,
     "notch": args.notch,
     "notch_q": args.notch_q,
+    "auto_sync": args.auto_sync
 }
 
 extra_options = {

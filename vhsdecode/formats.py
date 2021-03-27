@@ -67,18 +67,18 @@ RFParams_PAL_VHS["boost_bpf_mult"] = 2
 # Band-pass filter for Video rf.
 # TODO: Needs tweaking
 RFParams_NTSC_VHS["video_bpf_low"] = 2600000
-RFParams_NTSC_VHS["video_bpf_high"] = 5600000
+RFParams_NTSC_VHS["video_bpf_high"] = 5300000
 
 RFParams_NTSC_VHS["video_bpf_order"] = 1
 
 RFParams_NTSC_VHS["video_lpf_extra"] = 6080000
 RFParams_NTSC_VHS["video_lpf_extra_order"] = 3
 
-RFParams_NTSC_VHS["video_hpf_extra"] = 1500000
-RFParams_NTSC_VHS["video_hpf_extra_order"] = 1
+RFParams_NTSC_VHS["video_hpf_extra"] = 1300000
+RFParams_NTSC_VHS["video_hpf_extra_order"] = 2
 
 # Low-pass filter on Y after demodulation
-RFParams_NTSC_VHS["video_lpf_freq"] = 3200000
+RFParams_NTSC_VHS["video_lpf_freq"] = 3000000
 
 # Order may be fine as is.
 RFParams_NTSC_VHS["video_lpf_order"] = 1
