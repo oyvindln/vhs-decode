@@ -1,4 +1,5 @@
 from vhsdecode.addons.FMdeemph import FMDeEmphasis
+from vhsdecode.addons.headswitch import HeadSwitchDetect
 from vhsdecode.utils import FiltersClass, firdes_lowpass, plot_scope, dualplot_scope, filter_plot, zero_cross_det
 import numpy as np
 from scipy.signal import argrelextrema
@@ -11,11 +12,11 @@ def t_to_samples(samp_rate, value):
 
 class DCrestore:
 
-    def __init__(self, fs, tau, sysparams, ignore, scale=identity):
+    def __init__(self, fs, DP, sysparams, blocklen, scale=identity):
         self.samp_rate = fs
-        self.tau = tau
+        self.tau = DP["deemph_tau"]
         self.SysParams = sysparams
-        self.ignoresamples = ignore
+        self.blocklen = blocklen
         self.scale = scale
         self.fv = self.SysParams["FPS"] * 2
         self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
@@ -35,7 +36,7 @@ class DCrestore:
 
         self.eq_pulselen = round(t_to_samples(self.samp_rate, 1 / (self.SysParams["eqPulseUS"] * 1e-6)))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
-        self.last_lineoffset = 0
+        self.hs = HeadSwitchDetect(DP["color_under_carrier"], self.fv, self.samp_rate, self.blocklen)
 
     def gen_hsyncmask(self):
         eq_pulse = np.zeros(self.eq_pulselen)
@@ -78,18 +79,15 @@ class DCrestore:
                         sync_starts.append(where[s_p] + hmin_id)
                         hmin = np.mean(hsync_area[hmin_id-int_window:hmin_id+int_window])
                         sync_min_holds.append(hmin)
-                        print('Hslice min, id', hmin, where[s_p] + hmin_id)
+                        #print('Hslice min, id', hmin, where[s_p] + hmin_id)
 
                 except IndexError as e:
                     print(e)
                     print(len(where), start_points, end_points)
                     exit(0)
 
-            plot_scope(sync_min_holds)
+            #plot_scope(sync_min_holds)
             print(len(sync_min_holds), sync_starts, np.diff(sync_starts))
-            #plot_scope(result)
-            #for id, pos in enumerate(where):
-            #dualplot_scope(level[self.ignoresamples:], hsync[self.ignoresamples:])
             return None
         else:
             #plot_scope(self.gen_hsyncmask())
@@ -97,5 +95,6 @@ class DCrestore:
             return None
 
     def work(self, data):
+        self.hs.work(data)
         deemph = self.deemphFilter.filtfilt(data)
         locs = self.get_rawlinelocs(deemph)

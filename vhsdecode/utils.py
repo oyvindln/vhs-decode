@@ -39,19 +39,33 @@ def auto_chop(data):
 
 
 # simple scope plot
-def plot_scope(data):
+def plot_scope(data, title='plot', ylabel='', xlabel='t (samples)'):
     fig, ax1 = plt.subplots()
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.grid(which='both', axis='both')
+    ax2 = ax1.twinx()
     ax1.plot(data, color="#FF0000")
     plt.show()
 
 
 # simple scope plot
-def dualplot_scope(ch0, ch1):
+def dualplot_scope(ch0, ch1, title='dual plot', xlabel='t (samples)', a_label='ch0', b_label='ch1'):
     fig, ax1 = plt.subplots()
-    ax1.plot(ch0, color="#FF0000")
-    ax1.plot(ch1, color="#0000FF")
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(a_label)
+    ax1.plot(ch0, color="r")
+    _ = ax1.twinx()
+    plt.ylabel(b_label, color='b')
+    ax1.plot(ch1, color="b")
     plt.show()
 
+
+def plot_image(data):
+    plt.imshow(data,  cmap="hot", clim=(0, 1.0))
+    plt.show()
 
 # pads data with filler is len(data) < len(filler), otherwise truncates it
 def pad_or_truncate(data, filler):

@@ -1671,7 +1671,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
         #FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
-        self.DCrestore = DCrestore(self.freq_hz, DP["deemph_tau"], self.SysParams, self.blockcut_end, self.iretohz)
+        self.DCrestore = DCrestore(self.freq_hz, DP, self.SysParams, self.blocklen, self.iretohz)
 
 
     def computedelays(self, mtf_level=0):
