@@ -1734,8 +1734,6 @@ class VHSRFDecode(ldd.RFDecode):
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
 
-        #self.DCrestore.work(demod)
-
         if self.chroma_trap:
             # applies the Subcarrier trap
             demod = self.chromaTrap.work(demod)
@@ -1751,10 +1749,15 @@ class VHSRFDecode(ldd.RFDecode):
             demod_fft * self.Filters["FVideo"][0 : (self.blocklen // 2) + 1]
         ).real
 
+
         out_video05 = npfft.irfft(
             demod_fft * self.Filters["FVideo05"][0 : (self.blocklen // 2) + 1]
         ).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
+
+        self.DCrestore.work(out_video05)
+        out_video05 = self.DCrestore.compensate_sync(out_video05)
+        out_video = self.DCrestore.compensate_sync(out_video)
 
         # Filter out the color-under signal from the raw data.
         out_chroma = utils.filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])
