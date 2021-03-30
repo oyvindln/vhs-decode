@@ -12,6 +12,7 @@ from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
+from vhsdecode.addons.resync import DCrestore
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -655,6 +656,9 @@ class VHSDecodeInner(ldd.RFDecode):
         self.delays["video_sync"] = 0
         self.delays["video_white"] = 0
 
+        self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.blocklen, self.iretohz)
+
+
     def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
         data = npfft.ifft(fftdata).real
 
@@ -687,6 +691,11 @@ class VHSDecodeInner(ldd.RFDecode):
         )
         luma05 = npfft.irfft(luma05_fft)
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
+
+        self.DCrestore.work(luma05)
+        luma05 = self.DCrestore.compensate_sync(luma05)
+        luma = self.DCrestore.compensate_sync(luma)
+
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
         )

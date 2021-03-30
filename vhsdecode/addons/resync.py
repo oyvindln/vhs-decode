@@ -1,8 +1,8 @@
-from vhsdecode.addons.FMdeemph import FMDeEmphasis
 from vhsdecode.addons.wavesink import WaveSink
-from vhsdecode.utils import FiltersClass, firdes_lowpass, plot_scope, dualplot_scope, filter_plot, zero_cross_det
+from vhsdecode.utils import FiltersClass, firdes_lowpass, plot_scope, dualplot_scope, filter_plot, zero_cross_det, pad_or_truncate
 import numpy as np
 from scipy.signal import argrelextrema
+
 
 def identity(value):
     return value
@@ -12,7 +12,7 @@ def t_to_samples(samp_rate, value):
 
 class DCrestore:
 
-    def __init__(self, fs, DP, sysparams, blocklen, scale=identity):
+    def __init__(self, fs, sysparams, blocklen, scale=identity):
         self.samp_rate = fs
         self.SysParams = sysparams
         self.blocklen = blocklen
@@ -31,7 +31,7 @@ class DCrestore:
 
         self.eq_pulselen = round(t_to_samples(self.samp_rate, 1 / (self.SysParams["eqPulseUS"] * 1e-6)))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
-        self.sink = WaveSink(self.samp_rate, self.fh)
+        self.sink = WaveSink(self.fh, 44100)
         self.max_hpulses_per_block = np.round(self.blocklen / self.linelen)
         self.min_hpulses_per_block = self.max_hpulses_per_block - 1
         self.hsync_level_delay = int(self.eq_pulselen * 3 / 2)
@@ -65,9 +65,13 @@ class DCrestore:
         x = range(0, len(start_points))
         trend = self.get_trendloc(start_points)
         if trend is not None:
-            error = np.abs(start_points - trend(x))
+            error = start_points - trend(x)
+            abs_error = np.abs(error)
+            #plot_scope(error)
+            #ch0 = error / 1000
+            #self.sink.write(ch0, ch0)
             try:
-                start_loc = int(np.where(error == min(error))[0])
+                start_loc = int(np.where(error == min(abs_error))[0])
             except TypeError:
                 start_loc = 0
         else:
@@ -107,12 +111,19 @@ class DCrestore:
         hspace = range(start_loc, self.blocklen, self.linelen)
         return np.array(hspace)
 
+    def sink_levels(self, hlevels, blevels):
+        attenuation = 2e6
+        hlevel_bias, blevel_bias = np.mean(hlevels), np.mean(blevels)
+        ch0, ch1 = (hlevels - hlevel_bias) / attenuation, (blevels - blevel_bias) / attenuation
+        self.sink.write(ch0, ch1)
+
     def get_levels(self, data, sampling_pos):
         levels = np.array([])
         for pos in sampling_pos:
             start = pos
             end = min(pos + self.integration_constant, self.blocklen)
             levels = np.append(levels, np.mean(data[start:end]))
+
         return levels
 
     def get_syncblank(self, data, start_points):
@@ -123,6 +134,11 @@ class DCrestore:
         bsampling_pos = self.get_sampling_pos(bstart_pos)
         hlevels = self.get_levels(data, hsampling_pos)
         blevels = self.get_levels(data, bsampling_pos)
+
+        if len(blevels) < len(hlevels):
+            blevels = np.append(blevels, blevels[-1:])
+
+        self.sink_levels(hlevels, blevels)
         return hlevels, blevels, hsampling_pos
 
     def compensate_syncs(self, data, locs, hlevels):
