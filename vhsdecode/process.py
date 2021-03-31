@@ -1755,9 +1755,9 @@ class VHSRFDecode(ldd.RFDecode):
         ).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
-        self.DCrestore.work(out_video05)
-        out_video05 = self.DCrestore.compensate_sync(out_video05)
-        out_video = self.DCrestore.compensate_sync(out_video)
+        #self.DCrestore.work(out_video05)
+        #out_video05 = self.DCrestore.compensate_sync(out_video05)
+        #out_video = self.DCrestore.compensate_sync(out_video)
 
         # Filter out the color-under signal from the raw data.
         out_chroma = utils.filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])

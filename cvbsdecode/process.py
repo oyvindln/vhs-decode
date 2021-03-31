@@ -692,9 +692,9 @@ class VHSDecodeInner(ldd.RFDecode):
         luma05 = npfft.irfft(luma05_fft)
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
 
-        self.DCrestore.work(luma05)
-        luma05 = self.DCrestore.compensate_sync(luma05)
-        luma = self.DCrestore.compensate_sync(luma)
+        #self.DCrestore.work(luma05)
+        #luma05 = self.DCrestore.compensate_sync(luma05)
+        #luma = self.DCrestore.compensate_sync(luma)
 
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
