@@ -96,31 +96,6 @@ class DCrestore:
         #plot_scope(sync, title='sync indexes')
         return np.array(fsync, dtype=np.int)
 
-
-    # try to determine the first valid sync on the block
-    def get_startloc(self, start_points):
-        print(self.sync_lock_filter(start_points))
-        return start_points[self.sync_lock_start(start_points)]
-        x = range(0, len(start_points))
-        trend = self.get_trendloc(start_points)
-        if trend is not None:
-            error = start_points - trend(x)
-            abs_error = np.abs(error)
-            # plot_scope(error)
-            # ch0 = error / 1000
-            # self.sink.write(ch0, ch0)
-            try:
-                start_loc = self.sync_lock_start(start_points) # int(np.where(error == min(abs_error))[0])
-            except TypeError:
-                start_loc = 0
-        else:
-            start_loc = 0
-
-        if len(start_points) > 0:
-            return start_points[start_loc]
-        else:
-            return 0
-
     # computes the sync trend
     def get_trend(self, start_points):
         x = range(0, len(start_points))
