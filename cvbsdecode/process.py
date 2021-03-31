@@ -12,7 +12,7 @@ from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
-from vhsdecode.process import getpulses_override as vhs_getpulses_override
+from vhsdecode.addons.resync import DCrestore
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -81,7 +81,7 @@ def find_sync_levels(field):
         #        ax1.plot(hilbert, color='#FF0000')
         # ax1.plot(data, color="#00FF00")
         ax1.axhline(sync_min, color="#0000FF")
-        #        ax1.axhline(blank_level, color="#000000")
+#        ax1.axhline(blank_level, color="#000000")
         ax1.axvline(search_start, color="#FF0000")
         ax1.axvline(next_cross_raw, color="#00FF00")
         ax1.axvline(next_cross, color="#0000FF")
@@ -105,9 +105,8 @@ def find_sync_levels(field):
 
     return sync_min, blank_level
 
-
 def getpulses_override(field):
-    """Find sync pulses in the demodulated video signal
+    """Find sync pulses in the demodulated video sigal
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
@@ -117,9 +116,7 @@ def getpulses_override(field):
 
         if sync_level is not None and blank_level is not None:
             field.rf.SysParams["ire0"] = blank_level
-            field.rf.SysParams["hz_ire"] = (blank_level - sync_level) / (
-                -field.rf.SysParams["vsync_ire"]
-            )
+            field.rf.SysParams["hz_ire"] = (blank_level - sync_level) / (-field.rf.SysParams["vsync_ire"])
 
         if False:
             import matplotlib.pyplot as plt
@@ -132,7 +129,7 @@ def getpulses_override(field):
             # ax1.plot(data, color="#00FF00")
             ax1.axhline(field.rf.iretohz(0), color="#000000")
             #        ax1.axhline(blank_level, color="#000000")
-            ax1.axhline(field.rf.iretohz(field.rf.SysParams["vsync_ire"]))
+            ax1.axhline(field.rf.iretohz(-40))
             #            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
             #            ax1.axhline(self.iretohz(7.5))
             #            ax1.axhline(self.iretohz(100))
@@ -149,7 +146,79 @@ def getpulses_override(field):
             plt.show()
             #            exit(0)
 
-    return vhs_getpulses_override(field)
+    # pass one using standard levels
+
+    # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
+    pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+    pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
+
+    pulses = lddu.findpulses(
+        field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
+    )
+
+    if len(pulses) == 0:
+        # can't do anything about this
+        return pulses
+
+    # determine sync pulses from vsync
+    vsync_locs = []
+    vsync_means = []
+
+    for i, p in enumerate(pulses):
+        if p.len > field.usectoinpx(10):
+            vsync_locs.append(i)
+            vsync_means.append(
+                np.mean(
+                    field.data["video"]["demod_05"][
+                        int(p.start + field.rf.freq) : int(
+                            p.start + p.len - field.rf.freq
+                        )
+                    ]
+                )
+            )
+
+    if len(vsync_means) == 0:
+        return None
+
+    synclevel = np.median(vsync_means)
+
+    if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
+        # sync level is close enough to use
+        return pulses
+
+    if vsync_locs is None or not len(vsync_locs):
+        return None
+
+    # Now compute black level and try again
+
+    # take the eq pulses before and after vsync
+    r1 = range(vsync_locs[0] - 5, vsync_locs[0])
+    r2 = range(vsync_locs[-1] + 1, vsync_locs[-1] + 6)
+
+    black_means = []
+
+    for i in itertools.chain(r1, r2):
+        if i < 0 or i >= len(pulses):
+            continue
+
+        p = pulses[i]
+        if inrange(p.len, field.rf.freq * 0.75, field.rf.freq * 3):
+            black_means.append(
+                np.mean(
+                    field.data["video"]["demod_05"][
+                        int(p.start + (field.rf.freq * 5)) : int(
+                            p.start + (field.rf.freq * 20)
+                        )
+                    ]
+                )
+            )
+
+    blacklevel = np.median(black_means)
+
+    pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
+    pulse_hz_max = (blacklevel + synclevel) / 2
+
+    return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
 
 
 def get_burst_area(field):
@@ -312,7 +381,6 @@ def detect_burst_pal_line(
 
     return line
 
-
 def check_increment_field_no(rf):
     """Increment field number if the raw data location moved significantly since the last call"""
     raw_loc = rf.decoder.readloc / rf.decoder.bytes_per_field
@@ -344,7 +412,7 @@ class FieldPALCVBS(ldd.FieldPAL):
         return 1 + (self.rf.field_number % 8)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video signal
+        """Find sync pulses in the demodulated video sigal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -381,7 +449,7 @@ class FieldNTSCCVBS(ldd.FieldNTSC):
         return None
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video signal
+        """Find sync pulses in the demodulated video sigal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -588,6 +656,9 @@ class VHSDecodeInner(ldd.RFDecode):
         self.delays["video_sync"] = 0
         self.delays["video_white"] = 0
 
+        self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.blocklen, self.iretohz)
+
+
     def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
         data = npfft.ifft(fftdata).real
 
@@ -620,6 +691,12 @@ class VHSDecodeInner(ldd.RFDecode):
         )
         luma05 = npfft.irfft(luma05_fft)
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
+
+        # Ignore this ATM, the current code does it better.
+        #self.DCrestore.work(luma05)
+        #luma05 = self.DCrestore.compensate_sync(luma05)
+        #luma = self.DCrestore.compensate_sync(luma)
+
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
         )

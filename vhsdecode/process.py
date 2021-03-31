@@ -38,7 +38,7 @@ def chroma_to_u16(chroma):
     return np.uint16(chroma + S16_ABS_MAX)
 
 
-@njit
+@njit(cache=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     """Scale chroma according to the level of the color burst on each line."""
 
@@ -52,7 +52,7 @@ def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     return output
 
 
-@njit
+@njit(cache=True)
 def acc_line(chroma, burst_abs_ref, burststart, burstend):
     """Scale chroma according to the level of the color burst the line."""
     output = np.zeros(chroma.size, dtype=np.double)
@@ -147,7 +147,7 @@ def getpulses_override(field):
     return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
 
 
-@njit
+@njit(cache=True)
 def comb_c_pal(data, line_len):
     """Very basic comb filter, adds the signal together with a signal delayed by 2H,
     and one advanced by 2H
@@ -168,7 +168,7 @@ def comb_c_pal(data, line_len):
     return data
 
 
-@njit
+@njit(cache=True)
 def comb_c_ntsc(data, line_len):
     """Very basic comb filter, adds the signal together with a signal delayed by 1H,
     line by line. VCRs do this to reduce crosstalk.
@@ -187,7 +187,7 @@ def comb_c_ntsc(data, line_len):
     return data
 
 
-@njit
+@njit(cache=True)
 def upconvert_chroma(
     chroma,
     lineoffset,
@@ -231,7 +231,7 @@ def upconvert_chroma(
     return uphet
 
 
-@njit
+@njit(cache=True)
 def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
     for line in range(lineoffset, linesout + lineoffset):
         linestart = (line - lineoffset) * outwidth
@@ -518,7 +518,7 @@ def detect_burst_pal_line(
     return line
 
 
-@njit
+@njit(cache=True)
 def detect_burst_ntsc(
     chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
 ):
@@ -546,7 +546,7 @@ def detect_burst_ntsc(
     return even_i_acc / num_lines, odd_i_acc / num_lines
 
 
-@njit
+@njit(cache=True)
 def detect_burst_ntsc_line(
     chroma_data, sine, cosine, burst_area, line_length, line_number
 ):
@@ -609,6 +609,7 @@ def get_field_phase_id(field):
     return phase_id
 
 
+@njit(cache=True)
 def find_crossings(data, threshold):
     """Find where the data crosses the set threshold."""
 
@@ -640,6 +641,7 @@ def find_crossings_dir(data, threshold, look_for_down):
         return crossings_pos[1::2]
 
 
+@njit(cache=True)
 def combine_to_dropouts(crossings_down, crossings_up, merge_threshold):
     """Combine arrays of up and down crossings, and merge ones with small gaps between them.
     Intended to be used where up and down crossing levels are different, the two lists will not
@@ -647,7 +649,6 @@ def combine_to_dropouts(crossings_down, crossings_up, merge_threshold):
     Returns a list of start/end tuples.
     """
     used = []
-
     # TODO: Fix when ending on dropout
 
     cr_up = iter(crossings_up)
@@ -712,9 +713,10 @@ def detect_dropouts_rf(field):
         # down crossing for it in the data.
         crossings_down = np.concatenate((np.array([0]), crossings_down), axis=None)
 
-    errlist = combine_to_dropouts(
-        crossings_down, crossings_up, vhs_formats.DOD_MERGE_THRESHOLD
-    )
+    if len(crossings_down) > 0 and len(crossings_up) > 0:
+        errlist = combine_to_dropouts(
+            crossings_down, crossings_up, vhs_formats.DOD_MERGE_THRESHOLD
+        )
 
     # Drop very short dropouts that were not merged.
     # We do this after mergin to avoid removing short consecutive dropouts that
@@ -1117,7 +1119,7 @@ class VHSDecode(ldd.LDdecode):
         doDOD=True,
         threads=1,
         inputfreq=40,
-        level_adjust=0.2,
+        level_adjust=0,
         rf_options={},
         extra_options={},
     ):
@@ -1157,12 +1159,11 @@ class VHSDecode(ldd.LDdecode):
         else:
             raise Exception("Unknown video system!", system)
 
-        self.demodcache = VTRDemodCache(
+        self.demodcache = ldd.DemodCache(
             self.rf,
             self.infile,
             self.freader,
             num_worker_threads=self.numthreads,
-            cvbs_decode=extra_options["cvbs"],
         )
 
         if fname_out is not None:
@@ -1171,12 +1172,12 @@ class VHSDecode(ldd.LDdecode):
             self.outfile_chroma = None
 
     # Override to avoid NaN in JSON.
-    def calcsnr(self, f, snrslice):
-        data = f.output_to_ire(f.dspicture[snrslice])
+    def calcsnr(self, f, snrslice, psnr=False):
+        # if dspicture isn't converted to float, this underflows at -40IRE
+        data = f.output_to_ire(f.dspicture[snrslice].astype(float))
 
-        signal = np.mean(data)
+        signal = np.mean(data) if not psnr else 100
         noise = np.std(data)
-
         # Make sure signal is positive so we don't try to do log on a negative value.
         if signal < 0.0:
             ldd.logger.info(
@@ -1186,15 +1187,6 @@ class VHSDecode(ldd.LDdecode):
         if noise == 0:
             return 0
         return 20 * np.log10(signal / noise)
-
-    def calcpsnr(self, f, snrslice):
-        data = f.output_to_ire(f.dspicture[snrslice])
-
-        #        signal = np.mean(data)
-        noise = np.std(data)
-        if noise == 0:
-            return 0
-        return 20 * np.log10(100 / noise)
 
     def buildmetadata(self, f):
         if math.isnan(f.burstmedian):
@@ -1250,17 +1242,14 @@ class VTRDemodCache(ldd.DemodCache):
         cachesize=256,
         num_worker_threads=1,
         MTF_tolerance=0.05,
-        cvbs_decode=False,
     ):
-
-        self.cvbs_decode = cvbs_decode
 
         super(VTRDemodCache, self).__init__(
             rf,
             infile,
             loader,
             cachesize,
-            -1 if cvbs_decode else num_worker_threads,
+            num_worker_threads,
             MTF_tolerance,
         )
 
@@ -1291,16 +1280,10 @@ class VTRDemodCache(ldd.DemodCache):
                     "demod" not in block
                     or np.abs(block["MTF"] - target_MTF) > self.MTF_tolerance
                 ):
-                    if not self.cvbs_decode:
-                        # RF decode
-                        output["demod"] = self.rf.demodblock(
-                            fftdata=fftdata, mtf_level=target_MTF, cut=True
-                        )
-                    else:
-                        # CVBS decode
-                        output["demod"] = self.rf.cvbsblock(
-                            fftdata=fftdata, mtf_level=target_MTF, cut=True
-                        )
+                    # RF decode
+                    output["demod"] = self.rf.demodblock(
+                        fftdata=fftdata, mtf_level=target_MTF, cut=True
+                    )
 
                     output["MTF"] = target_MTF
                     self.q_out.put((blocknum, output))
@@ -1662,9 +1645,7 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-
-        #FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
-        self.DCrestore = DCrestore(self.freq_hz, DP, self.SysParams, self.blocklen, self.iretohz)
+        self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.blocklen, self.iretohz)
 
 
     def computedelays(self, mtf_level=0):
@@ -1716,7 +1697,9 @@ class VHSRFDecode(ldd.RFDecode):
         # Calculate an evelope with signal strength using absolute of hilbert transform.
         # Roll this a bit to compensate for filter delay, value eyballed for now.
         raw_env = np.roll(np.abs(raw_filtered), 4)
-        env = utils.filter_simple(raw_env, self.Filters["FEnvPost"])
+        # Downconvert to single precision for some possible speedup since we don't need
+        # super high accuracy for the dropout detection.
+        env = utils.filter_simple(raw_env, self.Filters["FEnvPost"]).astype(np.single)
         env_mean = np.mean(env)
 
         # Applies RF filters
@@ -1733,8 +1716,6 @@ class VHSRFDecode(ldd.RFDecode):
 
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
-
-        #self.DCrestore.work(demod)
 
         if self.chroma_trap:
             # applies the Subcarrier trap
@@ -1756,8 +1737,15 @@ class VHSRFDecode(ldd.RFDecode):
         ).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
+        # Ignore this ATM
+        # self.DCrestore.work(out_video05)
+        # out_video05 = self.DCrestore.compensate_sync(out_video05)
+        # out_video = self.DCrestore.compensate_sync(out_video)
+
         # Filter out the color-under signal from the raw data.
-        out_chroma = utils.filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])
+        out_chroma = utils.filter_simple(
+            data[: self.blocklen], self.Filters["FVideoBurst"]
+        )
 
         if self.notch is not None:
             out_chroma = sps.filtfilt(
@@ -1811,65 +1799,6 @@ class VHSRFDecode(ldd.RFDecode):
         video_out = np.rec.array(
             [out_video, demod, out_video05, out_chroma, env, data],
             names=["demod", "demod_raw", "demod_05", "demod_burst", "envelope", "raw"],
-        )
-
-        rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
-        )
-
-        return rv
-
-    def cvbsblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
-        data = npfft.ifft(fftdata).real
-
-        rv = {}
-        print('Deprecation warning: this will be moved into cvbs-decode')
-        # applies the Subcarrier trap
-        # (this will remove most chroma info)
-        if self.chroma_trap:
-            luma = self.chromaTrap.work(data)
-        else:
-            luma = data
-
-        luma += 0xFFFF / 2
-        luma /= 4 * 0xFFFF
-        luma *= self.iretohz(100)
-        luma += self.iretohz(self.SysParams["vsync_ire"])
-
-        luma05_fft = (
-            npfft.rfft(luma)
-            * self.Filters["F05"][: (len(self.Filters["F05"]) // 2) + 1]
-        )
-        luma05 = npfft.irfft(luma05_fft)
-        luma05 = np.roll(luma05, -self.Filters["F05_offset"])
-
-        if True:
-            import matplotlib.pyplot as plt
-
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
-            #        ax1.plot(hilbert, color='#FF0000')
-            # ax1.plot(data, color="#00FF00")
-            ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(7.5))
-            ax1.axhline(self.iretohz(100))
-            # print("Vsync IRE", self.SysParams["vsync_ire"])
-            #            ax2 = ax1.twinx()
-            #            ax3 = ax1.twinx()
-            ax1.plot(luma[:2048])
-            ax2.plot(luma05[:2048])
-            #            ax4.plot(env, color="#00FF00")
-            #            ax3.plot(np.angle(hilbert))
-            #            ax4.plot(hilbert.imag)
-            #            crossings = find_crossings(env, 700)
-            #            ax3.plot(crossings, color="#0000FF")
-            plt.show()
-        #            exit(0)
-
-        video_out = np.rec.array(
-            [luma, luma05, luma, data],
-            names=["demod", "demod_05", "demod_burst", "raw"],
         )
 
         rv["video"] = (
