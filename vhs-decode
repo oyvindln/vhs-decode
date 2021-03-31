@@ -126,7 +126,7 @@ parser.add_argument(
     dest="level_adjust",
     metavar="value",
     type=float,
-    default=0.2,
+    default=0.1,
     help="Multiply top/bottom IRE in json by 1 +/- this value (used to avoid clipping on RGB conversion in chroma decoder).",
 )
 # parser.add_argument('--noDOD', dest='nodod', action='store_true', default=False,
@@ -210,10 +210,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--cvbs", dest="cvbs", action="store_true", default=False, help="Decode raw CVBS"
-)
-
-parser.add_argument(
     "--notch",
     dest="notch",
     metavar="notch",
@@ -279,7 +275,6 @@ rf_options = {
 
 extra_options = {
     "useAGC": not args.noAGC,
-    "cvbs": args.cvbs,
 }
 
 # Wrap the LDdecode creation so that the signal handler is not taken by sub-threads,

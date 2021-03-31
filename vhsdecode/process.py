@@ -1749,18 +1749,19 @@ class VHSRFDecode(ldd.RFDecode):
             demod_fft * self.Filters["FVideo"][0 : (self.blocklen // 2) + 1]
         ).real
 
-
         out_video05 = npfft.irfft(
             demod_fft * self.Filters["FVideo05"][0 : (self.blocklen // 2) + 1]
         ).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
-        #self.DCrestore.work(out_video05)
-        #out_video05 = self.DCrestore.compensate_sync(out_video05)
-        #out_video = self.DCrestore.compensate_sync(out_video)
+        #self.DCrestore.work(luma05)
+        #luma05 = self.DCrestore.compensate_sync(luma05)
+        #luma = self.DCrestore.compensate_sync(luma)
 
         # Filter out the color-under signal from the raw data.
-        out_chroma = utils.filter_simple(data[: self.blocklen], self.Filters["FVideoBurst"])
+        out_chroma = utils.filter_simple(
+            data[: self.blocklen], self.Filters["FVideoBurst"]
+        )
 
         if self.notch is not None:
             out_chroma = sps.filtfilt(
@@ -1814,65 +1815,6 @@ class VHSRFDecode(ldd.RFDecode):
         video_out = np.rec.array(
             [out_video, demod, out_video05, out_chroma, env, data],
             names=["demod", "demod_raw", "demod_05", "demod_burst", "envelope", "raw"],
-        )
-
-        rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
-        )
-
-        return rv
-
-    def cvbsblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
-        data = npfft.ifft(fftdata).real
-
-        rv = {}
-        print('Deprecation warning: this will be moved into cvbs-decode')
-        # applies the Subcarrier trap
-        # (this will remove most chroma info)
-        if self.chroma_trap:
-            luma = self.chromaTrap.work(data)
-        else:
-            luma = data
-
-        luma += 0xFFFF / 2
-        luma /= 4 * 0xFFFF
-        luma *= self.iretohz(100)
-        luma += self.iretohz(self.SysParams["vsync_ire"])
-
-        luma05_fft = (
-            npfft.rfft(luma)
-            * self.Filters["F05"][: (len(self.Filters["F05"]) // 2) + 1]
-        )
-        luma05 = npfft.irfft(luma05_fft)
-        luma05 = np.roll(luma05, -self.Filters["F05_offset"])
-
-        if True:
-            import matplotlib.pyplot as plt
-
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
-            #        ax1.plot(hilbert, color='#FF0000')
-            # ax1.plot(data, color="#00FF00")
-            ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(7.5))
-            ax1.axhline(self.iretohz(100))
-            # print("Vsync IRE", self.SysParams["vsync_ire"])
-            #            ax2 = ax1.twinx()
-            #            ax3 = ax1.twinx()
-            ax1.plot(luma[:2048])
-            ax2.plot(luma05[:2048])
-            #            ax4.plot(env, color="#00FF00")
-            #            ax3.plot(np.angle(hilbert))
-            #            ax4.plot(hilbert.imag)
-            #            crossings = find_crossings(env, 700)
-            #            ax3.plot(crossings, color="#0000FF")
-            plt.show()
-        #            exit(0)
-
-        video_out = np.rec.array(
-            [luma, luma05, luma, data],
-            names=["demod", "demod_05", "demod_burst", "raw"],
         )
 
         rv["video"] = (

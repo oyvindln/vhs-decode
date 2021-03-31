@@ -60,6 +60,17 @@ static constexpr quint32 CANDIDATE_SHADES[] = {
     0xFF80FF, // CAND_NEXT_FRAME - purple
 };
 
+static constexpr std::array<double, 4> sin4fsc_data = {1, 0, -1, 0};
+
+constexpr double sin4fsc(const std::size_t i) {
+    return sin4fsc_data[i % 4];
+}
+
+constexpr double cos4fsc(const std::size_t i) {
+    // cos(i) is just sin(i + pi/2) and we are at 4 fsc.
+    return sin4fsc(i + 1);
+}
+
 // Public methods -----------------------------------------------------------------------------------------------------
 
 Comb::Comb()
@@ -104,20 +115,10 @@ void Comb::updateConfiguration(const LdDecodeMetaData::VideoParameters &_videoPa
     // Range check the video start
     if (videoParameters.activeVideoStart < 16) qCritical() << "Comb::Comb(): activeVideoStart must be > 16!";
 
-    if (configuration.phaseCompensation && ((sine.size() == 0) | (cosine.size() == 0))) {
-            sine.reserve(videoParameters.fieldWidth);
-            cosine.reserve(videoParameters.fieldWidth);
-            // Generate the reference carrier: quadrature samples of a sine wave at the
-            // subcarrier frequency. We'll use this for two purposes below:
-            // - product-detecting the line samples, to give us quadrature samples of
-            //   the chroma information centred on 0 Hz
-            // - working out what the phase of the subcarrier is on each line,
-            //   so we can rotate the chroma samples to put I/Q on the right axes
-            for (auto i = 0; i < videoParameters.fieldWidth; i++) {
-                const double rad = 2 * M_PI * i * videoParameters.fsc / videoParameters.sampleRate;
-                sine[i] = sin(rad);
-                cosine[i] = cos(rad);
-            }
+    if (videoParameters.sampleRate / videoParameters.fsc != 4)
+    {
+        // Decoder assumes 4fsc sample rate at the moment.
+        qCritical() << "Data is not in 4fsc sample rate, color decoding will not work properly!";
     }
 
     configurationSet = true;
@@ -177,17 +178,15 @@ void Comb::decodeFrames(const QVector<SourceField> &inputFields, qint32 startInd
 
         // Demodulate chroma giving I/Q
         if (configuration.phaseCompensation) {
-            currentFrameBuffer->splitIQlocked(sine, cosine);
+            currentFrameBuffer->splitIQlocked();
             currentFrameBuffer->filterIQFull();
         } else {
             currentFrameBuffer->splitIQ();
+            // Extract Y from baseband and I/Q
+            currentFrameBuffer->adjustY();
+            // Post-filter I/Q
+            if (configuration.colorlpf) currentFrameBuffer->filterIQ();
         }
-
-        // Extract Y from baseband and I/Q
-        currentFrameBuffer->adjustY();
-
-        // Post-filter I/Q
-        if (configuration.colorlpf) currentFrameBuffer->filterIQ();
 
         // Apply noise reduction
         currentFrameBuffer->doYNR();
@@ -504,46 +503,46 @@ Comb::FrameBuffer::Candidate Comb::FrameBuffer::getCandidate(qint32 refLineNumbe
     result.penalty = yPenalty + iqPenalty + adjustPenalty;
     return result;
 }
+
 namespace {
     // Information about a line we're decoding.
     struct BurstInfo {
         double bsin, bcos;
     };
-}
 
-BurstInfo detectBurst(const quint16* lineData,
-                     const LdDecodeMetaData::VideoParameters& videoParameters,
-                     const std::vector<double>& sine, const std::vector<double>& cosine)
-{
-    double bsin = 0, bcos = 0;
+    BurstInfo detectBurst(const quint16* lineData,
+                          const LdDecodeMetaData::VideoParameters& videoParameters)
+    {
+        double bsin = 0, bcos = 0;
 
-    // Find absolute burst phase relative to the reference carrier by
-    // product detection.
-    // For now we just use the burst on the current line, but we could possibly do some averaging with
-    // neighbouring lines later if needed.
-    for (qint32 i = videoParameters.colourBurstStart; i < videoParameters.colourBurstEnd; i++) {
-        bsin += lineData[i] * sine[i];
-        bcos += lineData[i] * cosine[i];
+        // Find absolute burst phase relative to the reference carrier by
+        // product detection.
+        // For now we just use the burst on the current line, but we could possibly do some averaging with
+        // neighbouring lines later if needed.
+        for (qint32 i = videoParameters.colourBurstStart; i < videoParameters.colourBurstEnd; i++) {
+            bsin += lineData[i] * sin4fsc(i);
+            bcos += lineData[i] * cos4fsc(i);
+        }
+
+        // Normalise the sums above
+        const qint32 colourBurstLength = videoParameters.colourBurstEnd - videoParameters.colourBurstStart;
+        bsin /= colourBurstLength;
+        bcos /= colourBurstLength;
+
+        const double burstNorm = qMax(sqrt(bsin * bsin + bcos * bcos), 130000.0 / 128);
+
+        //qDebug() << "burst norm " << burstNorm;
+
+        bsin /= burstNorm;
+        bcos /= burstNorm;
+
+        const BurstInfo info{bsin, bcos};
+        return info;
     }
-
-    // Normalise the sums above
-    const qint32 colourBurstLength = videoParameters.colourBurstEnd - videoParameters.colourBurstStart;
-    bsin /= colourBurstLength;
-    bcos /= colourBurstLength;
-
-    const double burstNorm = qMax(sqrt(bsin * bsin + bcos * bcos), 130000.0 / 128);
-
-    //qDebug() << "burst norm " << burstNorm;
-
-    bsin /= burstNorm;
-    bcos /= burstNorm;
-
-    BurstInfo info{bsin, bcos};
-    return info;
 }
 
 // Split I and Q, taking burst phase into account.
-void Comb::FrameBuffer::splitIQlocked(const std::vector<double>& sine, const std::vector<double>& cosine)
+void Comb::FrameBuffer::splitIQlocked()
 {
     // Clear the target frame YIQ buffer
     for (qint32 lineNumber = 0; lineNumber < MAX_HEIGHT; lineNumber++) {
@@ -556,21 +555,22 @@ void Comb::FrameBuffer::splitIQlocked(const std::vector<double>& sine, const std
         // Get a pointer to the line's data
         const quint16 *line = rawbuffer.data() + (lineNumber * videoParameters.fieldWidth);
         // Calculate burst phase
-        auto info = detectBurst(line, videoParameters, sine, cosine);
+        const auto info = detectBurst(line, videoParameters);
 
         for (qint32 h = videoParameters.activeVideoStart; h < videoParameters.activeVideoEnd; h++) {
-            auto val = clpbuffer[configuration.dimensions - 1].pixel[lineNumber][h];
-            yiqBuffer[lineNumber][h].y = line[h];
+            const auto val = clpbuffer[configuration.dimensions - 1].pixel[lineNumber][h];
 
             // Demodulate the sine and cosine components.
-            auto lsin = val * sine[h] * 2;
-            auto lcos = val * cosine[h] * 2;
+            const auto lsin = val * sin4fsc(h) * 2;
+            const auto lcos = val * cos4fsc(h) * 2;
             // Rotate the demodulated vector by the burst phase.
-            auto ti = (lsin * info.bcos - lcos * info.bsin);
-            auto tq = (lsin * info.bsin + lcos * info.bcos);
+            const auto ti = (lsin * info.bcos - lcos * info.bsin);
+            const auto tq = (lsin * info.bsin + lcos * info.bcos);
             // Rotate back 33 degrees and invert Q to get the correct I/Q vector.
             yiqBuffer[lineNumber][h].i = (ti * 0.83867056794 - tq * -0.54463903501);
             yiqBuffer[lineNumber][h].q = -(ti * -0.54463903501 + tq * 0.83867056794);
+            // Subtract the split chroma part from the luma signal.
+            yiqBuffer[lineNumber][h].y = line[h] - val;
         }
     }
 }

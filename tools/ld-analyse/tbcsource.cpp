@@ -670,7 +670,16 @@ void TbcSource::startBackgroundLoad(QString sourceFilename)
     // Open the TBC metadata file
     qDebug() << "TbcSource::startBackgroundLoad(): Processing JSON metadata...";
     emit busyLoading("Processing JSON metadata...");
-    if (!ldDecodeMetaData.read(sourceFilename + ".json")) {
+
+    QString jsonFileName = sourceFilename + ".json";
+    // If we are trying to open a _chroma tbc from vhs-decode.
+    // Try to look for the json for the luma part if the chroma doesn't have it's own.
+    if (!QFileInfo::exists(jsonFileName) && sourceFilename.endsWith("_chroma.tbc")) {
+        jsonFileName.chop(16);
+        jsonFileName += ".tbc.json";
+    }
+
+    if (!ldDecodeMetaData.read(jsonFileName)) {
         // Open failed
         qWarning() << "Open TBC JSON metadata failed for filename" << sourceFilename;
         currentSourceFilename.clear();

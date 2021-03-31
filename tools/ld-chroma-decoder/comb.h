@@ -87,9 +87,6 @@ private:
     Configuration configuration;
     LdDecodeMetaData::VideoParameters videoParameters;
 
-    std::vector<double> sine;
-    std::vector<double> cosine;
-
     // An input frame in the process of being decoded
     class FrameBuffer {
     public:
@@ -102,7 +99,7 @@ private:
         void split3D(const FrameBuffer &previousFrame, const FrameBuffer &nextFrame);
 
         void splitIQ();
-        void splitIQlocked(const std::vector<double>& sine, const std::vector<double>& cosine);
+        void splitIQlocked();
         void filterIQ();
         void filterIQFull();
         void adjustY();
