@@ -12,7 +12,8 @@ from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
-from vhsdecode.addons.resync import DCrestore
+#from vhsdecode.addons.resync import DCrestore
+#from vhsdecode.addons.vsync import Vsync
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -110,6 +111,9 @@ def getpulses_override(field):
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
+
+    # Ignore this ATM, the current code does it better.
+    # field.rf.Vsync.work(field.data["video"]["demod_05"])
 
     if field.rf.auto_sync:
         sync_level, blank_level = find_sync_levels(field)
@@ -644,6 +648,9 @@ class VHSDecodeInner(ldd.RFDecode):
         self.demods = 0
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        # self.Vsync = Vsync(self.freq_hz, self.SysParams)
+        # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
+
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -655,9 +662,6 @@ class VHSDecodeInner(ldd.RFDecode):
         self.delays = {}
         self.delays["video_sync"] = 0
         self.delays["video_white"] = 0
-
-        self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.blocklen, self.iretohz)
-
 
     def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
         data = npfft.ifft(fftdata).real
@@ -691,12 +695,6 @@ class VHSDecodeInner(ldd.RFDecode):
         )
         luma05 = npfft.irfft(luma05_fft)
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
-
-        # Ignore this ATM, the current code does it better.
-        #self.DCrestore.work(luma05)
-        #luma05 = self.DCrestore.compensate_sync(luma05)
-        #luma = self.DCrestore.compensate_sync(luma)
-
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
         )
