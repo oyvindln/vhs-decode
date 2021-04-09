@@ -48,6 +48,16 @@ def auto_chop(data):
     return data[first:last], first, last
 
 
+def fft_plot(data, samp_rate, f_limit, title='FFT'):
+    fft = np.fft.fft(data)
+    power = np.abs(fft) ** 2
+    sample_freq = np.fft.fftfreq(len(data), d=1.0/samp_rate)
+    fig, ax1 = plt.subplots()
+    plt.xlim(0, f_limit)
+    plt.plot(sample_freq, power)
+    plt.show()
+
+
 # simple scope plot
 def plot_scope(data, title='plot', ylabel='', xlabel='t (samples)'):
     fig, ax1 = plt.subplots()
@@ -89,13 +99,12 @@ def pad_or_truncate(data, filler):
 
 
 def moving_average(data_list, window=1024):
-    #average = np.mean(data_list)
-    average = sum(data_list) / len(data_list)
+    average = np.mean(data_list)
 
     if len(data_list) >= window:
-        data_list.pop()
+        data_list = data_list[-window:]
 
-    return average
+    return average, data_list
 
 
 def design_filter(samp_rate, passband, stopband, order_limit=20):

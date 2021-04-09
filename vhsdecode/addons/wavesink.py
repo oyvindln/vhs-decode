@@ -1,6 +1,6 @@
 import numpy as np
 import wave
-from samplerate import resample
+from samplerate import resample, ResamplingError
 
 
 class WaveSink:
@@ -35,18 +35,23 @@ class WaveSink:
         self.init_file()
 
     def set_scale(self, scale):
-        self.scales = scale
+        self.scales = scale, scale
 
     def set_offset(self, offset):
-        self.offsets = offset
+        self.offsets = offset, offset
 
     def to_wave(self, ch0, ch1):
         if max(ch0) > 1 or max(ch1) > 1:
             print('%s:  Wave signal clipping' % self.filename)
 
         ratio = self.audio_rate / self.samp_rate
-        left = resample(np.multiply(ch0, 0x7FFF), ratio, converter_type='linear')
-        right = resample(np.multiply(ch1, 0x7FFF), ratio, converter_type='linear')
+        try:
+            left = resample(np.multiply(ch0, 0x7FFF), ratio, converter_type='linear')
+            right = resample(np.multiply(ch1, 0x7FFF), ratio, converter_type='linear')
+        except ResamplingError as e:
+            print(ratio, e)
+            exit(0)
+
         interleaved = np.zeros(len(left)+len(right))
         interleaved[::2] = left
         interleaved[1::2] = right
