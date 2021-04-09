@@ -8,6 +8,7 @@ from io import BytesIO
 import logging
 import os
 import signal
+import subprocess
 import sys
 import argparse
 import json
@@ -243,6 +244,14 @@ parser.add_argument(
     default=-1,
     help="Video low-pass filter order",
 )
+parser.add_argument(
+    "--new-audio",
+    dest="newaudio",
+    action="store_true",
+    #type=bool,
+    default=False,
+    help="Use new audio code (will save to [output]-n.*",
+)
 
 args = parser.parse_args()
 # print(args)
@@ -256,9 +265,41 @@ if args.pal and (args.ntsc or args.ntscj):
     print("ERROR: Can only be PAL or NTSC")
     exit(1)
 
+audio_pipe = None
+
+if args.newaudio:
+    spath = os.path.dirname(os.path.realpath(__file__))
+    cmd = [os.path.join(spath, 'lddecode', 'audio.py'), 
+           '-i', '-',
+           '-o', outname + '-n']
+
+    if args.daa:
+        cmd.append('--daa')
+
+    if args.pal:
+        cmd.append('--PAL')
+
+    if args.prefm:
+        cmd.append('--preEFM')
+
+    if args.noefm:
+        cmd.append('--noEFM')
+
+    if False: # Flip this around when it becomes the default, remove when only
+        args.daa = True
+        args.noefm = True
+        args.prefm = False
+
+    audio_process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    if audio_process is None:
+        print("ERROR: unable to open audio subprocess")
+
+    audio_pipe = audio_process.stdin
+
 extra_options = {
     "useAGC": not args.noAGC,
     "write_RF_TBC": args.RF_TBC,
+    "pipe_RF_TBC": audio_pipe,
     "write_pre_efm": args.prefm,
     "deemp_mult": (args.deemp_adjust, args.deemp_adjust),
     "deemp_coeff": (args.deemp_low, args.deemp_high),
@@ -343,12 +384,13 @@ done = False
 
 jsondumper = jsondump_thread(ldd, outname)
 
-
 def cleanup():
     jsondumper.put(ldd.build_json(ldd.curfield))
     # logger.flush()
     ldd.close()
     jsondumper.put(None)
+    if audio_pipe is not None:
+        audio_pipe.close()
 
 
 while not done and ldd.fields_written < (req_frames * 2):

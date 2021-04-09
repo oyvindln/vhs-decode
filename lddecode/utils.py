@@ -4,11 +4,11 @@ import atexit
 from base64 import b64encode
 from collections import namedtuple
 import copy
-from datetime import datetime
 import getopt
 import io
 from io import BytesIO
 import json
+import math
 import os
 import sys
 import subprocess
@@ -115,6 +115,8 @@ def make_loader(filename, inputfreq=None):
             input_args = ["-f", "f32le"]
         elif filename.endswith(".r8") or filename.endswith(".u8"):
             input_args = ["-f", "u8"]
+        elif filename.endswith(".u16"):
+            input_args = ["-f", "u16le"]
         elif filename.endswith(".lds") or filename.endswith(".r30"):
             raise ValueError("File format not supported when resampling: " + filename)
         else:
@@ -154,9 +156,13 @@ def make_loader(filename, inputfreq=None):
 
 
 def load_unpacked_data(infile, sample, readlen, sampletype):
-    # this is run for unpacked data - 1 is for old cxadc data, 2 for 16bit DD
-    infile.seek(sample * sampletype, 0)
-    inbuf = infile.read(readlen * sampletype)
+    # this is run for unpacked data:
+    # 1 is for 8-bit cxadc data, 2 for 16bit DD, 3 for 16bit cxadc
+    
+    samplelength = 2 if sampletype == 3 else sampletype
+    
+    infile.seek(sample * samplelength, 0)
+    inbuf = infile.read(readlen * samplelength)
 
     if sampletype == 4:
         indata = np.fromstring(inbuf, "float32", len(inbuf) // 4) * 32768
@@ -176,7 +182,6 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
 def load_unpacked_data_u8(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 1)
 
-
 def load_unpacked_data_s16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 2)
     
@@ -184,6 +189,8 @@ def load_unpacked_data_s16(infile, sample, readlen):
 def load_unpacked_data_u16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 2)
 
+def load_unpacked_data_u16(infile, sample, readlen):
+    return load_unpacked_data(infile, sample, readlen, 3)
 
 def load_unpacked_data_float32(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 4)
@@ -633,6 +640,17 @@ def calczc_sets(data, start, end, tgt=0, cliplevel=None):
 
     return {False: np.array(zcsets[False]), True: np.array(zcsets[True])}
 
+# Shamelessly based on https://github.com/scipy/scipy/blob/v1.6.0/scipy/signal/signaltools.py#L2264-2267
+# ... and intended for real FFT, but seems fine with complex as well ;)
+def build_hilbert(fft_size):
+    if (fft_size // 2) - (fft_size / 2) != 0:
+        raise Exception("build_hilbert: must have even fft_size")
+    
+    output = np.zeros(fft_size)
+    output[0] = output[fft_size // 2] = 1
+    output[1:fft_size // 2] = 2
+
+    return output
 
 def unwrap_hilbert(hilbert, freq_hz):
     tangles = np.angle(hilbert)
@@ -650,6 +668,34 @@ def unwrap_hilbert(hilbert, freq_hz):
         tdangles2[tdangles2 > tau] -= tau
     return tdangles2 * (freq_hz / tau)
 
+def fft_determine_slices(center, min_bandwidth, freq_hz, bins_in):
+    ''' returns the # of sub-bins needed to get center+/-min_bandwidth.
+        The returned lowbin is the first bin (symmetrically) needed to be saved.
+        
+        This will need to be 'flipped' using fft_slice to get the trimmed set
+    '''
+    
+    # compute the width of each bin
+    binwidth = freq_hz / bins_in
+    
+    cbin = nb_round(center / binwidth)
+    
+    # compute the needed number of fft bins...
+    bbins = nb_round(min_bandwidth / binwidth)
+    # ... and round that up to the next power of two
+    nbins = 2 * (2 ** math.ceil(math.log2(bbins * 2)))
+    
+    lowbin = cbin - (nbins // 4)
+    
+    cut_freq = binwidth * nbins
+    
+    return lowbin, nbins, cut_freq
+
+def fft_do_slice(fdomain, lowbin, nbins, blocklen):
+    ''' Uses lowbin and nbins as returned from fft_determine_slices to 
+        cut the fft '''
+    nbins_half = nbins//2
+    return np.concatenate([fdomain[lowbin:lowbin+nbins_half], fdomain[blocklen-lowbin-nbins_half:blocklen-lowbin]])
 
 def genwave(rate, freq, initialphase=0):
     """ Generate an FM waveform from target frequency data """
@@ -960,7 +1006,34 @@ def jsondump_thread(ldd, outname):
 
     return q
 
+class StridedCollector:
+    # This keeps a numpy buffer and outputs an fft block and keeps the overlap
+    # for the next fft.
+    def __init__(self, blocklen = 65536, stride = 2048):
+        self.buffer = None
+        self.blocklen = blocklen
+        self.stride = stride
+        
+    def add(self, data):
+        if self.buffer is None:
+            self.buffer = data
+        else:
+            self.buffer = np.concatenate([self.buffer, data])
 
+        return self.have_block()
+        
+    def have_block(self):
+        return (self.buffer is not None) and (len(self.buffer) >= self.blocklen)
+    
+    def get_block(self):
+        if self.have_block():
+            rv = self.buffer[0:self.blocklen]
+            self.buffer = self.buffer[self.blocklen-self.stride:]
+                
+            return rv
+            
+        return None
+        
 if __name__ == "__main__":
     print("Nothing to see here, move along ;)")
     

@@ -30,12 +30,9 @@ def todb(y, zero=False):
     else:
         return db
 
-
-def plotfilter_wh(w, h, freq, zero_base=False):
-    db = todb(h, zero_base)
-
+def print_crossings(db, w):
     above_m3 = None
-    for i in range(1, len(w)):
+    for i in range(1, len(w)//2):
         if (db[i] >= -10) and (db[i - 1] < -10):
             print(">-10db crossing at ", w[i])
         if (db[i] >= -3) and (db[i - 1] < -3):
@@ -48,6 +45,12 @@ def plotfilter_wh(w, h, freq, zero_base=False):
             print("<-3db crossing at ", w[i])
         if (db[i] >= 3) and (db[i - 1] < 3):
             print(">3db crossing at ", w[i])
+
+
+def plotfilter_wh(w, h, freq, zero_base=False):
+    db = todb(h, zero_base)
+
+    print_crossings(db, w)
 
     fig, ax1 = plt.subplots(1, 1, sharex=True)
     ax1.set_title("Digital filter frequency response")
@@ -79,6 +82,38 @@ def plotfilter(B, A, dfreq=None, freq=40, zero_base=False):
 
     return plotfilter_wh(w[1:keep], h[1:keep], freq, zero_base)
 
+def plotfilter2(F1, F2, dfreq=None, freq=40, zero_base=False):
+    if dfreq is None:
+        dfreq = freq / 2
+
+    w, h1 = sps.freqz(F1[0], F1[1], whole=True, worN=4096)
+    w = np.arange(0, freq, freq / len(h1))
+    db1 = todb(h1, zero_base)
+
+    print_crossings(db1, w)
+
+    w, h2 = sps.freqz(F2[0], F2[1], whole=True, worN=4096)
+    w = np.arange(0, freq, freq / len(h1))
+    db2 = todb(h2, zero_base)
+
+    print("second filter:")
+    print_crossings(db2, w)
+
+    keep = int((dfreq / freq) * len(h1))
+
+    fig, ax1 = plt.subplots(1, 1, sharex=True)
+    ax1.set_title("Digital filter frequency response")
+
+    ax1.plot(w[:keep], db1[:keep], "b")
+    ax1.plot(w[:keep], db2[:keep], "g")
+    ax1.set_ylabel("Amplitude [dB]", color="b")
+    ax1.set_xlabel("Frequency [rad/sample]")
+
+    plt.grid()
+    plt.axis("tight")
+    plt.show()
+
+    return None
 
 pi = np.pi
 tau = np.pi * 2

@@ -157,7 +157,7 @@ int main (int argc, char **argv)
     /* open input file, and allocate format context */
     if ((ret = avformat_open_input(&fmt_ctx, src_filename, NULL, NULL)) < 0) {
         if (!strcmp(src_filename, "--help") || !strcmp(src_filename, "-h")) {
-        	fprintf(stderr, "%s: Extract 16-bit unsigned data from .ldf (.oga compressed) files\n", argv[0]);
+        	fprintf(stderr, "%s: Extract 16-bit data from .ldf (.oga compressed) files\n", argv[0]);
         	fprintf(stderr, "usage: %s [filename] [seek location]\n", argv[0]);
         	fprintf(stderr, "(output is streamed to standard output)\n");
         	exit(1);

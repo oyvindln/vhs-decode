@@ -468,11 +468,7 @@ class RFDecode:
 
             SF["RFVideo"] *= SF["Fcutl"] * SF["Fcutr"]
 
-        # The hilbert filter performs a 90 degree shift on the input.  From: 
-        # https://github.com/scipy/scipy/blob/v1.6.0/scipy/signal/signaltools.py#L2264-2267
-        SF["hilbert"] = np.zeros(self.blocklen)
-        SF["hilbert"][0] = SF["hilbert"][self.blocklen // 2] = 1
-        SF["hilbert"][1 : self.blocklen // 2] = 2
+        SF["hilbert"] = build_hilbert(self.blocklen)
 
         SF["RFVideo"] *= SF["hilbert"]
 
@@ -3216,6 +3212,8 @@ class LDdecode:
             if self.write_rf_tbc:
                 self.ffmpeg_rftbc, self.outfile_rftbc = ldf_pipe(fname_out + ".tbc.ldf")
 
+        self.pipe_rftbc = extra_options.get("pipe_RF_TBC", None)
+
         self.fname_out = fname_out
 
         self.firstfield = None  # In frame output mode, the first field goes here
@@ -3364,8 +3362,14 @@ class LDdecode:
         self.outfile_video.write(picture)
         self.fields_written += 1
 
-        if self.outfile_rftbc is not None:
-            self.outfile_rftbc.write(f.rf_tbc())
+        if self.outfile_rftbc is not None or self.pipe_rftbc is not None:
+            rftbc = f.rf_tbc()
+
+            if self.outfile_rftbc is not None:
+                self.outfile_rftbc.write(rftbc)
+
+            if self.pipe_rftbc is not None:
+                self.pipe_rftbc.write(rftbc)
 
         if audio is not None and self.outfile_audio is not None:
             self.outfile_audio.write(audio)
