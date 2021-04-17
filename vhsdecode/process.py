@@ -40,6 +40,17 @@ def chroma_to_u16(chroma):
 
 
 @njit(cache=True)
+def replace_spikes(demod, demod_diffed, max_value):
+    too_high = max_value
+    to_fix = np.argwhere(demod[:-20] > too_high)
+
+    for i in to_fix:
+        start = min(i[0] - 4, 0)
+        end = i[0] + 20
+        demod[start:end] = demod_diffed[start:end]
+
+
+@njit(cache=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     """Scale chroma according to the level of the color burst on each line."""
 
@@ -1731,8 +1742,19 @@ class VHSRFDecode(ldd.RFDecode):
             # applies the video EQ
             demod = self.video_EQ(demod)
 
+        check_value = self.iretohz(100) * 2
+
+        # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
+        # replace the spikes with data from the diffed demod.
+        if np.max(demod[20:-20]) > check_value:
+            demod_b = unwrap_hilbert(
+                np.pad(np.diff(hilbert), (1, 0), mode="constant"), self.freq_hz
+            ).real
+            replace_spikes(demod, demod_b, check_value)
+
         # applies main deemphasis filter
         demod_fft = npfft.rfft(demod)
+
         out_video = npfft.irfft(
             demod_fft * self.Filters["FVideo"][0 : (self.blocklen // 2) + 1]
         ).real
@@ -1766,28 +1788,24 @@ class VHSRFDecode(ldd.RFDecode):
         if False:
             import matplotlib.pyplot as plt
 
-            fig, ax1 = plt.subplots()
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-            # out_video2 = np.fft.irfft(
-            #    demod_fft * self.Filters["FVideo2"][0 : (self.blocklen // 2) + 1]
-            # ).real
-            # out_video3 = np.fft.irfft(
-            #    demod_fft * self.Filters["FVideo3"][0 : (self.blocklen // 2) + 1]
-            # ).real
             # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
             #        ax1.plot(hilbert, color='#FF0000')
             # ax1.plot(data, color="#00FF00")
-            ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(7.5))
-            ax1.axhline(self.iretohz(100))
+            # ax1.axhline(self.iretohz(0))
+            # ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
             # print("Vsync IRE", self.SysParams["vsync_ire"])
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
-            ax1.plot(out_video[:2048])
-            # ax2.plot(out_video2[:2048])
-            # ax3.plot(out_video3[:2048])
-            #            ax4.plot(env, color="#00FF00")
+            ax1.plot(demod)
+            ax1.plot(demod_b, color="#000000")
+            ax2.plot(out_video)
+
+            # ax3.plot(hilbert)
+            # ax3.axhline(0)
+            # ax4.plot(np.pad(np.diff(hilbert), (0, 1), mode="constant"))
+            # ax4.axhline(0)
             #            ax3.plot(np.angle(hilbert))
             #            ax4.plot(hilbert.imag)
             #            crossings = find_crossings(env, 700)
