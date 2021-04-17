@@ -106,7 +106,7 @@ def find_sync_levels(field):
 
 
 def getpulses_override(field):
-    """Find sync pulses in the demodulated video sigal
+    """Find sync pulses in the demodulated video signal
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
@@ -415,7 +415,7 @@ class FieldPALCVBS(ldd.FieldPAL):
         return 1 + (self.rf.field_number % 8)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -452,7 +452,7 @@ class FieldNTSCCVBS(ldd.FieldNTSC):
         return None
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
