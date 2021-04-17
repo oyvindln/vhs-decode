@@ -14,8 +14,6 @@ from vhsdecode.utils import get_line
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
-# from vhsdecode.addons.resync import DCrestore
-# from vhsdecode.addons.vsync import Vsync
 
 from numba import njit
 
@@ -84,9 +82,6 @@ def getpulses_override(field):
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
-    # Ignore this ATM, the current code does it better.
-    # field.rf.Vsync.work(field.data["video"]["demod_05"])
-
     # pass one using standard levels
 
     # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
@@ -1660,9 +1655,6 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        # self.Vsync = Vsync(self.freq_hz, self.SysParams)
-        # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
-
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
