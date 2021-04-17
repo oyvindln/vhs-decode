@@ -69,7 +69,7 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
 
 
 def getpulses_override(field):
-    """Find sync pulses in the demodulated video sigal
+    """Find sync pulses in the demodulated video signal
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
