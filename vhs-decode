@@ -36,21 +36,13 @@ parser.add_argument(
     default=-1,
     help="jump to precise sample # in the file",
 )
-parser.add_argument(
-    "-S",
-    "--seek",
-    metavar="seek",
-    type=int,
-    default=-1,
-    help="seek to frame n of capture",
-)
 # parser.add_argument('-E', '--end', metavar='end', type=int, default=-1, help='cutting: last frame')
 parser.add_argument(
     "-l",
     "--length",
     metavar="length",
     type=int,
-    default=110000,
+    default=99999999,
     help="limit length to n frames",
 )
 parser.add_argument(
@@ -311,11 +303,6 @@ else:
 
 if system == "NTSC" and not args.ntscj:
     vhsd.blackIRE = 7.5
-
-if args.seek != -1:
-    if vhsd.seek(args.seek if firstframe == 0 else firstframe, args.seek) is None:
-        print("ERROR: Seeking failed", file=sys.stderr)
-        exit(1)
 
 # if args.MTF is not None:
 #    ldd.rf.mtf_mult = args.MTF
