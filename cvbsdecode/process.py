@@ -13,7 +13,7 @@ from vhsdecode.utils import get_line
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
 #from vhsdecode.addons.resync import DCrestore
-#from vhsdecode.addons.vsync import Vsync
+from vhsdecode.addons.vsync import Vsync
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -114,7 +114,7 @@ def getpulses_override(field):
     """
 
     # Ignore this ATM, the current code does it better.
-    # field.rf.Vsync.work(field.data["video"]["demod_05"])
+    field.rf.Vsync.work(field.data["video"]["demod_05"])
 
     if field.rf.auto_sync:
         sync_level, blank_level = find_sync_levels(field)
@@ -652,7 +652,7 @@ class VHSDecodeInner(ldd.RFDecode):
         self.demods = 0
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        # self.Vsync = Vsync(self.freq_hz, self.SysParams)
+        self.Vsync = Vsync(self.freq_hz, self.SysParams)
         # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
 
 

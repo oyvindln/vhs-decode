@@ -15,7 +15,7 @@ import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
 # from vhsdecode.addons.resync import DCrestore
-# from vhsdecode.addons.vsync import Vsync
+from vhsdecode.addons.vsync import Vsync
 
 from numba import njit
 
@@ -69,12 +69,12 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
 
 
 def getpulses_override(field):
-    """Find sync pulses in the demodulated video sigal
+    """Find sync pulses in the demodulated video signal
 
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
     # Ignore this ATM, the current code does it better.
-    # field.rf.Vsync.work(field.data["video"]["demod_05"])
+    field.rf.Vsync.work(field.data["video"]["demod_05"])
 
     # pass one using standard levels
 
@@ -1649,7 +1649,7 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        # self.Vsync = Vsync(self.freq_hz, self.SysParams)
+        self.Vsync = Vsync(self.freq_hz, self.SysParams)
         # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
 
 
