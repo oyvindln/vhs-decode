@@ -918,7 +918,7 @@ class FieldPALVHS(ldd.FieldPAL):
         return 1 + (self.rf.field_number % 8)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -967,7 +967,7 @@ class FieldPALUMatic(ldd.FieldPAL):
         return 1 + (self.rf.field_number % 8)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -1060,7 +1060,7 @@ class FieldNTSCVHS(ldd.FieldNTSC):
         return detect_dropouts_rf(self)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
@@ -1106,7 +1106,7 @@ class FieldNTSCUMatic(ldd.FieldNTSC):
         return detect_dropouts_rf(self)
 
     def getpulses(self):
-        """Find sync pulses in the demodulated video sigal
+        """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """

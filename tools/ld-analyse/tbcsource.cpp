@@ -672,9 +672,12 @@ void TbcSource::startBackgroundLoad(QString sourceFilename)
     emit busyLoading("Processing JSON metadata...");
 
     QString jsonFileName = sourceFilename + ".json";
+
+    const bool chroma_tbc = sourceFilename.endsWith("_chroma.tbc");
+
     // If we are trying to open a _chroma tbc from vhs-decode.
     // Try to look for the json for the luma part if the chroma doesn't have it's own.
-    if (!QFileInfo::exists(jsonFileName) && sourceFilename.endsWith("_chroma.tbc")) {
+    if (!QFileInfo::exists(jsonFileName) && chroma_tbc) {
         jsonFileName.chop(16);
         jsonFileName += ".tbc.json";
     }
@@ -714,6 +717,10 @@ void TbcSource::startBackgroundLoad(QString sourceFilename)
     if (videoParameters.isSourcePal) {
         palColour.updateConfiguration(videoParameters, palConfiguration);
     } else {
+        // Enable this option by default if we are loading a vhs-decode chroma only tbc file.
+        if(chroma_tbc) {
+            ntscConfiguration.phaseCompensation = true;
+        }
         ntscColour.updateConfiguration(videoParameters, ntscConfiguration);
     }
 

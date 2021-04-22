@@ -229,12 +229,12 @@ int main(int argc, char *argv[])
                                       QCoreApplication::translate("main", "Transform: Overlay the input and output FFTs"));
     parser.addOption(showFFTsOption);
 
-    // Option to overlay the FFTs
+    // Option to use phase compensating decoder
     QCommandLineOption ntscPhaseComp(QStringList() << "ntsc-phase-comp",
                                       QCoreApplication::translate("main", "Use NTSC QADM decoder taking burst phase into account (BETA)"));
     parser.addOption(ntscPhaseComp);
 
-    // Option to overlay the FFTs
+    // Option to use chroma post-filter
     QCommandLineOption colorLPF(QStringList() << "color-lpf",
                                       QCoreApplication::translate("main", "NTSC: Use Chroma post-filter"));
     parser.addOption(colorLPF);

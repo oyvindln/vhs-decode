@@ -413,13 +413,15 @@ void DropOutCorrect::findPotentialReplacementLine(const QVector<QVector<DropOutL
     qint32 sourceLine = targetDropouts[0][targetIndex].fieldLine + sourceOffset;
 
     // Is the line within the active range?
-    if (sourceLine < videoParameters[sourceNo].firstActiveFieldLine || sourceLine >= videoParameters[sourceNo].lastActiveFieldLine) {
+    if ((sourceLine - 1) < videoParameters[sourceNo].firstActiveFieldLine
+        || (sourceLine - 1) >= videoParameters[sourceNo].lastActiveFieldLine) {
         qDebug() << "Line" << sourceLine << "is not in active range - ignoring";
         return;
     }
 
     // Hunt for a replacement
-    while (sourceLine >= videoParameters[sourceNo].firstActiveFieldLine && sourceLine < videoParameters[sourceNo].lastActiveFieldLine) {
+    while ((sourceLine - 1) >= videoParameters[sourceNo].firstActiveFieldLine
+           && (sourceLine - 1) < videoParameters[sourceNo].lastActiveFieldLine) {
         // Is there a dropout that overlaps the one we're trying to replace?
         bool hasOverlap = false;
         for (qint32 sourceIndex = 0; sourceIndex < sourceDropouts[sourceNo].size(); sourceIndex++) {
