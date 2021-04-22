@@ -149,6 +149,7 @@ void ChromaDecoderConfigDialog::updateDialog()
     const bool isSourceNtsc = !isSourcePal;
 
     ui->phaseCompCheckBox->setEnabled(isSourceNtsc);
+    ui->phaseCompCheckBox->setChecked(ntscConfiguration.phaseCompensation);
     ui->ntscFilter2DRadioButton->setEnabled(isSourceNtsc);
     ui->ntscFilter3DRadioButton->setEnabled(isSourceNtsc);
 
