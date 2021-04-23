@@ -68,6 +68,36 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
     return output
 
 
+# stores the last valid blacklevel, synclevel and vsynclocs state
+# preliminary solution to fix spurious decoding halts (chewed tape case)
+class FieldState:
+    def __init__(self):
+        self.blacklevel = None
+        self.synclevel = None
+        self.locs = None
+
+    def setLevels(self, black, sync):
+        self.blacklevel, self.synclevel = black, sync
+
+    def getLevels(self):
+        return self.blacklevel, self.synclevel
+
+    def setSyncLevel(self, level):
+        self.synclevel = level
+
+    def getSyncLevel(self):
+        return self.synclevel
+
+    def setLocs(self, locs):
+        self.locs = locs
+
+    def getLocs(self):
+        return self.locs
+
+
+field_state = FieldState()
+
+
 def getpulses_override(field):
     """Find sync pulses in the demodulated video signal
 
@@ -108,16 +138,20 @@ def getpulses_override(field):
             )
 
     if len(vsync_means) == 0:
-        return None
+        synclevel = field_state.getSyncLevel()
+        if synclevel is None:
+            return None
 
     synclevel = np.median(vsync_means)
+    field_state.setSyncLevel(synclevel)
+    field_state.setLocs(vsync_locs)
 
     if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
         # sync level is close enough to use
         return pulses
 
     if vsync_locs is None or not len(vsync_locs):
-        return None
+        vsync_locs = field_state.getLocs()
 
     # Now compute black level and try again
 
@@ -144,6 +178,16 @@ def getpulses_override(field):
             )
 
     blacklevel = np.median(black_means)
+
+    if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
+        #utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
+        bl, sl = field_state.getLevels()
+        if bl is not None and sl is not None:
+            blacklevel, synclevel = bl, sl
+        else:
+            return None
+
+    field_state.setLevels(blacklevel, synclevel)
 
     pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
     pulse_hz_max = (blacklevel + synclevel) / 2
