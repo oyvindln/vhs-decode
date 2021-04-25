@@ -147,6 +147,13 @@ def getpulses_override(field):
         synclevel = field_state.getSyncLevel()
         if synclevel is None:
             return None
+    else:
+        synclevel = np.median(vsync_means)
+        field_state.setSyncLevel(synclevel)
+        field_state.setLocs(vsync_locs)
+        synclevel = field_state.getSyncLevel()
+        if synclevel is None:
+            return None
 
     synclevel = np.median(vsync_means)
     field_state.setSyncLevel(synclevel)
@@ -184,6 +191,16 @@ def getpulses_override(field):
             )
 
     blacklevel = np.median(black_means)
+
+    if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
+        # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
+        bl, sl = field_state.getLevels()
+        if bl is not None and sl is not None:
+            blacklevel, synclevel = bl, sl
+        else:
+            return None
+    else:
+        field_state.setLevels(blacklevel, synclevel)
 
     if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
         #utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
