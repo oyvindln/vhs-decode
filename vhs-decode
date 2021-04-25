@@ -52,6 +52,10 @@ parser.add_argument(
     "-n", "--ntsc", dest="ntsc", action="store_true", help="source is in NTSC format"
 )
 parser.add_argument(
+    "-pm", "--palm", dest="palm", action="store_true", help="source is in PAL-M format"
+)
+
+parser.add_argument(
     "-t",
     "--threads",
     metavar="threads",
@@ -225,10 +229,24 @@ outname = args.outfile
 firstframe = args.start
 req_frames = args.length
 tape_format = "UMATIC" if args.umatic else "VHS"
-system = "PAL" if args.pal else "NTSC"
+
+if args.pal:
+    system = "PAL"
+elif args.palm:
+    system = "MPAL"
+else:
+    system = "NTSC"
 
 if args.pal and args.ntsc:
     print("ERROR: Can only be PAL or NTSC")
+    exit(1)
+
+if args.palm and args.pal:
+    print("ERROR: Can only be PAL-M or PAL")
+    exit(1)
+
+if args.palm and args.ntsc:
+    print("ERROR: Can only be PAL-M or NTSC")
     exit(1)
 
 sample_freq = (

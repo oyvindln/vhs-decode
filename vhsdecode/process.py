@@ -891,6 +891,7 @@ class FieldPALVHS(ldd.FieldPAL):
         return linelocs
 
     def downscale(self, final=False, *args, **kwargs):
+
         dsout, dsaudio, dsefm = super(FieldPALVHS, self).downscale(
             final, *args, **kwargs
         )
@@ -1155,6 +1156,12 @@ class FieldNTSCUMatic(ldd.FieldNTSC):
         """Disabled this for now as line starts can vary widely."""
         return baserr
 
+def parent_system(system):
+    if system is 'MPAL':
+        parent_system = 'NTSC'
+    else:
+        parent_system = system
+    return parent_system
 
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
@@ -1183,7 +1190,7 @@ class VHSDecode(ldd.LDdecode):
             freader,
             logger,
             analog_audio=False,
-            system=system,
+            system=parent_system(system),
             doDOD=doDOD,
             threads=threads,
             extra_options=extra_options,
@@ -1200,12 +1207,12 @@ class VHSDecode(ldd.LDdecode):
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
-        if system == "PAL":
+        if parent_system(system) == "PAL":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldPALUMatic
             else:
                 self.FieldClass = FieldPALVHS
-        elif system == "NTSC":
+        elif parent_system(system) == "NTSC":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldNTSCUMatic
             else:
@@ -1354,7 +1361,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
-            inputfreq, system, decode_analog_audio=False, has_analog_audio=False
+            inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
         )
 
         # controls the sharpness EQ gain
@@ -1406,6 +1413,9 @@ class VHSRFDecode(ldd.RFDecode):
             else:
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_VHS)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_VHS)
+        elif system == "MPAL":
+            self.SysParams = copy.deepcopy(vhs_formats.SysParams_MPAL_VHS)
+            self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_MPAL_VHS)
         else:
             raise Exception("Unknown video system! ", system)
 
@@ -1835,7 +1845,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
             ax1.plot(demod)
-            ax1.plot(demod_b, color="#000000")
+            #ax1.plot(demod_b, color="#000000")
             ax2.plot(out_video)
 
             # ax3.plot(hilbert)
@@ -1847,7 +1857,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            crossings = find_crossings(env, 700)
             #            ax3.plot(crossings, color="#0000FF")
             plt.show()
-            exit(0)
+            #exit(0)
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
         video_out = np.rec.array(
