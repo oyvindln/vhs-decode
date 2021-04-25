@@ -107,6 +107,9 @@ RFParams_NTSC_VHS["boost_bpf_low"] = 4100000
 RFParams_NTSC_VHS["boost_bpf_high"] = 5000000
 RFParams_NTSC_VHS["boost_bpf_mult"] = 1
 
+# PAL-M VHS section
+RFParams_MPAL_VHS = copy.deepcopy(RFParams_NTSC_VHS)
+RFParams_MPAL_VHS["color_under_carrier"] = 631.337e3
 
 # UMATIC section
 # These need tweaking.
