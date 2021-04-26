@@ -49,6 +49,7 @@ class Vsync:
         self.sink.set_scale(1)
         self.sink.set_offset(0)
         self.sink.set_name('vsyncdata.wav')
+        self.levels = None, None
 
     # return true if lo_bound < value < hi_bound
     def hysteresis_checker(self, value, ref, error=0.1):
@@ -184,11 +185,22 @@ class Vsync:
                 if serration - self.vsynclen >= 0 or serration + self.vsynclen <= datalen -1:
                     result = np.append(result, serration)
         elif len(where_allmin) == 1:
-            result = np.append(where_allmin[0], where_allmin[0] + self.vsynclen)
+            if where_allmin[0] + self.vsynclen < datalen - 1:
+                result = np.append(where_allmin[0], where_allmin[0] + self.vsynclen)
+            else:
+                result = np.append(where_allmin[0], max(where_allmin[0] - self.vsynclen, 0))
         else:
             result = None
 
+
         return result
+
+    def get_serration_sync_levels(self, serration):
+        half_amp = np.mean(serration)
+        peaks = np.where(serration > half_amp)[0]
+        valleys = np.where(serration <= half_amp)[0]
+        levels = np.median(serration[valleys]), np.median(serration[peaks])
+        return levels
 
     def search_eq_pulses(self, data, pos, linespan=30):
         start, end = max(0, pos - self.linelen * linespan), min(len(data) -1, pos + self.linelen * linespan)
@@ -198,26 +210,21 @@ class Vsync:
         zero_block = min_block - level
         sync_pulses = zero_cross_det(zero_block)
         diff_sync = np.diff(sync_pulses)
-        #max_diffs = argrelextrema(diff_sync, np.greater)[0]
-        #min_diffs = argrelextrema(diff_sync, np.less)[0]
-        #max_diffmean = np.mean(diff_sync[max_diffs])
-        #min_diffmean = np.mean(diff_sync[min_diffs])
-        #print(max_diffmean, min_diffmean, self.eq_pulselen, self.linelen)
-
-        #diff_threshold = (max_diffmean - min_diffmean) / 4
-        #diff_threshold += min_diffmean
-        #threshold = np.ones(len(diff_sync)) * self.eq_pulselen * 0.5
-        #dualplot_scope(diff_sync, threshold, title='diff_sync')
 
         where_min_diff = np.where(np.logical_and(self.eq_pulselen * 0.2 < diff_sync, diff_sync <= self.eq_pulselen))[0]
-        if len(where_min_diff) > 0:
-            eq_s, eq_e = sync_pulses[where_min_diff[0]], sync_pulses[where_min_diff[-1:][0]] + 30
+        if 9 <= len(where_min_diff) <= 12:
+            eq_s, eq_e = sync_pulses[where_min_diff[0]], \
+                         min(int(sync_pulses[where_min_diff[-1:][0]] + self.eq_pulselen / 2), len(data) - 1)
             data_s, data_e = eq_s + start, eq_e + start
-            plot_scope(data[data_s:data_e], title='serration')
-            return data_s, data_e
+            serration = data[data_s:data_e]
+            self.levels = self.get_serration_sync_levels(serration)
+            #marker = np.ones(len(serration)) * self.levels[1]
+            #dualplot_scope(serration, marker, title='serration')
+            return True, data_s, data_e
         else:
-            print('EQ search failed')
-            return None, None
+            if self.levels == (None, None):
+                print('VBI EQ pulses search failed', self.levels)
+            return False, None, None
 
 
     #from where_min search for the min level and repeat
@@ -231,22 +238,22 @@ class Vsync:
             where_min = self.vsync_arbitrage2(where_allmin, serrations, len(padded))
             if len(where_min) > 0:
                 mask = self.mutemask(where_min, len(data), self.linelen * 5)
-                dualplot_scope(data, mask * max(data))
+                dualplot_scope(data, np.clip(mask * max(data), a_max=max(data), a_min=min(data)))
                 #self.window_plot(data, where_min, window=self.linelen * 25)
-                #print(np.diff(where_min))
                 for w_min in where_min:
                     self.search_eq_pulses(data, w_min)
                 return mask
             else:
-                dualplot_scope(forward[0], forward[1], title='unexpected')
+                #dualplot_scope(forward[0], forward[1], title='unexpected')
                 return None
         else:
-            dualplot_scope(forward[0], forward[1], title='unexpected')
+            #dualplot_scope(forward[0], forward[1], title='unexpected')
             return None
 
     # main
     def get_syncedgelocs(self, data):
         mask = self.vsync_envelope(data)
+
         if mask is not None:
             self.sink.write(mask / 2, mask / 2)
 
