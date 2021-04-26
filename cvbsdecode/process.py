@@ -12,6 +12,7 @@ from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
+from vhsdecode.process import getpulses_override as vhs_getpulses_override
 #from vhsdecode.addons.resync import DCrestore
 from vhsdecode.addons.vsync import Vsync
 

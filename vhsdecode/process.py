@@ -79,6 +79,36 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
     return output
 
 
+# stores the last valid blacklevel, synclevel and vsynclocs state
+# preliminary solution to fix spurious decoding halts (chewed tape case)
+class FieldState:
+    def __init__(self):
+        self.blacklevel = None
+        self.synclevel = None
+        self.locs = None
+
+    def setLevels(self, black, sync):
+        self.blacklevel, self.synclevel = black, sync
+
+    def getLevels(self):
+        return self.blacklevel, self.synclevel
+
+    def setSyncLevel(self, level):
+        self.synclevel = level
+
+    def getSyncLevel(self):
+        return self.synclevel
+
+    def setLocs(self, locs):
+        self.locs = locs
+
+    def getLocs(self):
+        return self.locs
+
+
+field_state = FieldState()
+
+
 def getpulses_override(field):
     """Find sync pulses in the demodulated video signal
 
@@ -119,16 +149,20 @@ def getpulses_override(field):
             )
 
     if len(vsync_means) == 0:
-        return None
-
-    synclevel = np.median(vsync_means)
+        synclevel = field_state.getSyncLevel()
+        if synclevel is None:
+            return None
+    else:
+        synclevel = np.median(vsync_means)
+        field_state.setSyncLevel(synclevel)
+        field_state.setLocs(vsync_locs)
 
     if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
         # sync level is close enough to use
         return pulses
 
     if vsync_locs is None or not len(vsync_locs):
-        return None
+        vsync_locs = field_state.getLocs()
 
     # Now compute black level and try again
 
@@ -155,6 +189,16 @@ def getpulses_override(field):
             )
 
     blacklevel = np.median(black_means)
+
+    if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
+        # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
+        bl, sl = field_state.getLevels()
+        if bl is not None and sl is not None:
+            blacklevel, synclevel = bl, sl
+        else:
+            return None
+    else:
+        field_state.setLevels(blacklevel, synclevel)
 
     pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
     pulse_hz_max = (blacklevel + synclevel) / 2
@@ -852,6 +896,7 @@ class FieldPALVHS(ldd.FieldPAL):
         return linelocs
 
     def downscale(self, final=False, *args, **kwargs):
+
         dsout, dsaudio, dsefm = super(FieldPALVHS, self).downscale(
             final, *args, **kwargs
         )
@@ -1116,6 +1161,12 @@ class FieldNTSCUMatic(ldd.FieldNTSC):
         """Disabled this for now as line starts can vary widely."""
         return baserr
 
+def parent_system(system):
+    if system is 'MPAL':
+        parent_system = 'NTSC'
+    else:
+        parent_system = system
+    return parent_system
 
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
@@ -1144,7 +1195,7 @@ class VHSDecode(ldd.LDdecode):
             freader,
             logger,
             analog_audio=False,
-            system=system,
+            system=parent_system(system),
             doDOD=doDOD,
             threads=threads,
             extra_options=extra_options,
@@ -1161,12 +1212,12 @@ class VHSDecode(ldd.LDdecode):
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
-        if system == "PAL":
+        if parent_system(system) == "PAL":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldPALUMatic
             else:
                 self.FieldClass = FieldPALVHS
-        elif system == "NTSC":
+        elif parent_system(system) == "NTSC":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldNTSCUMatic
             else:
@@ -1315,7 +1366,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
-            inputfreq, system, decode_analog_audio=False, has_analog_audio=False
+            inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
         )
 
         # controls the sharpness EQ gain
@@ -1367,6 +1418,9 @@ class VHSRFDecode(ldd.RFDecode):
             else:
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_VHS)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_VHS)
+        elif system == "MPAL":
+            self.SysParams = copy.deepcopy(vhs_formats.SysParams_MPAL_VHS)
+            self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_MPAL_VHS)
         else:
             raise Exception("Unknown video system! ", system)
 
@@ -1799,7 +1853,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
             ax1.plot(demod)
-            ax1.plot(demod_b, color="#000000")
+            #ax1.plot(demod_b, color="#000000")
             ax2.plot(out_video)
 
             # ax3.plot(hilbert)
@@ -1811,7 +1865,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            crossings = find_crossings(env, 700)
             #            ax3.plot(crossings, color="#0000FF")
             plt.show()
-            exit(0)
+            #exit(0)
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
         video_out = np.rec.array(

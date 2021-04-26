@@ -1,3 +1,4 @@
+import copy
 from lddecode.core import RFParams_PAL, RFParams_NTSC, SysParams_PAL, SysParams_NTSC
 
 # We base the parameters off the original laserdisc ones and override the ones
@@ -106,6 +107,9 @@ RFParams_NTSC_VHS["boost_bpf_low"] = 4100000
 RFParams_NTSC_VHS["boost_bpf_high"] = 5000000
 RFParams_NTSC_VHS["boost_bpf_mult"] = 1
 
+# PAL-M VHS section
+RFParams_MPAL_VHS = copy.deepcopy(RFParams_NTSC_VHS)
+RFParams_MPAL_VHS["color_under_carrier"] = 631.337e3
 
 # UMATIC section
 # These need tweaking.
@@ -215,6 +219,10 @@ SysParams_NTSC_VHS["max_ire"] = 100
 # Mean absolute value of color burst for Automatic Chroma Control.
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.
 SysParams_NTSC_VHS["burst_abs_ref"] = 1750
+
+# PAL-M sysparams override (From JVC Video technical guide)
+SysParams_MPAL_VHS = copy.deepcopy(SysParams_NTSC_VHS)
+SysParams_MPAL_VHS['fsc_mhz'] = 3.575611
 
 # PAL and NTSC "regular-band" use the same frequencies, but
 # not sure if PAL sync being -43 and ntsc being -40 makes
