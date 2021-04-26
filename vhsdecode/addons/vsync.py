@@ -18,9 +18,28 @@ class Vsync:
         self.fv = self.SysParams["FPS"] * 2
         self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
         self.venv_limit = 3
-
+        self.serration_limit = 3
         iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
         self.vsyncEnvFilter = FiltersClass(iir_vsync_env[0], iir_vsync_env[1], self.samp_rate)
+
+        iir_serration_base_lo = firdes_highpass(self.samp_rate, self.fh, self.fh)
+        iir_serration_base_hi = firdes_lowpass(self.samp_rate, self.fh, self.fh)
+
+        self.serrationFilter_base = {
+            FiltersClass(iir_serration_base_lo[0], iir_serration_base_lo[1], self.samp_rate),
+            FiltersClass(iir_serration_base_hi[0], iir_serration_base_hi[1], self.samp_rate),
+        }
+
+        iir_serration_second_lo = firdes_highpass(self.samp_rate, self.fh * 2, self.fh * 2)
+        iir_serration_second_hi = firdes_lowpass(self.samp_rate, self.fh * 2, self.fh * 2)
+
+        self.serrationFilter_second = {
+            FiltersClass(iir_serration_second_lo[0], iir_serration_second_lo[1], self.samp_rate),
+            FiltersClass(iir_serration_second_hi[0], iir_serration_second_hi[1], self.samp_rate),
+        }
+
+        iir_serration_envelope_lo = firdes_lowpass(self.samp_rate, self.fh / self.serration_limit, self.fh / 2)
+        self.serrationFilter_envelope = FiltersClass(iir_serration_envelope_lo[0], iir_serration_envelope_lo[1], self.samp_rate)
 
         self.eq_pulselen = round(t_to_samples(self.samp_rate, 1 / (self.SysParams["eqPulseUS"] * 1e-6)))
         self.vsynclen = round(t_to_samples(self.samp_rate, self.fv))
@@ -114,13 +133,23 @@ class Vsync:
             #plot_scope(data_chunks[peak_id], title='missing chunk')
             return None
 
+    def chainfiltfilt(self, data, filters):
+        for filter in filters:
+            data = filter.filtfilt(data)
+        return data
+
+    def power_ratio_search(self, data):
+        first_harmonic = np.power(self.chainfiltfilt(data, self.serrationFilter_base), 2)
+        first_harmonic = self.serrationFilter_envelope.filtfilt(first_harmonic)
+        return argrelextrema(first_harmonic, np.less)[0]
+
     def window_plot(self, data, where_min, window=2048):
         for n, point in enumerate(where_min):
             start = max(0, int(point - window / 2))
             end = min(len(data), int(point + window / 2))
-            #plot_scope(data[start:end], title='Zoom point %d/%d' % (n, len(where_min)))
-            dc_rem = data[start:end] - np.mean(data[start:end])
-            self.fft_power_bin_search(dc_rem, self.fh * 2)
+            plot_scope(data[start:end], title='Zoom point %d/%d' % (n, len(where_min)))
+            #dc_rem = data[start:end] - np.mean(data[start:end])
+            #self.fft_power_bin_search(dc_rem, self.fh * 2)
 
             #fft = np.fft.fft(data[start:end])
             #freq = np.fft.fftfreq(len(data), data[1] - data[0])
@@ -138,20 +167,79 @@ class Vsync:
 
         return result
 
+    def select_serration(self, where_min, serrations):
+        selected = np.array([], np.int)
+        for id, edge in enumerate(serrations):
+            for s_min in where_min:
+                next_serration_id = min(id + 1, len(serrations) -1)
+                if edge <= s_min <= serrations[next_serration_id]:
+                    selected = np.append(selected, edge)
+        return selected
+
+    def vsync_arbitrage2(self, where_allmin, serrations, datalen):
+        result = np.array([], np.int)
+        if len(where_allmin) > 0:
+            valid_serrations = self.select_serration(where_allmin, serrations)
+            for serration in valid_serrations:
+                if serration - self.vsynclen >= 0 or serration + self.vsynclen <= datalen -1:
+                    result = np.append(result, serration)
+        elif len(where_allmin) == 1:
+            result = np.append(where_allmin[0], where_allmin[0] + self.vsynclen)
+        else:
+            result = None
+
+        return result
+
+    def search_eq_pulses(self, data, pos, linespan=30):
+        start, end = max(0, pos - self.linelen * linespan), min(len(data) -1, pos + self.linelen * linespan)
+        min_block = data[start:end]
+        level = (np.median(min_block) - np.min(min_block)) / 2
+        level += np.min(min_block)
+        zero_block = min_block - level
+        sync_pulses = zero_cross_det(zero_block)
+        diff_sync = np.diff(sync_pulses)
+        #max_diffs = argrelextrema(diff_sync, np.greater)[0]
+        #min_diffs = argrelextrema(diff_sync, np.less)[0]
+        #max_diffmean = np.mean(diff_sync[max_diffs])
+        #min_diffmean = np.mean(diff_sync[min_diffs])
+        #print(max_diffmean, min_diffmean, self.eq_pulselen, self.linelen)
+
+        #diff_threshold = (max_diffmean - min_diffmean) / 4
+        #diff_threshold += min_diffmean
+        #threshold = np.ones(len(diff_sync)) * self.eq_pulselen * 0.5
+        #dualplot_scope(diff_sync, threshold, title='diff_sync')
+
+        where_min_diff = np.where(np.logical_and(self.eq_pulselen * 0.2 < diff_sync, diff_sync <= self.eq_pulselen))[0]
+        if len(where_min_diff) > 0:
+            eq_s, eq_e = sync_pulses[where_min_diff[0]], sync_pulses[where_min_diff[-1:][0]] + 30
+            data_s, data_e = eq_s + start, eq_e + start
+            plot_scope(data[data_s:data_e], title='serration')
+            return data_s, data_e
+        else:
+            print('EQ search failed')
+            return None, None
+
+
     #from where_min search for the min level and repeat
     def vsync_envelope(self, data, padding=1024):  # 0x10000
         padded = np.append(data[:padding], data)
         forward = self.vsync_envelope_double(padded)
         diff = np.add(forward[0][padding:], forward[1][padding:])
         where_allmin = argrelextrema(diff, np.less)[0]
-
         if len(where_allmin) > 0:
-            where_min = self.vsync_arbitrage(where_allmin)
-            mask = self.mutemask(where_min, len(data), self.linelen * 5)
-            #dualplot_scope(data, mask * max(data))
-            self.window_plot(data, where_min, window=self.linelen * 25)
-            #print(np.diff(where_min))
-            return mask
+            serrations = self.power_ratio_search(padded)
+            where_min = self.vsync_arbitrage2(where_allmin, serrations, len(padded))
+            if len(where_min) > 0:
+                mask = self.mutemask(where_min, len(data), self.linelen * 5)
+                dualplot_scope(data, mask * max(data))
+                #self.window_plot(data, where_min, window=self.linelen * 25)
+                #print(np.diff(where_min))
+                for w_min in where_min:
+                    self.search_eq_pulses(data, w_min)
+                return mask
+            else:
+                dualplot_scope(forward[0], forward[1], title='unexpected')
+                return None
         else:
             dualplot_scope(forward[0], forward[1], title='unexpected')
             return None
