@@ -117,11 +117,24 @@ def getpulses_override(field):
     # Ignore this ATM, the current code does it better.
     field.rf.Vsync.work(field.data["video"]["demod_05"])
 
-    # pass one using standard levels
+    # if has levels, then compensate blanking bias
+    if field.rf.Vsync.has_levels():
+        sync, blank = field.rf.Vsync.get_levels()
 
-    # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-    pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
-    pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
+        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
+        # field.data["video"]["demod_05"] -= blank
+        # field.data["video"]["demod_05"] += field.rf.SysParams["ire0"]
+        # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=field_levels[0], a_max=field_levels[1])
+        field.data["video"]["demod"] -= blank
+        field.data["video"]["demod"] += field.rf.SysParams["ire0"]
+        sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+        pulse_hz_min = field.rf.iretohz(sync_ire - 10)
+        pulse_hz_max = field.rf.iretohz(sync_ire / 2)
+    else:
+        # pass one using standard levels
+        # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
+        pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+        pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
 
     pulses = lddu.findpulses(
         field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max

@@ -178,16 +178,17 @@ while not done and vhsd.fields_written < (req_frames * 2):
         print("Terminated, saving JSON and exiting")
         cleanup(outname)
         exit(1)
+    """
     except Exception as err:
         print(
             "\nERROR - please paste the following into a bug report:", file=sys.stderr
-        )
         print("current sample:", vhsd.fdoffset, file=sys.stderr)
         print("arguments:", args, file=sys.stderr)
         print("Exception:", err, " Traceback:", file=sys.stderr)
         traceback.print_tb(err.__traceback__)
         cleanup(outname)
         exit(1)
+    """
 
     if f is None:
         # or (args.ignoreleadout == False and vhsd.leadOut == True):

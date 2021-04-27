@@ -1,6 +1,5 @@
-from vhsdecode.addons.wavesink import WaveSink
 from vhsdecode.utils import FiltersClass, firdes_lowpass, firdes_highpass, firdes_bandpass, plot_scope, dualplot_scope, filter_plot, zero_cross_det, \
-    pad_or_truncate, fft_plot
+    pad_or_truncate, fft_plot, moving_average
 import numpy as np
 from scipy.signal import argrelextrema
 from os import getpid
@@ -30,14 +29,6 @@ class Vsync:
             FiltersClass(iir_serration_base_hi[0], iir_serration_base_hi[1], self.samp_rate),
         }
 
-        iir_serration_second_lo = firdes_highpass(self.samp_rate, self.fh * 2, self.fh * 2)
-        iir_serration_second_hi = firdes_lowpass(self.samp_rate, self.fh * 2, self.fh * 2)
-
-        self.serrationFilter_second = {
-            FiltersClass(iir_serration_second_lo[0], iir_serration_second_lo[1], self.samp_rate),
-            FiltersClass(iir_serration_second_hi[0], iir_serration_second_hi[1], self.samp_rate),
-        }
-
         iir_serration_envelope_lo = firdes_lowpass(self.samp_rate, self.fh / self.serration_limit, self.fh / 2)
         self.serrationFilter_envelope = FiltersClass(iir_serration_envelope_lo[0], iir_serration_envelope_lo[1], self.samp_rate)
 
@@ -45,20 +36,21 @@ class Vsync:
         self.vsynclen = round(t_to_samples(self.samp_rate, self.fv))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
         self.pid = getpid()
-        self.sink = WaveSink(self.samp_rate)
-        self.sink.set_scale(1)
-        self.sink.set_offset(0)
-        self.sink.set_name('vsyncdata.wav')
-        self.levels = None, None
+        self.levels = list(), list() # sync / blanking
+        self.level_average = 30
 
-    # return true if lo_bound < value < hi_bound
-    def hysteresis_checker(self, value, ref, error=0.1):
-        lo_bound = (1 - error) * ref
-        hi_bound = (1 + error) * ref
-        if lo_bound < value < hi_bound:
-            return True
-        else:
-            return False
+    def get_levels(self):
+        sync, sync_list = moving_average(self.levels[0], window=self.level_average)
+        blank, blank_list = moving_average(self.levels[1], window=self.level_average)
+        self.levels = sync_list, blank_list
+        return sync, blank
+
+    def has_levels(self):
+        return len(self.levels[0]) > 0 and len(self.levels[1]) > 0
+
+    def push_levels(self, levels):
+        for ix, level in enumerate(levels):
+            self.levels[ix].append(level)
 
     def mutemask(self, raw_locs, blocklen, pulselen):
         mask = np.zeros(blocklen)
@@ -66,13 +58,6 @@ class Vsync:
         for loc in locs:
             mask[loc:loc+pulselen] = [1] * pulselen
         return mask[:blocklen]
-
-    # writes the wav file
-    def sink_levels(self, hlevels, blevels):
-        attenuation = 2e6
-        hlevel_bias, blevel_bias = np.mean(hlevels), np.mean(blevels)
-        ch0, ch1 = (hlevels - hlevel_bias) / attenuation, (blevels - blevel_bias) / attenuation
-        self.sink.write(ch0, ch1)
 
     def vsync_envelope_simple(self, data):
         hi_part = np.clip(data, a_max=np.max(data), a_min=0)
@@ -94,46 +79,6 @@ class Vsync:
         #dualplot_scope(result[0], result[1])
         return result
 
-    def fft_power_ratio(self, data, f):
-        fft = np.fft.fft(data)
-        power = np.abs(fft) ** 2
-        sample_freq = np.fft.fftfreq(len(data), d=1.0 / self.samp_rate)
-        step = sample_freq[1] - sample_freq[0]
-        main = int(f / step)
-        half = int(f / (2 * step))
-        return power[main] / power[half]
-
-    def chunks(self, l, n):
-        n = max(1, n)
-        split = [l[x:x + n] for x in range(0, len(l), n)]
-        return split
-
-    def is_valid_serration(self, chunk):
-        half_amp = (np.max(chunk) - np.min(chunk)) / 2
-        half_level = half_amp + np.min(chunk)
-        dc_chunk = chunk - half_level
-        crosses = zero_cross_det(dc_chunk)
-        return 6 <= len(crosses) <= 7
-
-    def fft_power_bin_search(self, data, f, bins=16):
-        data_chunks = self.chunks(data, int(len(data) / bins))
-        bin_power = list()
-
-        for chunk in data_chunks:
-            if len(chunk) == int(len(data) / bins):
-                bin_power.append(self.fft_power_ratio(chunk, f))
-
-        peak_id = int(np.where(bin_power == max(bin_power))[0])
-        if max(bin_power) > 100 and self.is_valid_serration(data_chunks[peak_id]):
-            plot_scope(data_chunks[peak_id], title='serration chunk')
-            print(max(bin_power), min(bin_power))
-            return peak_id
-        else:
-            print('Missing video serration')
-            #print(max(bin_power))
-            #plot_scope(data_chunks[peak_id], title='missing chunk')
-            return None
-
     def chainfiltfilt(self, data, filters):
         for filter in filters:
             data = filter.filtfilt(data)
@@ -144,30 +89,6 @@ class Vsync:
         first_harmonic = self.serrationFilter_envelope.filtfilt(first_harmonic)
         return argrelextrema(first_harmonic, np.less)[0]
 
-    def window_plot(self, data, where_min, window=2048):
-        for n, point in enumerate(where_min):
-            start = max(0, int(point - window / 2))
-            end = min(len(data), int(point + window / 2))
-            plot_scope(data[start:end], title='Zoom point %d/%d' % (n, len(where_min)))
-            #dc_rem = data[start:end] - np.mean(data[start:end])
-            #self.fft_power_bin_search(dc_rem, self.fh * 2)
-
-            #fft = np.fft.fft(data[start:end])
-            #freq = np.fft.fftfreq(len(data), data[1] - data[0])
-
-    def vsync_arbitrage(self, where_allmin):
-        meas_pulse_width = self.samp_rate
-        cut = 0
-        if len(where_allmin) > 1:
-            while self.hysteresis_checker(meas_pulse_width, self.vsynclen, error=0.05):
-                meas_pulse_width = where_allmin[len(where_allmin)-cut-1] - where_allmin[0]
-                cut += 1
-            result = np.append(where_allmin[0], where_allmin[len(where_allmin)-cut-1])
-        else:
-            result = np.append(where_allmin[0], where_allmin[0] + self.vsynclen)
-
-        return result
-
     def select_serration(self, where_min, serrations):
         selected = np.array([], np.int)
         for id, edge in enumerate(serrations):
@@ -177,7 +98,7 @@ class Vsync:
                     selected = np.append(selected, edge)
         return selected
 
-    def vsync_arbitrage2(self, where_allmin, serrations, datalen):
+    def vsync_arbitrage(self, where_allmin, serrations, datalen):
         result = np.array([], np.int)
         if len(where_allmin) > 0:
             valid_serrations = self.select_serration(where_allmin, serrations)
@@ -217,17 +138,19 @@ class Vsync:
                          min(int(sync_pulses[where_min_diff[-1:][0]] + self.eq_pulselen / 2), len(data) - 1)
             data_s, data_e = eq_s + start, eq_e + start
             serration = data[data_s:data_e]
-            self.levels = self.get_serration_sync_levels(serration)
-            #marker = np.ones(len(serration)) * self.levels[1]
-            #dualplot_scope(serration, marker, title='serration')
-            return True, data_s, data_e
+            if 17e3 < len(serration) < 23e3:
+                self.push_levels(self.get_serration_sync_levels(serration))
+                #sync, blank = self.get_levels()
+                #marker = np.ones(len(serration)) * blank
+                #dualplot_scope(serration, marker, title='VBI EQ serration + measured blanking level')
+                return True, data_s, data_e
+            else:
+                return False, None, None
         else:
-            if self.levels == (None, None):
-                print('VBI EQ pulses search failed', self.levels)
+            if not self.has_levels():
+                print('VBI EQ pulses search failed')
             return False, None, None
 
-
-    #from where_min search for the min level and repeat
     def vsync_envelope(self, data, padding=1024):  # 0x10000
         padded = np.append(data[:padding], data)
         forward = self.vsync_envelope_double(padded)
@@ -235,14 +158,13 @@ class Vsync:
         where_allmin = argrelextrema(diff, np.less)[0]
         if len(where_allmin) > 0:
             serrations = self.power_ratio_search(padded)
-            where_min = self.vsync_arbitrage2(where_allmin, serrations, len(padded))
+            where_min = self.vsync_arbitrage(where_allmin, serrations, len(padded))
             if len(where_min) > 0:
-                mask = self.mutemask(where_min, len(data), self.linelen * 5)
-                dualplot_scope(data, np.clip(mask * max(data), a_max=max(data), a_min=min(data)))
-                #self.window_plot(data, where_min, window=self.linelen * 25)
+                #mask = self.mutemask(where_min, len(data), self.linelen * 5)
+                #dualplot_scope(data, np.clip(mask * max(data), a_max=max(data), a_min=min(data)))
                 for w_min in where_min:
                     self.search_eq_pulses(data, w_min)
-                return mask
+                return None
             else:
                 #dualplot_scope(forward[0], forward[1], title='unexpected')
                 return None
@@ -250,15 +172,13 @@ class Vsync:
             #dualplot_scope(forward[0], forward[1], title='unexpected')
             return None
 
-    # main
     def get_syncedgelocs(self, data):
-        mask = self.vsync_envelope(data)
-
-        if mask is not None:
-            self.sink.write(mask / 2, mask / 2)
+        self.vsync_envelope(data)
+        if self.has_levels():
+            print('levels:', len(self.levels[0]), self.get_levels())
 
         return np.array([]), np.array([]), np.array([])
 
-    # computes the internal state
+    # computes the internal levels
     def work(self, data):
         hlevels, blevels, hsampling_pos = self.get_syncedgelocs(data)
