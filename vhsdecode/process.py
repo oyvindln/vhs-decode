@@ -1795,10 +1795,13 @@ class VHSRFDecode(ldd.RFDecode):
         data_filtered = npfft.ifft(indata_fft_filt)
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
-        high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
-            (env_mean * 0.9) / env
-        )
-        indata_fft_filt += npfft.fft(high_part * self.high_boost)
+        if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
+            high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
+                (env_mean * 0.9) / env
+            )
+            indata_fft_filt += npfft.fft(high_part * self.high_boost)
+        else:
+            print('WARN: found zero on env')
 
         hilbert = npfft.ifft(indata_fft_filt * self.Filters["hilbert"])
 
