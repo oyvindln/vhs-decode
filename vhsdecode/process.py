@@ -1399,6 +1399,11 @@ class VHSRFDecode(ldd.RFDecode):
         high_boost = rf_options.get("high_boost", None)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
+        # enable extra-diff
+        self.extra_diff = (
+            rf_options.get("extra_diff", False)
+        )
+
 
         if track_phase is None:
             self.track_phase = 0
@@ -1809,15 +1814,16 @@ class VHSRFDecode(ldd.RFDecode):
             # applies the video EQ
             demod = self.video_EQ(demod)
 
-        check_value = self.iretohz(100) * 2
+        if self.extra_diff:
+            check_value = self.iretohz(100) * 2
 
-        # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
-        # replace the spikes with data from the diffed demod.
-        if np.max(demod[20:-20]) > check_value:
-            demod_b = unwrap_hilbert(
-                np.pad(np.diff(hilbert), (1, 0), mode="constant"), self.freq_hz
-            ).real
-            replace_spikes(demod, demod_b, check_value)
+            # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
+            # replace the spikes with data from the diffed demod.
+            if np.max(demod[20:-20]) > check_value:
+                demod_b = unwrap_hilbert(
+                    np.pad(np.diff(hilbert), (1, 0), mode="constant"), self.freq_hz
+                ).real
+                replace_spikes(demod, demod_b, check_value)
 
         # applies main deemphasis filter
         demod_fft = npfft.rfft(demod)

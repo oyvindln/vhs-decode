@@ -80,6 +80,15 @@ parser.add_argument(
     help="Multiplier for boost to high rf frequencies, uses default if not specified. Subject to change.",
 )
 
+parser.add_argument(
+    "-ed",
+    "--extra_diff",
+    dest="extra_diff",
+    action="store_true",
+    default=False,
+    help="Force zero cross at demod (extra diff)",
+)
+
 args = parser.parse_args()
 
 filename, outname, firstframe, req_frames = get_basics(args)
@@ -104,6 +113,7 @@ rf_options["dod_threshold_a"] = args.dod_threshold_a
 rf_options["dod_hysteresis"] = args.dod_hysteresis
 rf_options["track_phase"] = args.track_phase
 rf_options["high_boost"] = args.high_boost
+rf_options["extra_diff"] = args.extra_diff
 
 extra_options = get_extra_options(args)
 
