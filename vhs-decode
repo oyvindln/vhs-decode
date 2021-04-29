@@ -79,6 +79,14 @@ parser.add_argument(
     default=None,
     help="Multiplier for boost to high rf frequencies, uses default if not specified. Subject to change.",
 )
+parser.add_argument(
+    "-nodd",
+    "--no_diff_demod",
+    dest="disable_diff_demod",
+    action="store_true",
+    default=False,
+    help="Disable diff demod",
+)
 
 args = parser.parse_args()
 
@@ -104,6 +112,7 @@ rf_options["dod_threshold_a"] = args.dod_threshold_a
 rf_options["dod_hysteresis"] = args.dod_hysteresis
 rf_options["track_phase"] = args.track_phase
 rf_options["high_boost"] = args.high_boost
+rf_options["disable_diff_demod"] = args.disable_diff_demod
 
 extra_options = get_extra_options(args)
 
