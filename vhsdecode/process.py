@@ -1805,6 +1805,7 @@ class VHSRFDecode(ldd.RFDecode):
         # Applies RF filters
         indata_fft_filt = indata_fft * self.Filters["RFVideo"]
         data_filtered = npfft.ifft(indata_fft_filt)
+
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
