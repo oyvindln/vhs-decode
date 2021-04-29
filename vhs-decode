@@ -93,6 +93,14 @@ parser.add_argument(
     default=False,
     help="Disable diff demod",
 )
+parser.add_argument(
+    "-nodc",
+    "--no_dc_offset",
+    dest="disable_dc_offset",
+    action="store_true",
+    default=False,
+    help="Disable blanking DC offset compensation",
+)
 
 args = parser.parse_args()
 
@@ -119,6 +127,7 @@ rf_options["dod_hysteresis"] = args.dod_hysteresis
 rf_options["track_phase"] = args.track_phase
 rf_options["high_boost"] = args.high_boost
 rf_options["disable_diff_demod"] = args.disable_diff_demod
+rf_options["disable_dc_offset"] = args.disable_dc_offset
 
 extra_options = get_extra_options(args)
 
