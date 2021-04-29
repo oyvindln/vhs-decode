@@ -81,7 +81,7 @@ def find_sync_levels(field):
         #        ax1.plot(hilbert, color='#FF0000')
         # ax1.plot(data, color="#00FF00")
         ax1.axhline(sync_min, color="#0000FF")
-#        ax1.axhline(blank_level, color="#000000")
+        #        ax1.axhline(blank_level, color="#000000")
         ax1.axvline(search_start, color="#FF0000")
         ax1.axvline(next_cross_raw, color="#00FF00")
         ax1.axvline(next_cross, color="#0000FF")

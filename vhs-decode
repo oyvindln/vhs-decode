@@ -8,8 +8,14 @@ import lddecode.utils as lddu
 from lddecode.utils_logging import init_logging
 from vhsdecode.process import VHSDecode
 import vhsdecode.formats as f
-from vhsdecode.cmdcommons import common_parser, select_sample_freq, select_system, get_basics, get_rf_options, \
-    get_extra_options
+from vhsdecode.cmdcommons import (
+    common_parser,
+    select_sample_freq,
+    select_system,
+    get_basics,
+    get_rf_options,
+    get_extra_options,
+)
 
 parser = common_parser("Extracts video from raw VHS rf captures")
 parser.add_argument(
