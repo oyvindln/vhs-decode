@@ -139,6 +139,14 @@ def common_parser(meta_title):
         default=10.0,
         help="Q factor for notch filter",
     )
+    parser.add_argument(
+        "-nodc",
+        "--no_dc_offset",
+        dest="disable_dc_offset",
+        action="store_true",
+        default=False,
+        help="Disable blanking DC offset compensation",
+    )
     return parser
 
 
