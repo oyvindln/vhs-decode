@@ -80,7 +80,7 @@ bool DataConverter::openInputFile(void)
         inputFileHandle = new QFile(inputFileName);
         if (!inputFileHandle->open(QIODevice::ReadOnly)) {
             // Failed to open source sample file
-            qDebug() << "Could not open " << inputFileName << "as input file";
+            qDebug() << "Could not open" << inputFileName << "as input file";
             return false;
         }
         qDebug() << "DataConverter::openInputFile(): Input file is" << inputFileName << "and is" << inputFileHandle->size() << "bytes in length";
@@ -122,7 +122,7 @@ bool DataConverter::openOutputFile(void)
         outputFileHandle = new QFile(outputFileName);
         if (!outputFileHandle->open(QIODevice::WriteOnly)) {
             // Failed to open output file
-            qDebug() << "DataConverter::openOutputFile(): Could not open " << outputFileName << "as output file";
+            qDebug() << "DataConverter::openOutputFile(): Could not open" << outputFileName << "as output file";
             return false;
         }
         qDebug() << "DataConverter::openOutputFile(): Output file is" << outputFileName;
