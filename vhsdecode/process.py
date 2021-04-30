@@ -178,13 +178,6 @@ def getpulses_override(field):
         synclevel = np.median(vsync_means)
         field_state.setSyncLevel(synclevel)
         field_state.setLocs(vsync_locs)
-        synclevel = field_state.getSyncLevel()
-        if synclevel is None:
-            return None
-
-    synclevel = np.median(vsync_means)
-    field_state.setSyncLevel(synclevel)
-    field_state.setLocs(vsync_locs)
 
     if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
         # sync level is close enough to use
@@ -229,16 +222,6 @@ def getpulses_override(field):
             return None
     else:
         field_state.setLevels(blacklevel, synclevel)
-
-    if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
-        #utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
-        bl, sl = field_state.getLevels()
-        if bl is not None and sl is not None:
-            blacklevel, synclevel = bl, sl
-        else:
-            return None
-
-    field_state.setLevels(blacklevel, synclevel)
 
     pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
     pulse_hz_max = (blacklevel + synclevel) / 2
