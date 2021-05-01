@@ -398,28 +398,30 @@ def process_chroma(field, track_phase, disable_deemph=False):
 
 def decode_chroma_vhs(field):
     """Do track detection if needed and upconvert the chroma signal"""
+    rf = field.rf
+
     # Use field number based on raw data position
     # This may not be 100% accurate, so we may want to add some more logic to
     # make sure we re-check the phase occasionally.
-    raw_loc = field.rf.decoder.readloc / field.rf.decoder.bytes_per_field
+    raw_loc = rf.decoder.readloc / rf.decoder.bytes_per_field
 
-    check_increment_field_no(field.rf)
+    check_increment_field_no(rf)
 
     # If we moved significantly more than the length of one field, re-check phase
     # as we may have skipped fields.
-    if raw_loc - field.rf.last_raw_loc > 2.0:
-        if field.rf.detect_track:
-            ldd.logger.info("Possibly skipped track, re-checking phase..")
-            field.rf.needs_detect
+    if raw_loc - rf.last_raw_loc > 2.0:
+        if rf.detect_track:
+            ldd.logger.info("Possibly skipped a track, re-checking phase..")
+            rf.needs_detect = True
 
-    if field.rf.detect_track and field.rf.needs_detect:
-        field.rf.track_phase = field.try_detect_track()
-        field.rf.needs_detect = False
+    if rf.detect_track and rf.needs_detect or rf.recheck_phase:
+        rf.track_phase = field.try_detect_track()
+        rf.needs_detect = False
 
-    uphet = process_chroma(field, field.rf.track_phase)
+    uphet = process_chroma(field, rf.track_phase)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
-    field.rf.last_raw_loc = raw_loc
+    rf.last_raw_loc = raw_loc
     return chroma_to_u16(uphet)
 
 
@@ -1323,68 +1325,6 @@ class VHSDecode(ldd.LDdecode):
             return None
 
 
-class VTRDemodCache(ldd.DemodCache):
-    def __init__(
-        self,
-        rf,
-        infile,
-        loader,
-        cachesize=256,
-        num_worker_threads=1,
-        MTF_tolerance=0.05,
-    ):
-
-        super(VTRDemodCache, self).__init__(
-            rf,
-            infile,
-            loader,
-            cachesize,
-            num_worker_threads,
-            MTF_tolerance,
-        )
-
-    def worker(self, pipein):
-        while True:
-            ispiped = False
-            if pipein.poll():
-                item = pipein.recv()
-                ispiped = True
-            else:
-                item = self.q_in.get()
-
-            if item is None or item[0] == "END":
-                return
-
-            if item[0] == "DEMOD":
-                blocknum, block, target_MTF = item[1:]
-
-                output = {}
-
-                if "fft" not in block:
-                    output["fft"] = npfft.fft(block["rawinput"])
-                    fftdata = output["fft"]
-                else:
-                    fftdata = block["fft"]
-
-                if (
-                    "demod" not in block
-                    or np.abs(block["MTF"] - target_MTF) > self.MTF_tolerance
-                ):
-                    # RF decode
-                    output["demod"] = self.rf.demodblock(
-                        fftdata=fftdata, mtf_level=target_MTF, cut=True
-                    )
-
-                    output["MTF"] = target_MTF
-                    self.q_out.put((blocknum, output))
-
-            elif item[0] == "NEWPARAMS":
-                self.apply_newparams(item[1])
-
-            if not ispiped:
-                self.q_in.task_done()
-
-
 class VHSRFDecode(ldd.RFDecode):
     def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
 
@@ -1410,6 +1350,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
         self.chroma_trap = rf_options.get("chroma_trap", False)
         track_phase = rf_options.get("track_phase", None)
+        self.recheck_phase = rf_options.get("recheck_phase", False)
         high_boost = rf_options.get("high_boost", None)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
