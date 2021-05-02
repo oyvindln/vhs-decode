@@ -6,6 +6,7 @@ CXADC_FREQ_HIGH = 3150.0 / 88.0  # 35.795454545
 CXADC_TENBIT_FREQ = (8 * 315.0) / 88.0 / 2.0  # 14.318181818
 CXADC_TENBIT_FREQ_HIGH = 3150.0 / 88.0 / 2.0  # 17.897727272
 
+
 def common_parser(meta_title):
     parser = argparse.ArgumentParser(description=meta_title)
     parser.add_argument("infile", metavar="infile", type=str, help="source file")
@@ -39,10 +40,18 @@ def common_parser(meta_title):
         "-p", "--pal", dest="pal", action="store_true", help="source is in PAL format"
     )
     parser.add_argument(
-        "-n", "--ntsc", dest="ntsc", action="store_true", help="source is in NTSC format"
+        "-n",
+        "--ntsc",
+        dest="ntsc",
+        action="store_true",
+        help="source is in NTSC format",
     )
     parser.add_argument(
-        "-pm", "--palm", dest="palm", action="store_true", help="source is in PAL-M format"
+        "-pm",
+        "--palm",
+        dest="palm",
+        action="store_true",
+        help="source is in PAL-M format",
     )
     parser.add_argument(
         "-t",
@@ -130,7 +139,16 @@ def common_parser(meta_title):
         default=10.0,
         help="Q factor for notch filter",
     )
+    parser.add_argument(
+        "-nodc",
+        "--no_dc_offset",
+        dest="disable_dc_offset",
+        action="store_true",
+        default=False,
+        help="Disable blanking DC offset compensation",
+    )
     return parser
+
 
 def select_sample_freq(args):
     sample_freq = (
@@ -145,6 +163,7 @@ def select_sample_freq(args):
         else args.inputfreq
     )
     return sample_freq
+
 
 def select_system(args):
     if args.pal:
@@ -168,8 +187,10 @@ def select_system(args):
 
     return system
 
+
 def get_basics(args):
     return args.infile, args.outfile, args.start, args.length
+
 
 def get_rf_options(args):
     rf_options = {
@@ -179,6 +200,7 @@ def get_rf_options(args):
         "notch_q": args.notch_q,
     }
     return rf_options
+
 
 def get_extra_options(args):
     extra_options = {

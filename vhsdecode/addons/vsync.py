@@ -16,7 +16,7 @@ class Vsync:
         self.SysParams = sysparams
         self.fv = self.SysParams["FPS"] * 2
         self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
-        self.venv_limit = 3
+        self.venv_limit = 5
         self.serration_limit = 3
         iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
         self.vsyncEnvFilter = FiltersClass(iir_vsync_env[0], iir_vsync_env[1], self.samp_rate)
@@ -38,6 +38,7 @@ class Vsync:
         self.pid = getpid()
         self.levels = list(), list() # sync / blanking
         self.level_average = 30
+        self.sync_level_bias = np.array([])
 
     def get_levels(self):
         sync, sync_list = moving_average(self.levels[0], window=self.level_average)
@@ -76,7 +77,7 @@ class Vsync:
         # end of forward + beginning of reverse
         result = np.append(reverse[0][:half], forward[0][half:]), np.append(reverse[1][:half], forward[1][half:])
         #dualplot_scope(forward[0], forward[1])
-        #dualplot_scope(result[0], result[1])
+        #dualplot_scope(result[0], result[1], title="VBI envelope")
         return result
 
     def chainfiltfilt(self, data, filters):
@@ -152,18 +153,30 @@ class Vsync:
             return False, None, None
 
     def vsync_envelope(self, data, padding=1024):  # 0x10000
-        padded = np.append(data[:padding], data)
+        padded = np.append(np.flip(data[:padding]), data)
         forward = self.vsync_envelope_double(padded)
+        self.sync_level_bias = forward[1][padding:]
         diff = np.add(forward[0][padding:], forward[1][padding:])
         where_allmin = argrelextrema(diff, np.less)[0]
         if len(where_allmin) > 0:
             serrations = self.power_ratio_search(padded)
             where_min = self.vsync_arbitrage(where_allmin, serrations, len(padded))
+            serration_locs = list()
             if len(where_min) > 0:
-                #mask = self.mutemask(where_min, len(data), self.linelen * 5)
-                #dualplot_scope(data, np.clip(mask * max(data), a_max=max(data), a_min=min(data)))
+                mask_len = self.linelen * 5
                 for w_min in where_min:
-                    self.search_eq_pulses(data, w_min)
+                    state, serr_loc, serr_len = self.search_eq_pulses(data, w_min)
+                    if state:
+                        serration_locs.append(serr_loc)
+                        mask_len = serr_len - serr_loc
+
+                #data_copy = data - self.sync_level_bias
+                #if len(serration_locs) > 0:
+                    # mask = self.mutemask(np.array(serration_locs), len(data_copy), mask_len)
+                    # dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")
+                #else:
+                    # plot_scope(data_copy, title="Missing serration measure")
+                    #print('A serration measure is missing')
                 return None
             else:
                 #dualplot_scope(forward[0], forward[1], title='unexpected')
