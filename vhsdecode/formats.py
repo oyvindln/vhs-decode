@@ -222,7 +222,7 @@ SysParams_NTSC_VHS["burst_abs_ref"] = 1750
 
 # PAL-M sysparams override (From JVC Video technical guide)
 SysParams_MPAL_VHS = copy.deepcopy(SysParams_NTSC_VHS)
-SysParams_MPAL_VHS['fsc_mhz'] = 3.575611
+SysParams_MPAL_VHS["fsc_mhz"] = 3.575611
 
 # PAL and NTSC "regular-band" use the same frequencies, but
 # not sure if PAL sync being -43 and ntsc being -40 makes

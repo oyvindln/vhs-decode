@@ -48,10 +48,10 @@ def auto_chop(data):
     return data[first:last], first, last
 
 
-def fft_plot(data, samp_rate, f_limit, title='FFT'):
+def fft_plot(data, samp_rate, f_limit, title="FFT"):
     fft = np.fft.fft(data)
     power = np.abs(fft) ** 2
-    sample_freq = np.fft.fftfreq(len(data), d=1.0/samp_rate)
+    sample_freq = np.fft.fftfreq(len(data), d=1.0 / samp_rate)
     fig, ax1 = plt.subplots()
     plt.xlim(0, f_limit)
     plt.plot(sample_freq, power)
@@ -59,41 +59,44 @@ def fft_plot(data, samp_rate, f_limit, title='FFT'):
 
 
 # simple scope plot
-def plot_scope(data, title='plot', ylabel='', xlabel='t (samples)'):
+def plot_scope(data, title="plot", ylabel="", xlabel="t (samples)"):
     fig, ax1 = plt.subplots()
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
-    plt.grid(which='both', axis='both')
+    plt.grid(which="both", axis="both")
     ax2 = ax1.twinx()
     ax1.plot(data, color="#FF0000")
     plt.show()
 
 
 # simple scope plot
-def dualplot_scope(ch0, ch1, title='dual plot', xlabel='t (samples)', a_label='ch0', b_label='ch1'):
+def dualplot_scope(
+    ch0, ch1, title="dual plot", xlabel="t (samples)", a_label="ch0", b_label="ch1"
+):
     fig, ax1 = plt.subplots()
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(a_label)
     ax1.plot(ch0, color="r")
     _ = ax1.twinx()
-    plt.ylabel(b_label, color='b')
+    plt.ylabel(b_label, color="b")
     ax1.plot(ch1, color="b")
     plt.show()
 
 
 def plot_image(data):
-    plt.imshow(data,  cmap="hot", clim=(0, 1.0))
+    plt.imshow(data, cmap="hot", clim=(0, 1.0))
     plt.show()
+
 
 # pads data with filler is len(data) < len(filler), otherwise truncates it
 def pad_or_truncate(data, filler):
     if len(filler) > len(data):
         err = len(filler) - len(data)
-        data = np.append(data, filler[len(data) - err: len(data)])
+        data = np.append(data, filler[len(data) - err : len(data)])
     else:
-        data = data[len(data) - len(filler):]
+        data = data[len(data) - len(filler) :]
 
     return data
 
@@ -110,33 +113,31 @@ def moving_average(data_list, window=1024):
 def design_filter(samp_rate, passband, stopband, order_limit=20):
     max_loss_passband = 3  # The maximum loss allowed in the passband
     min_loss_stopband = 30  # The minimum loss allowed in the stopband
-    order, normal_cutoff = signal.buttord(passband, stopband, max_loss_passband,
-                                          min_loss_stopband, samp_rate)
+    order, normal_cutoff = signal.buttord(
+        passband, stopband, max_loss_passband, min_loss_stopband, samp_rate
+    )
     if order > order_limit:
-        print('WARN: Limiting order of the filter from %d to %d' % (order, order_limit))
+        print("WARN: Limiting order of the filter from %d to %d" % (order, order_limit))
         order = order_limit
     return order, normal_cutoff
 
 
 def firdes_lowpass(samp_rate, cutoff, transition_width, order_limit=20):
     passband, stopband = cutoff, cutoff + transition_width
-    order, normal_cutoff =\
-        design_filter(samp_rate, passband, stopband, order_limit)
+    order, normal_cutoff = design_filter(samp_rate, passband, stopband, order_limit)
     return signal.butter(order, normal_cutoff, btype="lowpass", fs=samp_rate)
 
 
 def firdes_highpass(samp_rate, cutoff, transition_width, order_limit=20):
     passband, stopband = cutoff, cutoff + transition_width
-    order, normal_cutoff =\
-        design_filter(samp_rate, passband, stopband, order_limit)
+    order, normal_cutoff = design_filter(samp_rate, passband, stopband, order_limit)
     return signal.butter(order, normal_cutoff, btype="highpass", fs=samp_rate)
 
 
 def firdes_bandpass(samp_rate, f0, t0, f1, t1, order_limit=20):
-    assert f0 < f1, 'First frequency specified is higher than the second one, swap them'
+    assert f0 < f1, "First frequency specified is higher than the second one, swap them"
     passband, stopband = (f1, f1 + t1), (f0, f0 - t0)
-    order, normal_cutoff =\
-        design_filter(samp_rate, passband, stopband, order_limit)
+    order, normal_cutoff = design_filter(samp_rate, passband, stopband, order_limit)
     return signal.butter(order, normal_cutoff, btype="bandpass", fs=samp_rate)
 
 
@@ -146,19 +147,21 @@ def filter_plot(iir_b, iir_a, samp_rate, type, title):
     from math import log10
 
     nyq = samp_rate / 2
-    w, h = signal.freqz(iir_b, iir_a, worN=np.logspace(0, log10(nyq), 10000), fs=samp_rate)
+    w, h = signal.freqz(
+        iir_b, iir_a, worN=np.logspace(0, log10(nyq), 10000), fs=samp_rate
+    )
     fig = plt.figure()
     plt.semilogx(w, 20 * np.log10(abs(h)))
     ax1 = fig.add_subplot()
     plt.ylim([-42, 3])
-    plt.title('Butterworth IIR %s fit to\n%s' % (type, title))
-    plt.xlabel('Frequency [Hz]')
-    plt.ylabel('Amplitude [dB]')
-    plt.grid(which='both', axis='both')
+    plt.title("Butterworth IIR %s fit to\n%s" % (type, title))
+    plt.xlabel("Frequency [Hz]")
+    plt.ylabel("Amplitude [dB]")
+    plt.grid(which="both", axis="both")
     ax2 = ax1.twinx()
     angles = np.unwrap(np.angle(h))
-    plt.plot(w, angles, 'g')
-    plt.ylabel('Angle [degrees]', color='g')
+    plt.plot(w, angles, "g")
+    plt.ylabel("Angle [degrees]", color="g")
     plt.show()
 
 

@@ -5,7 +5,8 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018 Chad Page
     Copyright (C) 2018-2019 Simon Inns
-    Copyright (C) 2020 Adam Sampson
+    Copyright (C) 2020-2021 Adam Sampson
+    Copyright (C) 2021 Phillip Blucas
 
     This file is part of ld-decode-tools.
 
@@ -900,8 +901,8 @@ OutputFrame Comb::FrameBuffer::yiqToYUVFrame()
 
         // Fill the output line with YCbCr values
         ycbcr.convertLine(&yiqBuffer[lineNumber][videoParameters.activeVideoStart],
-                        &yiqBuffer[lineNumber][videoParameters.activeVideoEnd],
-                        &linePointerY[o], &linePointerCb[o], &linePointerCr[o]);
+                          &yiqBuffer[lineNumber][videoParameters.activeVideoEnd],
+                          &linePointerY[o], &linePointerCb[o], &linePointerCr[o]);
     }
 
     return outputFrame;

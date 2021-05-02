@@ -130,7 +130,6 @@ INCLUDEPATH += "/usr/local/include"
 }
 
 # Normal open-source OS goodness
-INCLUDEPATH += "/usr/local/include/opencv"
 LIBS += -L"/usr/local/lib"
 LIBS += -lfftw3
 

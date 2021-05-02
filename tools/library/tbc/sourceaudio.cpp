@@ -44,7 +44,7 @@ bool SourceAudio::open(QFileInfo inputFileInfo)
     inputAudioFile.setFileName(inputAudioFileInfo.filePath());
     if (!inputAudioFile.open(QIODevice::ReadOnly)) {
         // Failed to open named input file
-        qDebug() << "Could not open " << inputAudioFileInfo.filePath() << "as source audio input file";
+        qDebug() << "Could not open" << inputAudioFileInfo.filePath() << "as source audio input file";
         qFatal("Could not open PCM audio file!");
         return false;
     }
@@ -52,7 +52,7 @@ bool SourceAudio::open(QFileInfo inputFileInfo)
     // Get the length of the PCM audio file
     audioFileByteLength = inputAudioFileInfo.size();
     if (audioFileByteLength == 0) {
-        qDebug() << "Could get file size of " << inputAudioFileInfo.filePath() << "(or file was 0 bytes length)";
+        qDebug() << "Could get file size of" << inputAudioFileInfo.filePath() << "(or file was 0 bytes length)";
         qFatal("Could not get PCM audio file length!");
         return false;
     }
