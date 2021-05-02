@@ -145,7 +145,7 @@ def getpulses_override(field):
         dc_offset = field.rf.SysParams["ire0"] - blank
         # field.data["video"]["demod_05"] -= blank
         # field.data["video"]["demod_05"] += field.rf.SysParams["ire0"]
-        # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=field_levels[0], a_max=field_levels[1])
+        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
         field.data["video"]["demod"] += dc_offset
         sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
         pulse_hz_min = field.rf.iretohz(sync_ire)
