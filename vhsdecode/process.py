@@ -135,8 +135,11 @@ def getpulses_override(field):
     field.rf.Vsync.work(field.data["video"]["demod_05"])
 
     # if has levels, then compensate blanking bias
-    if field.rf.Vsync.has_levels():
-        sync, blank = field.rf.Vsync.get_levels()
+    if field.rf.Vsync.has_levels() or field_state.hasLevels():
+        if field.rf.Vsync.has_levels():
+            sync, blank = field.rf.Vsync.get_levels()
+        else:
+            blank, sync = field_state.getLevels()
 
         field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
         dc_offset = field.rf.SysParams["ire0"] - blank

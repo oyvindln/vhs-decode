@@ -47,7 +47,7 @@ class Vsync:
         return sync, blank
 
     def has_levels(self):
-        return len(self.levels[0]) > 0 and len(self.levels[1]) > 0
+        return len(self.levels[0]) > 2 and len(self.levels[1]) > 2
 
     def push_levels(self, levels):
         for ix, level in enumerate(levels):
