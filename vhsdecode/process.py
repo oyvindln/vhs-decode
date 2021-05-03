@@ -118,7 +118,7 @@ class FieldState:
         return self.locs
 
     def hasLevels(self):
-        return np.size(self.blanklevels) > 0 and np.size(self.synclevels) > 0
+        return np.size(self.blanklevels) > 3 and np.size(self.synclevels) > 3
 
 
 field_state = FieldState()
@@ -132,13 +132,24 @@ def getpulses_override(field):
 
     if field_state.hasLevels():
         blank, sync = field_state.getLevels()
-        dc_offset = field.rf.SysParams["ire0"] - blank
-        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
+
         if not field.rf.disable_dc_offset:
+            dc_offset = field.rf.SysParams["ire0"] - blank
             field.data["video"]["demod"] += dc_offset
-        sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
-        pulse_hz_min = field.rf.iretohz(sync_ire - 10)
-        pulse_hz_max = field.rf.iretohz(sync_ire / 2)
+            field.data["video"]["demod_05"] += dc_offset
+            sync, blank = sync + dc_offset, blank + dc_offset
+            # forced blank
+            # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
+
+        # regenerates the sync pulses amplitude
+        sync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+        half_sync = (sync + blank) / 2
+        where_sync = np.where(field.data["video"]["demod_05"] < half_sync)[0]
+        field.data["video"]["demod"][where_sync] = sync_hz
+        field.data["video"]["demod_05"][where_sync] = sync_hz
+        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync_hz, a_max=blank)
+        pulse_hz_min = sync_hz
+        pulse_hz_max = half_sync
     else:
         # pass one using standard levels
         # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync

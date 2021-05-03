@@ -2109,8 +2109,8 @@ class Field:
 
         self.rawpulses = self.getpulses()
         if self.rawpulses is None or len(self.rawpulses) == 0:
-            logger.error("Unable to find any sync pulses, jumping one second")
-            return None, None, int(self.rf.freq_hz)
+            logger.error("Unable to find any sync pulses, jumping 100 ms")
+            return None, None, int(self.rf.freq_hz/10)
 
         self.validpulses = validpulses = self.refinepulses()
 
