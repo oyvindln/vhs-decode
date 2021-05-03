@@ -71,6 +71,13 @@ parser.add_argument(
     help="If set to 0 or 1, force use of video track phase.",
 )
 parser.add_argument(
+    "--recheck_phase",
+    dest="recheck_phase",
+    action="store_true",
+    default=False,
+    help="Re-check phase on every field.",
+)
+parser.add_argument(
     "-U",
     "--u-matic",
     dest="umatic",
@@ -118,6 +125,7 @@ rf_options["dod_threshold_p"] = dod_threshold_p
 rf_options["dod_threshold_a"] = args.dod_threshold_a
 rf_options["dod_hysteresis"] = args.dod_hysteresis
 rf_options["track_phase"] = args.track_phase
+rf_options["recheck_phase"] = args.recheck_phase
 rf_options["high_boost"] = args.high_boost
 rf_options["disable_diff_demod"] = args.disable_diff_demod
 rf_options["disable_dc_offset"] = args.disable_dc_offset
