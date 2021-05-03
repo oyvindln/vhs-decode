@@ -14,6 +14,8 @@ from vhsdecode.utils import get_line
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
+# from vhsdecode.addons.resync import DCrestore
+from vhsdecode.addons.vsync import Vsync
 
 from numba import njit
 
@@ -130,8 +132,15 @@ def getpulses_override(field):
     NOTE: TEMPORARY override until an override for the value itself is added upstream.
     """
 
-    if field_state.hasLevels():
-        blank, sync = field_state.getLevels()
+    # measures the serration levels if possible
+    field.rf.Vsync.work(field.data["video"]["demod_05"])
+
+    # if has levels, then compensate blanking bias
+    if field.rf.Vsync.has_levels() or field_state.hasLevels():
+        if field.rf.Vsync.has_levels():
+            sync, blank = field.rf.Vsync.get_levels()
+        else:
+            blank, sync = field_state.getLevels()
 
         if not field.rf.disable_dc_offset:
             dc_offset = field.rf.SysParams["ire0"] - blank
@@ -141,15 +150,11 @@ def getpulses_override(field):
             # forced blank
             # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
-        # regenerates the sync pulses amplitude
-        sync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-        half_sync = (sync + blank) / 2
-        where_sync = np.where(field.data["video"]["demod_05"] < half_sync)[0]
-        field.data["video"]["demod"][where_sync] = sync_hz
-        field.data["video"]["demod_05"][where_sync] = sync_hz
-        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync_hz, a_max=blank)
-        pulse_hz_min = sync_hz
-        pulse_hz_max = half_sync
+        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
+        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=np.max(field.data["video"]["demod"]))
+        sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+        pulse_hz_min = field.rf.iretohz(sync_ire)
+        pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
     else:
         # pass one using standard levels
         # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
@@ -1699,6 +1704,9 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        self.Vsync = Vsync(self.freq_hz, self.SysParams)
+        # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
+
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
