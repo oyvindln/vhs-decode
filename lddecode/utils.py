@@ -606,7 +606,11 @@ def calczc_do(data, _start_offset, target, edge=0, count=10):
     a = data[x - 1] - target
     b = data[x] - target
 
-    y = -a / (-a + b)
+    if b - a != 0:
+        y = -a / (-a + b)
+    else:
+        print('RuntimeWarning: Div by zero prevented at lddecode/utils.calczc_do()', a, b)
+        y = 0
 
     return x - 1 + y
 
