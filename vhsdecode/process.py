@@ -141,12 +141,16 @@ def getpulses_override(field):
         else:
             blank, sync = field_state.getLevels()
 
+        if not field.rf.disable_dc_offset:
+            dc_offset = field.rf.SysParams["ire0"] - blank
+            field.data["video"]["demod"] += dc_offset
+            field.data["video"]["demod_05"] += dc_offset
+            sync, blank = sync + dc_offset, blank + dc_offset
+
         field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
-        dc_offset = field.rf.SysParams["ire0"] - blank
-        # field.data["video"]["demod_05"] -= blank
-        # field.data["video"]["demod_05"] += field.rf.SysParams["ire0"]
-        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
-        field.data["video"]["demod"] += dc_offset
+        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=np.max(field.data["video"]["demod"]))
+        # forced blank
+        # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
         sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
         pulse_hz_min = field.rf.iretohz(sync_ire)
         pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)

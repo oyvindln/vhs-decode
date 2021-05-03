@@ -39,6 +39,7 @@ class Vsync:
         self.levels = list(), list() # sync / blanking
         self.level_average = 30
         self.sync_level_bias = np.array([])
+        self.fieldcount = 0
 
     def get_levels(self):
         sync, sync_list = moving_average(self.levels[0], window=self.level_average)
@@ -148,7 +149,7 @@ class Vsync:
             else:
                 return False, None, None
         else:
-            if not self.has_levels():
+            if not self.has_levels() and self.fieldcount % 10 == 0:
                 print('VBI EQ pulses search failed')
             return False, None, None
 
@@ -195,3 +196,4 @@ class Vsync:
     # computes the internal levels
     def work(self, data):
         hlevels, blevels, hsampling_pos = self.get_syncedgelocs(data)
+        self.fieldcount += 1
