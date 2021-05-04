@@ -89,6 +89,7 @@ class FieldState:
         self.synclevels = np.array([])
         self.locs = None
         self.field_average = 30
+        self.min_watermark = 3
 
     def setSyncLevel(self, level):
         self.synclevels = np.append(self.synclevels, level)
@@ -118,7 +119,7 @@ class FieldState:
         return self.locs
 
     def hasLevels(self):
-        return np.size(self.blanklevels) > 3 and np.size(self.synclevels) > 3
+        return np.size(self.blanklevels) > self.min_watermark and np.size(self.synclevels) > self.min_watermark
 
 
 field_state = FieldState()
@@ -141,15 +142,12 @@ def getpulses_override(field):
             # forced blank
             # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
-        # regenerates the sync pulses amplitude
-        sync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-        half_sync = (sync + blank) / 2
-        where_sync = np.where(field.data["video"]["demod_05"] < half_sync)[0]
-        field.data["video"]["demod"][where_sync] = sync_hz
-        field.data["video"]["demod_05"][where_sync] = sync_hz
-        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync_hz, a_max=blank)
-        pulse_hz_min = sync_hz
-        pulse_hz_max = half_sync
+        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
+        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=np.max(field.data["video"]["demod"]))
+        sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+        pulse_hz_min = field.rf.iretohz(sync_ire)
+        pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
+
     else:
         # pass one using standard levels
         # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
