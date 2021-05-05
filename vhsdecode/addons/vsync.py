@@ -36,10 +36,11 @@ class Vsync:
         self.vsynclen = round(t_to_samples(self.samp_rate, self.fv))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
         self.pid = getpid()
-        self.levels = list(), list() # sync / blanking
+        self.levels = list(), list()  # sync, blanking
         self.level_average = 30
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
+        self.min_watermark = 2
 
     def get_levels(self):
         sync, sync_list = moving_average(self.levels[0], window=self.level_average)
@@ -48,7 +49,7 @@ class Vsync:
         return sync, blank
 
     def has_levels(self):
-        return len(self.levels[0]) > 2 and len(self.levels[1]) > 2
+        return len(self.levels[0]) > self.min_watermark and len(self.levels[1]) > self.min_watermark
 
     def push_levels(self, levels):
         for ix, level in enumerate(levels):
@@ -114,7 +115,6 @@ class Vsync:
                 result = np.append(where_allmin[0], max(where_allmin[0] - self.vsynclen, 0))
         else:
             result = None
-
 
         return result
 
@@ -186,15 +186,28 @@ class Vsync:
             #dualplot_scope(forward[0], forward[1], title='unexpected')
             return None
 
-    def get_syncedgelocs(self, data):
+    def work(self, data):
         self.vsync_envelope(data)
         if self.has_levels():
             print('levels:', len(self.levels[0]), self.get_levels())
 
-        return np.array([]), np.array([]), np.array([])
-
-    # computes the internal levels
-    def work(self, data):
-        hlevels, blevels, hsampling_pos = self.get_syncedgelocs(data)
         self.fieldcount += 1
+
+    # safe clips the bottom of the sync pulses, but not the picture area
+    def safe_sync_clip(self, sync_ref, data):
+        if self.has_levels():
+            sync, blank = self.get_levels()
+            mid_sync = (sync + blank) / 2
+            where_all_picture = np.where(sync_ref > mid_sync)[0]
+            locs_len = np.diff(where_all_picture)
+            min_synclen = self.eq_pulselen * 3 / 4
+            max_synclen = self.eq_pulselen * 3
+            is_sync = np.bitwise_and(locs_len > min_synclen, locs_len < max_synclen)
+            where_all_syncs = np.where(is_sync)[0]
+            clip_from = where_all_picture[where_all_syncs]
+            clip_len = locs_len[where_all_syncs]
+            for ix, begin in enumerate(clip_from):
+                data[begin:begin + clip_len[ix]] = sync
+
+        return data
 

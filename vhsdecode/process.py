@@ -133,7 +133,10 @@ def getpulses_override(field):
     """
 
     # measures the serration levels if possible
-    field.rf.Vsync.work(field.data["video"]["demod_05"])
+    sync_refence = field.data["video"]["demod_05"]
+    field.rf.Vsync.work(sync_refence)
+    # safe clips the bottom of the sync pulses but leaves picture area unchanged
+    demod_data = field.rf.Vsync.safe_sync_clip(sync_refence, field.data["video"]["demod"])
 
     # if has levels, then compensate blanking bias
     if field.rf.Vsync.has_levels() or field_state.hasLevels():
@@ -144,14 +147,14 @@ def getpulses_override(field):
 
         if not field.rf.disable_dc_offset:
             dc_offset = field.rf.SysParams["ire0"] - blank
-            field.data["video"]["demod"] += dc_offset
-            field.data["video"]["demod_05"] += dc_offset
+            sync_refence += dc_offset
+            demod_data += dc_offset
             sync, blank = sync + dc_offset, blank + dc_offset
             # forced blank
             # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
-        field.data["video"]["demod_05"] = np.clip(field.data["video"]["demod_05"], a_min=sync, a_max=blank)
-        field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=np.max(field.data["video"]["demod"]))
+        field.data["video"]["demod_05"] = np.clip(sync_refence, a_min=sync, a_max=blank)
+        field.data["video"]["demod"] = demod_data
         sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
         pulse_hz_min = field.rf.iretohz(sync_ire)
         pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
