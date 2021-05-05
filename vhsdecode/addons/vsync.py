@@ -134,12 +134,18 @@ class Vsync:
         sync_pulses = zero_cross_det(zero_block)
         diff_sync = np.diff(sync_pulses)
 
-        where_min_diff = np.where(np.logical_and(self.eq_pulselen * 0.2 < diff_sync, diff_sync <= self.eq_pulselen))[0]
-        if 9 <= len(where_min_diff) <= 12:
+        where_min_diff = np.where(
+            np.logical_and(self.eq_pulselen * 0.2 < diff_sync,
+                           diff_sync < self.eq_pulselen * 5/4)
+        )[0]
+
+        if len(where_min_diff):
             eq_s, eq_e = sync_pulses[where_min_diff[0]], \
                          min(int(sync_pulses[where_min_diff[-1:][0]] + self.eq_pulselen / 2), len(data) - 1)
             data_s, data_e = eq_s + start, eq_e + start
             serration = data[data_s:data_e]
+
+            # validates it by time length, range must be calculated
             if 17e3 < len(serration) < 23e3:
                 self.push_levels(self.get_serration_sync_levels(serration))
                 #sync, blank = self.get_levels()
@@ -153,11 +159,14 @@ class Vsync:
                 print('VBI EQ pulses search failed')
             return False, None, None
 
+    def remove_bias(self, data):
+        return data - self.sync_level_bias
+
     def vsync_envelope(self, data, padding=1024):  # 0x10000
         padded = np.append(np.flip(data[:padding]), data)
         forward = self.vsync_envelope_double(padded)
         self.sync_level_bias = forward[1][padding:]
-        diff = np.add(forward[0][padding:], forward[1][padding:])
+        diff = np.add(forward[0][padding:], -self.sync_level_bias)
         where_allmin = argrelextrema(diff, np.less)[0]
         if len(where_allmin) > 0:
             serrations = self.power_ratio_search(padded)
@@ -171,19 +180,22 @@ class Vsync:
                         serration_locs.append(serr_loc)
                         mask_len = serr_len - serr_loc
 
-                #data_copy = data - self.sync_level_bias
-                #if len(serration_locs) > 0:
-                    # mask = self.mutemask(np.array(serration_locs), len(data_copy), mask_len)
-                    # dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")
-                #else:
-                    # plot_scope(data_copy, title="Missing serration measure")
-                    #print('A serration measure is missing')
+                if False:
+                    data_copy = self.remove_bias(data)
+                    if len(serration_locs) > 0:
+                        mask = self.mutemask(np.array(serration_locs), len(data_copy), mask_len)
+                        dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")
+                    else:
+                        plot_scope(data_copy, title="Missing serration measure")
+                        print('A serration measure is missing')
                 return None
             else:
-                #dualplot_scope(forward[0], forward[1], title='unexpected')
+                # dualplot_scope(forward[0], forward[1], title='unexpected arbitrage')
+                print('Unexpected vsync arbitrage')
                 return None
         else:
-            #dualplot_scope(forward[0], forward[1], title='unexpected')
+            # dualplot_scope(forward[0], forward[1], title='unexpected, there is no minima')
+            print('Unexpected video envelope')
             return None
 
     def work(self, data):

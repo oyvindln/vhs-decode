@@ -161,9 +161,14 @@ def getpulses_override(field):
     else:
         # pass one using standard levels
         # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
+        field.data["video"]["demod_05"] = field.rf.Vsync.remove_bias(sync_refence) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+        if not field.rf.disable_dc_offset:
+            field.data["video"]["demod"] = field.rf.Vsync.remove_bias(demod_data) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+
         pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
         pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
 
+    #utils.plot_scope(field.data["video"]["demod_05"])
     pulses = lddu.findpulses(
         field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
     )
