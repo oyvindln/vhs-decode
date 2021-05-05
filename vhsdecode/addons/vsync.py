@@ -139,7 +139,7 @@ class Vsync:
                            diff_sync < self.eq_pulselen * 5/4)
         )[0]
 
-        if len(where_min_diff):
+        if 9 <= len(where_min_diff) <= 12:
             eq_s, eq_e = sync_pulses[where_min_diff[0]], \
                          min(int(sync_pulses[where_min_diff[-1:][0]] + self.eq_pulselen / 2), len(data) - 1)
             data_s, data_e = eq_s + start, eq_e + start
