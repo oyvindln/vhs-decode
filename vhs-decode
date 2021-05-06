@@ -100,7 +100,14 @@ parser.add_argument(
     default=False,
     help="Disable diff demod",
 )
-
+parser.add_argument(
+    "-noclamp",
+    "--no_clamping",
+    dest="disable_dc_offset",
+    action="store_true",
+    default=False,
+    help="Disable blanking DC offset clamping/compensation",
+)
 
 args = parser.parse_args()
 

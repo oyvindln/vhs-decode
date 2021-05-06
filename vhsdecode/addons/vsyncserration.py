@@ -188,15 +188,15 @@ class VsyncSerration:
                         dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")
                     else:
                         plot_scope(data_copy, title="Missing serration measure")
-                        ldd.logger.info('A serration measure is missing')
+                        ldd.logger.warning('A serration measure is missing')
                 return state
             else:
                 # dualplot_scope(forward[0], forward[1], title='unexpected arbitrage')
-                ldd.logger.info('WARN: Unexpected vsync arbitrage')
+                ldd.logger.warning('WARN: Unexpected vsync arbitrage')
                 return None
         else:
             # dualplot_scope(forward[0], forward[1], title='unexpected, there is no minima')
-            ldd.logger.info('WARN: Unexpected video envelope')
+            ldd.logger.warning('Unexpected video envelope')
             return None
 
     def work(self, data):

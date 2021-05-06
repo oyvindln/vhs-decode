@@ -579,9 +579,6 @@ class VHSDecodeInner(ldd.RFDecode):
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
         self.auto_sync = rf_options.get("auto_sync", False)
-        self.disable_dc_offset = (
-            rf_options.get("disable_dc_offset", False)
-        )
 
         self.hsync_tolerance = 0.8
 
