@@ -46,7 +46,7 @@ def replace_spikes(demod, demod_diffed, max_value, replace_start=4, replace_end=
 
     for i in to_fix:
         start = max(i - replace_start, 0)
-        end = min(i + replace_end, len(demod_diffed) - 1)
+        end = min(i + replace_end, len(demod_diffed) -1)
         demod[start:end] = demod_diffed[start:end]
 
     return demod
@@ -95,14 +95,14 @@ def comb_c_pal(data, line_len):
     data2 = data.copy()
     numlines = len(data) // line_len
     for line_num in range(16, numlines - 2):
-        adv2h = data2[(line_num + 2) * line_len: (line_num + 3) * line_len]
-        delayed2h = data2[(line_num - 2) * line_len: (line_num - 1) * line_len]
-        line_slice = data[line_num * line_len: (line_num + 1) * line_len]
+        adv2h = data2[(line_num + 2) * line_len : (line_num + 3) * line_len]
+        delayed2h = data2[(line_num - 2) * line_len : (line_num - 1) * line_len]
+        line_slice = data[line_num * line_len : (line_num + 1) * line_len]
         # Let the delayed signal contribute 1/4 and advanced 1/4.
         # Could probably make the filtering configurable later.
-        data[line_num * line_len: (line_num + 1) * line_len] = (
-                                                                       (line_slice) - (delayed2h) - adv2h
-                                                               ) / 3
+        data[line_num * line_len : (line_num + 1) * line_len] = (
+            (line_slice) - (delayed2h) - adv2h
+        ) / 3
     return data
 
 
@@ -115,25 +115,25 @@ def comb_c_ntsc(data, line_len):
     data2 = data.copy()
     numlines = len(data) // line_len
     for line_num in range(16, numlines - 2):
-        delayed1h = data2[(line_num - 1) * line_len: (line_num) * line_len]
-        line_slice = data[line_num * line_len: (line_num + 1) * line_len]
+        delayed1h = data2[(line_num - 1) * line_len : (line_num) * line_len]
+        line_slice = data[line_num * line_len : (line_num + 1) * line_len]
         # Let the delayed signal contribute 1/3.
         # Could probably make the filtering configurable later.
-        data[line_num * line_len: (line_num + 1) * line_len] = (
-                                                                       (line_slice * 2) - (delayed1h)
-                                                               ) / 3
+        data[line_num * line_len : (line_num + 1) * line_len] = (
+            (line_slice * 2) - (delayed1h)
+        ) / 3
     return data
 
 
 @njit(cache=True)
 def upconvert_chroma(
-        chroma,
-        lineoffset,
-        linesout,
-        outwidth,
-        chroma_heterodyne,
-        phase_rotation,
-        starting_phase,
+    chroma,
+    lineoffset,
+    linesout,
+    outwidth,
+    chroma_heterodyne,
+    phase_rotation,
+    starting_phase,
 ):
     uphet = np.zeros(len(chroma), dtype=np.double)
     if phase_rotation == 0:
@@ -175,7 +175,7 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
         linestart = (line - lineoffset) * outwidth
         lineend = linestart + outwidth
 
-        chroma[linestart + burstarea[1] + 5: lineend] *= 2
+        chroma[linestart + burstarea[1] + 5 : lineend] *= 2
 
     return chroma
 
@@ -338,8 +338,8 @@ def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
     for line_number in range(start_line, end_line, 2):
         burst_a = get_line(chroma_data, line_length, line_number)[burst_start:burst_end]
         burst_b = get_line(chroma_data, line_length, line_number + 1)[
-                  burst_start:burst_end
-                  ]
+            burst_start:burst_end
+        ]
 
         # Use the absolute of the sums to differences cancelling out.
         mean_dev = np.mean(abs(burst_a + burst_b))
@@ -351,7 +351,7 @@ def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
 
 
 def detect_burst_pal(
-        chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
+    chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
 ):
     """Decode the burst of most lines to see if we have a valid PAL color burst."""
 
@@ -369,13 +369,13 @@ def detect_burst_pal(
         line_data.append(info)
         burst_norm[linenumber] = info.burst_norm
 
-    burst_mean = np.nanmean(burst_norm[IGNORED_LINES: lines - IGNORED_LINES])
+    burst_mean = np.nanmean(burst_norm[IGNORED_LINES : lines - IGNORED_LINES])
 
     return line_data, burst_mean
 
 
 def detect_burst_pal_line(
-        chroma_data, sine, cosine, burst_area, line_length, line_number
+    chroma_data, sine, cosine, burst_area, line_length, line_number
 ):
     """Detect burst function ported from the C++ chroma decoder (palcolour.cpp)
 
@@ -460,7 +460,7 @@ def detect_burst_pal_line(
 
 @njit(cache=True)
 def detect_burst_ntsc(
-        chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
+    chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
 ):
     """Check the phase of the color burst."""
 
@@ -488,13 +488,13 @@ def detect_burst_ntsc(
 
 @njit(cache=True)
 def detect_burst_ntsc_line(
-        chroma_data, sine, cosine, burst_area, line_length, line_number
+    chroma_data, sine, cosine, burst_area, line_length, line_number
 ):
     bi = 0
     bq = 0
     # TODO:
-    sine = sine[burst_area[0]:]
-    cosine = cosine[burst_area[0]:]
+    sine = sine[burst_area[0] :]
+    cosine = cosine[burst_area[0] :]
     line = get_line(chroma_data, line_length, line_number)
     for i in range(burst_area[0], burst_area[1]):
         bi += line[i] * sine[i]
@@ -644,10 +644,10 @@ def detect_dropouts_rf(field):
     crossings_up = find_crossings_dir(env, threshold * hysteresis, False)
 
     if (
-            len(crossings_down) > 0
-            and len(crossings_up) > 0
-            and crossings_down[0] > crossings_up[0]
-            and env[0] < threshold
+        len(crossings_down) > 0
+        and len(crossings_up) > 0
+        and crossings_down[0] > crossings_up[0]
+        and env[0] < threshold
     ):
         # Handle if we start on a dropout by adding a zero at the start since we won't have any
         # down crossing for it in the data.
@@ -701,17 +701,17 @@ def dropout_errlist_to_tbc(field, errlist):
 
     for line in range(field.lineoffset, field.linecount + field.lineoffset):
         while curerr is not None and inrange(
-                curerr[0], field.linelocs[line], field.linelocs[line + 1]
+            curerr[0], field.linelocs[line], field.linelocs[line + 1]
         ):
             start_rf_linepos = curerr[0] - field.linelocs[line]
             start_linepos = start_rf_linepos / (
-                    field.linelocs[line + 1] - field.linelocs[line]
+                field.linelocs[line + 1] - field.linelocs[line]
             )
             start_linepos = int(start_linepos * field.outlinelen)
 
             end_rf_linepos = curerr[1] - field.linelocs[line]
             end_linepos = end_rf_linepos / (
-                    field.linelocs[line + 1] - field.linelocs[line]
+                field.linelocs[line + 1] - field.linelocs[line]
             )
             end_linepos = int(np.round(end_linepos * field.outlinelen))
 
@@ -1057,19 +1057,19 @@ def parent_system(system):
 # later as the ld-decode is in flux at the moment.
 class VHSDecode(ldd.LDdecode):
     def __init__(
-            self,
-            fname_in,
-            fname_out,
-            freader,
-            logger,
-            system="NTSC",
-            tape_format="VHS",
-            doDOD=True,
-            threads=1,
-            inputfreq=40,
-            level_adjust=0,
-            rf_options={},
-            extra_options={},
+        self,
+        fname_in,
+        fname_out,
+        freader,
+        logger,
+        system="NTSC",
+        tape_format="VHS",
+        doDOD=True,
+        threads=1,
+        inputfreq=40,
+        level_adjust=0,
+        rf_options={},
+        extra_options={},
     ):
         super(VHSDecode, self).__init__(
             fname_in,
@@ -1194,7 +1194,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # controls the sharpness EQ gain
         self.sharpness_level = (
-                rf_options.get("sharpness", vhs_formats.DEFAULT_SHARPNESS) / 100
+            rf_options.get("sharpness", vhs_formats.DEFAULT_SHARPNESS) / 100
         )
 
         self.dod_threshold_p = rf_options.get(
@@ -1340,10 +1340,10 @@ class VHSRFDecode(ldd.RFDecode):
                 self.freq_hz, DP["deemph_gain"], DP["deemph_mid"] - 50000
             ).get()
             self.Filters["FVideo2"] = (
-                    lddu.filtfft((db2, da2), self.blocklen) * self.Filters["Fvideo_lpf"]
+                lddu.filtfft((db2, da2), self.blocklen) * self.Filters["Fvideo_lpf"]
             )
             self.Filters["FVideo3"] = (
-                    lddu.filtfft((db3, da3), self.blocklen) * self.Filters["Fvideo_lpf"]
+                lddu.filtfft((db3, da3), self.blocklen) * self.Filters["Fvideo_lpf"]
             )
 
             fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
@@ -1608,11 +1608,11 @@ class VHSRFDecode(ldd.RFDecode):
         # on sharp transitions. Using filtfilt to avoid phase issues.
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
             high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
-                    (env_mean * 0.9) / env
+                (env_mean * 0.9) / env
             )
             indata_fft_filt += npfft.fft(high_part * self.high_boost)
         else:
-            ldd.logger.warning('RF signal is weak. Is your deck tracking properly?')
+            ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
         hilbert = npfft.ifft(indata_fft_filt * self.Filters["hilbert"])
 
@@ -1643,11 +1643,11 @@ class VHSRFDecode(ldd.RFDecode):
         demod_fft = npfft.rfft(demod)
 
         out_video = npfft.irfft(
-            demod_fft * self.Filters["FVideo"][0: (self.blocklen // 2) + 1]
+            demod_fft * self.Filters["FVideo"][0 : (self.blocklen // 2) + 1]
         ).real
 
         out_video05 = npfft.irfft(
-            demod_fft * self.Filters["FVideo05"][0: (self.blocklen // 2) + 1]
+            demod_fft * self.Filters["FVideo05"][0 : (self.blocklen // 2) + 1]
         ).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
@@ -1669,7 +1669,7 @@ class VHSRFDecode(ldd.RFDecode):
         out_chroma = np.roll(out_chroma, 10)
         # crude DC offset removal
         out_chroma = out_chroma - np.mean(
-            out_chroma[self.blockcut: -self.blockcut_end]
+            out_chroma[self.blockcut : -self.blockcut_end]
         )
 
         if False:
@@ -1707,7 +1707,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         rv["video"] = (
-            video_out[self.blockcut: -self.blockcut_end] if cut else video_out
+            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
         )
 
         return rv
