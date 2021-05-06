@@ -40,7 +40,7 @@ def chroma_to_u16(chroma):
 
 
 @njit(cache=True)
-def replace_spikes(demod, demod_diffed, max_value, replace_span=4):
+def replace_spikes(demod, demod_diffed, max_value, replace_start=4, replace_end=20):
     """Go through and replace spikes and some samples after them with data
     from the diff demod pass"""
     assert len(demod) == len(demod_diffed), "diff demod length doesn't match demod length"
@@ -48,8 +48,8 @@ def replace_spikes(demod, demod_diffed, max_value, replace_span=4):
     to_fix = np.where(demod > too_high)[0]
 
     for i in to_fix:
-        start = max(i - replace_span, 0)
-        end = min(i + replace_span, len(demod_diffed) -1)
+        start = max(i - replace_start, 0)
+        end = min(i + replace_end, len(demod_diffed) -1)
         demod[start:end] = demod_diffed[start:end]
 
     return demod
