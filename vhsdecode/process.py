@@ -90,6 +90,7 @@ class FieldState:
         self.synclevels = np.array([])
         self.locs = None
         self.field_average = 30
+        self.min_watermark = 3
 
     def setSyncLevel(self, level):
         self.synclevels = np.append(self.synclevels, level)
@@ -119,7 +120,7 @@ class FieldState:
         return self.locs
 
     def hasLevels(self):
-        return np.size(self.blanklevels) > 3 and np.size(self.synclevels) > 3
+        return np.size(self.blanklevels) > self.min_watermark and np.size(self.synclevels) > self.min_watermark
 
 
 field_state = FieldState()
