@@ -1,15 +1,18 @@
-from vhsdecode.utils import FiltersClass, firdes_lowpass, firdes_highpass, firdes_bandpass, plot_scope, dualplot_scope, filter_plot, zero_cross_det, \
-    pad_or_truncate, fft_plot, moving_average
+from vhsdecode.utils import \
+    FiltersClass, firdes_lowpass, firdes_highpass, \
+    plot_scope, dualplot_scope, zero_cross_det, \
+    moving_average
 import numpy as np
 from scipy.signal import argrelextrema
 from os import getpid
+import lddecode.core as ldd
 
 
 def t_to_samples(samp_rate, value):
     return samp_rate / value
 
 
-class Vsync:
+class VsyncSerration:
 
     def __init__(self, fs, sysparams):
         self.samp_rate = fs
@@ -155,8 +158,6 @@ class Vsync:
             else:
                 return False, None, None
         else:
-            if not self.has_levels() and self.fieldcount % 10 == 0:
-                print('VBI EQ pulses search failed')
             return False, None, None
 
     def remove_bias(self, data):
@@ -187,21 +188,24 @@ class Vsync:
                         dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")
                     else:
                         plot_scope(data_copy, title="Missing serration measure")
-                        print('A serration measure is missing')
-                return None
+                        ldd.logger.info('A serration measure is missing')
+                return state
             else:
                 # dualplot_scope(forward[0], forward[1], title='unexpected arbitrage')
-                print('Unexpected vsync arbitrage')
+                ldd.logger.info('WARN: Unexpected vsync arbitrage')
                 return None
         else:
             # dualplot_scope(forward[0], forward[1], title='unexpected, there is no minima')
-            print('Unexpected video envelope')
+            ldd.logger.info('WARN: Unexpected video envelope')
             return None
 
     def work(self, data):
         self.vsync_envelope(data)
         if self.has_levels():
-            print('levels:', len(self.levels[0]), self.get_levels())
+            ldd.logger.info('VBI serration levels %d - Sync tip: %.02f Hz, Blanking: %.02f Hz' %
+                  (len(self.levels[0]), self.get_levels()[0], self.get_levels()[1]))
+        elif self.fieldcount % 10 == 0:
+                ldd.logger.info('VBI EQ serration pulses search failed')
 
         self.fieldcount += 1
 

@@ -14,8 +14,7 @@ from vhsdecode.utils import get_line
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
-# from vhsdecode.addons.resync import DCrestore
-from vhsdecode.addons.vsync import Vsync
+from vhsdecode.addons.vsyncserration import VsyncSerration
 
 from numba import njit
 
@@ -133,27 +132,29 @@ def getpulses_override(field):
     """
 
     # measures the serration levels if possible
-    sync_refence = field.data["video"]["demod_05"]
-    field.rf.Vsync.work(sync_refence)
+    sync_reference = field.data["video"]["demod_05"]
+    field.rf.VsyncSerration.work(sync_reference)
     # safe clips the bottom of the sync pulses but leaves picture area unchanged
-    demod_data = field.rf.Vsync.safe_sync_clip(sync_refence, field.data["video"]["demod"])
+    demod_data = field.rf.VsyncSerration.safe_sync_clip(sync_reference, field.data["video"]["demod"])
 
     # if has levels, then compensate blanking bias
-    if field.rf.Vsync.has_levels() or field_state.hasLevels():
-        if field.rf.Vsync.has_levels():
-            sync, blank = field.rf.Vsync.get_levels()
+    if field.rf.VsyncSerration.has_levels() or field_state.hasLevels():
+        if field.rf.VsyncSerration.has_levels():
+            sync, blank = field.rf.VsyncSerration.get_levels()
         else:
             blank, sync = field_state.getLevels()
 
         if not field.rf.disable_dc_offset:
+            # sync_reference = field.rf.VsyncSerration.remove_bias(sync_reference) + sync
+            # demod_data = field.rf.VsyncSerration.remove_bias(demod_data) + sync
             dc_offset = field.rf.SysParams["ire0"] - blank
-            sync_refence += dc_offset
+            sync_reference += dc_offset
             demod_data += dc_offset
             sync, blank = sync + dc_offset, blank + dc_offset
             # forced blank
             # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
-        field.data["video"]["demod_05"] = np.clip(sync_refence, a_min=sync, a_max=blank)
+        field.data["video"]["demod_05"] = np.clip(sync_reference, a_min=sync, a_max=blank)
         field.data["video"]["demod"] = demod_data
         sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
         pulse_hz_min = field.rf.iretohz(sync_ire)
@@ -161,9 +162,9 @@ def getpulses_override(field):
     else:
         # pass one using standard levels
         # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-        field.data["video"]["demod_05"] = field.rf.Vsync.remove_bias(sync_refence) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+        field.data["video"]["demod_05"] = field.rf.VsyncSerration.remove_bias(sync_reference) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
         if not field.rf.disable_dc_offset:
-            field.data["video"]["demod"] = field.rf.Vsync.remove_bias(demod_data) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+            field.data["video"]["demod"] = field.rf.VsyncSerration.remove_bias(demod_data) + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
 
         pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
         pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
@@ -1712,8 +1713,7 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        self.Vsync = Vsync(self.freq_hz, self.SysParams)
-        # self.DCrestore = DCrestore(self.freq_hz, self.SysParams, self.iretohz)
+        self.VsyncSerration = VsyncSerration(self.freq_hz, self.SysParams)
 
 
     def computedelays(self, mtf_level=0):
