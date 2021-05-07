@@ -50,6 +50,7 @@ class FieldState:
 
 class Resync:
     def __init__(self, fs, sysparams):
+        self.samp_rate = fs
         self.SysParams = sysparams
         self.VsyncSerration = VsyncSerration(fs, sysparams)
         self.field_state = FieldState()
@@ -91,14 +92,18 @@ class Resync:
         else:
             # pass one using standard levels
             # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-            field.data["video"]["demod_05"] = self.VsyncSerration.remove_bias(sync_reference) + field.rf.iretohz(
-                field.rf.SysParams["vsync_ire"])
-            if not field.rf.disable_dc_offset:
+            pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+            pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
+
+            # checks if the DC offset is abnormal before correcting it
+            mean_bias = self.VsyncSerration.mean_bias()
+            if not field.rf.disable_dc_offset and not \
+                    pulse_hz_min < mean_bias < field.rf.iretohz(field.rf.SysParams["vsync_ire"]):
+                field.data["video"]["demod_05"] = self.VsyncSerration.remove_bias(sync_reference) + field.rf.iretohz(
+                    field.rf.SysParams["vsync_ire"])
                 field.data["video"]["demod"] = self.VsyncSerration.remove_bias(demod_data) + field.rf.iretohz(
                     field.rf.SysParams["vsync_ire"])
 
-            pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
-            pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
 
         # utils.plot_scope(field.data["video"]["demod_05"])
         pulses = lddu.findpulses(

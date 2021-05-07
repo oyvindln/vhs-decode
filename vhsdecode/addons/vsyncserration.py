@@ -14,7 +14,8 @@ def t_to_samples(samp_rate, value):
 
 class VsyncSerration:
 
-    def __init__(self, fs, sysparams):
+    def __init__(self, fs, sysparams, show_decoded_serration=False):
+        self.show_decoded = show_decoded_serration
         self.samp_rate = fs
         self.SysParams = sysparams
         self.fv = self.SysParams["FPS"] * 2
@@ -160,6 +161,9 @@ class VsyncSerration:
         else:
             return False, None, None
 
+    def mean_bias(self):
+        return np.mean(self.sync_level_bias)
+
     def remove_bias(self, data):
         return data - self.sync_level_bias
 
@@ -175,13 +179,14 @@ class VsyncSerration:
             serration_locs = list()
             if len(where_min) > 0:
                 mask_len = self.linelen * 5
+                state = False
                 for w_min in where_min:
                     state, serr_loc, serr_len = self.search_eq_pulses(data, w_min)
                     if state:
                         serration_locs.append(serr_loc)
                         mask_len = serr_len - serr_loc
 
-                if False:
+                if self.show_decoded:
                     data_copy = self.remove_bias(data)
                     if len(serration_locs) > 0:
                         mask = self.mutemask(np.array(serration_locs), len(data_copy), mask_len)
@@ -192,7 +197,7 @@ class VsyncSerration:
                 return state
             else:
                 # dualplot_scope(forward[0], forward[1], title='unexpected arbitrage')
-                ldd.logger.warning('WARN: Unexpected vsync arbitrage')
+                ldd.logger.warning('Unexpected vsync arbitrage')
                 return None
         else:
             # dualplot_scope(forward[0], forward[1], title='unexpected, there is no minima')
@@ -202,10 +207,10 @@ class VsyncSerration:
     def work(self, data):
         self.vsync_envelope(data)
         if self.has_levels():
-            ldd.logger.info('VBI serration levels %d - Sync tip: %.02f Hz, Blanking: %.02f Hz' %
-                  (len(self.levels[0]), self.get_levels()[0], self.get_levels()[1]))
+            ldd.logger.info('VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz' %
+                  (len(self.levels[0]), self.get_levels()[0] / 1e3, self.get_levels()[1] / 1e3))
         elif self.fieldcount % 10 == 0:
-                ldd.logger.info('VBI EQ serration pulses search failed')
+            ldd.logger.info('VBI EQ serration pulses search failed (using fallback logic)')
 
         self.fieldcount += 1
 

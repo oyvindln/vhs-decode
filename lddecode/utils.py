@@ -796,8 +796,12 @@ def findpulses(array, low, high):
     if ends[0] < starts[0]:
         ends = ends[1:]
 
-    if starts[-1] > ends[-1]:
-        starts = starts[:-1]
+    try:
+        if starts[-1] > ends[-1]:
+            starts = starts[:-1]
+    except IndexError:
+        print("Index error at lddecode/utils.findpulses(). Are we on the end of the file?")
+        return []
 
     return [Pulse(z[0], z[1] - z[0]) for z in zip(starts, ends)]
 
