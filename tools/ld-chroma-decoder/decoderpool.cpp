@@ -5,6 +5,7 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018-2019 Simon Inns
     Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -30,11 +31,12 @@
 constexpr qint32 DecoderPool::DEFAULT_BATCH_SIZE;
 
 DecoderPool::DecoderPool(Decoder &_decoder, QString _inputFileName,
-                         LdDecodeMetaData &_ldDecodeMetaData, QString _outputFileName,
+                         LdDecodeMetaData &_ldDecodeMetaData,
+                         OutputWriter::Configuration &_outputConfig, QString _outputFileName,
                          qint32 _startFrame, qint32 _length, qint32 _maxThreads)
     : decoder(_decoder), inputFileName(_inputFileName),
-      outputFileName(_outputFileName), startFrame(_startFrame),
-      length(_length), maxThreads(_maxThreads),
+      outputConfig(_outputConfig), outputFileName(_outputFileName),
+      startFrame(_startFrame), length(_length), maxThreads(_maxThreads),
       abort(false), ldDecodeMetaData(_ldDecodeMetaData)
 {
 }
@@ -42,6 +44,10 @@ DecoderPool::DecoderPool(Decoder &_decoder, QString _inputFileName,
 bool DecoderPool::process()
 {
     LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
+
+    // Configure the OutputWriter, adjusting videoParameters
+    outputWriter.updateConfiguration(videoParameters, outputConfig);
+    outputWriter.printOutputInfo();
 
     // Configure the decoder, and check that it can accept this video
     if (!decoder.configure(videoParameters)) {
@@ -86,23 +92,23 @@ bool DecoderPool::process()
             sourceVideo.close();
             return false;
         }
-        qInfo() << "Writing" << decoder.getPixelName() << "to stdout";
+        qInfo() << "Writing output to stdout";
     } else {
         // Open output file
         targetVideo.setFileName(outputFileName);
         if (!targetVideo.open(QIODevice::WriteOnly)) {
             // Failed to open output file
-            qCritical() << "Could not open" << outputFileName << "as" << decoder.getPixelName() << "output file";
+            qCritical() << "Could not open" << outputFileName << "for output";
             sourceVideo.close();
             return false;
         }
     }
 
-    if (decoder.isOutputY4m()) {
-        if (targetVideo.write(decoder.getHeaders().toUtf8()) == -1) {
-            qCritical() << "Could not write Y4M header";
-            return false;
-        }
+    // Write the stream header (if there is one)
+    const QByteArray streamHeader = outputWriter.getStreamHeader();
+    if (streamHeader.size() != 0 && targetVideo.write(streamHeader) == -1) {
+        qCritical() << "Writing to the output video file failed";
+        return false;
     }
 
     qInfo() << "Using" << maxThreads << "threads";
@@ -216,27 +222,17 @@ bool DecoderPool::putOutputFrame(qint32 frameNumber, const OutputFrame &outputFr
     while (pendingOutputFrames.contains(outputFrameNumber)) {
         const OutputFrame& outputData = pendingOutputFrames.value(outputFrameNumber);
 
-        // Save the frame data to the output file
-        if (outputData.Y.size()) {
-            if (decoder.isOutputY4m()) {
-                if (targetVideo.write("FRAME\n") == -1) {
-                    qCritical() << "Writing to the output video file failed";
-                    return false;
-                }
-            }
-            if (targetVideo.write(reinterpret_cast<const char *>(outputData.Y.data()), outputData.Y.size() * 2) == -1 ||
-                targetVideo.write(reinterpret_cast<const char *>(outputData.Cb.data()), outputData.Cb.size() * 2) == -1 ||
-                targetVideo.write(reinterpret_cast<const char *>(outputData.Cr.data()), outputData.Cr.size() * 2) == -1) {
-                // Could not write to target video file
-                qCritical() << "Writing to the output video file failed";
-                return false;
-            }
-        } else {
-            if (!targetVideo.write(reinterpret_cast<const char *>(outputData.RGB.data()), outputData.RGB.size() * 2)) {
-                // Could not write to target video file
-                qCritical() << "Writing to the output video file failed";
-                return false;
-            }
+        // Write the frame header (if there is one)
+        const QByteArray frameHeader = outputWriter.getFrameHeader();
+        if (frameHeader.size() != 0 && targetVideo.write(frameHeader) == -1) {
+            qCritical() << "Writing to the output video file failed";
+            return false;
+        }
+
+        // Write the frame data
+        if (targetVideo.write(reinterpret_cast<const char *>(outputData.data()), outputData.size() * 2) == -1) {
+            qCritical() << "Writing to the output video file failed";
+            return false;
         }
 
         pendingOutputFrames.remove(outputFrameNumber);

@@ -42,6 +42,33 @@
     </widget>
    </item>
    <item>
+    <widget class="QLabel" name="chromaPhaseLabel">
+     <property name="text">
+      <string>Chroma phase:</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSlider" name="chromaPhaseHorizontalSlider">
+     <property name="maximum">
+      <number>200</number>
+     </property>
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="chromaPhaseValueLabel">
+     <property name="text">
+      <string>0.0°</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="yNRLabel">
      <property name="text">
       <string>Luma noise reduction:</string>

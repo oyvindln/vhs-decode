@@ -3,7 +3,7 @@
     transformpal3d.h
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     Reusing code from pyctools-pal, which is:
     Copyright (C) 2014 Jim Easterbrook
@@ -31,7 +31,8 @@
 #include <QVector>
 #include <fftw3.h>
 
-#include "outputframe.h"
+#include "componentframe.h"
+#include "outputwriter.h"
 #include "sourcefield.h"
 #include "transformpal.h"
 
@@ -58,7 +59,7 @@ protected:
     void applyFilter();
     void overlayFFTFrame(qint32 positionX, qint32 positionY,
                          const QVector<SourceField> &inputFields, qint32 fieldIndex,
-                         OutputFrame &rgbFrame) override;
+                         ComponentFrame &componentFrame) override;
 
     // FFT input and output sizes.
     //

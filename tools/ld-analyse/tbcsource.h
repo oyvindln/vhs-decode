@@ -96,9 +96,11 @@ public:
     qint32 getCcData0(qint32 frameNumber);
     qint32 getCcData1(qint32 frameNumber);
 
-    void setChromaConfiguration(const PalColour::Configuration &palConfiguration, const Comb::Configuration &ntscConfiguration);
+    void setChromaConfiguration(const PalColour::Configuration &palConfiguration, const Comb::Configuration &ntscConfiguration,
+                                const OutputWriter::Configuration &outputConfiguration);
     const PalColour::Configuration &getPalConfiguration();
     const Comb::Configuration &getNtscConfiguration();
+    const OutputWriter::Configuration &getOutputConfiguration();
 
     qint32 startOfNextChapter(qint32 currentFrameNumber);
     qint32 startOfChapter(qint32 currentFrameNumber);
@@ -129,9 +131,10 @@ private:
     QString currentSourceFilename;
     QString lastLoadError;
 
-    // Chroma decoders
+    // Chroma decoder objects
     PalColour palColour;
     Comb ntscColour;
+    OutputWriter outputWriter;
 
     // VBI decoder
     VbiDecoder vbiDecoder;
@@ -147,6 +150,7 @@ private:
     // Chroma decoder configuration
     PalColour::Configuration palConfiguration;
     Comb::Configuration ntscConfiguration;
+    OutputWriter::Configuration outputConfiguration;
     bool decoderConfigurationChanged;
 
     // Chapter map

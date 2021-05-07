@@ -1,6 +1,10 @@
 /*
- * adapted/gutted from demuxing_decoding.c - copyright below:
- * 
+ * Decode 16-bit samples from a compressed file using ffmpeg's libraries.
+ *
+ * Copyright (c) 2019-2021 Chad Page
+ * Copyright (c) 2020-2021 Adam Sampson
+ *
+ * Adapted from ffmpeg's doc/examples/demuxing_decoding.c, which is:
  * Copyright (c) 2012 Stefano Sabatini
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,6 +26,9 @@
  * THE SOFTWARE.
  */
 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <libavutil/samplefmt.h>
 #include <libavutil/timestamp.h>
@@ -34,59 +41,54 @@ static const char *src_filename = NULL;
 
 static int audio_stream_idx = -1;
 static AVFrame *frame = NULL;
-static AVPacket pkt;
+static AVPacket *pkt = NULL;
 
 static uint64_t seekto = 0;
 
-static int decode_packet(int *got_frame, int cached)
+static int decode_packet(AVCodecContext *dec, const AVPacket *pkt)
 {
     int ret = 0;
-    int decoded = pkt.size;
 
-    *got_frame = 0;
-
-    if (pkt.stream_index == audio_stream_idx) {
-        /* decode audio frame */
-        ret = avcodec_decode_audio4(audio_dec_ctx, frame, got_frame, &pkt);
-        if (ret < 0) {
-            fprintf(stderr, "Error decoding audio frame (%s)\n", av_err2str(ret));
-            return ret;
-        }
-        /* Some audio decoders decode only part of the packet, and have to be
-         * called again with the remainder of the packet data.
-         * Sample: fate-suite/lossless-audio/luckynight-partial.shn
-         * Also, some decoders might over-read the packet. */
-        decoded = FFMIN(ret, pkt.size);
-
-        if (*got_frame) {
-            int64_t offset = FFMIN((seekto - frame->pts), 0);
-            size_t unpadded_linesize = (frame->nb_samples - offset) * av_get_bytes_per_sample(frame->format);
-            size_t rv = 0;
-
-            if ((frame->pts + frame->nb_samples) < seekto) {
-                return decoded;
-            }
-
-            // fprintf(stderr, "%lld %d\n", frame->pts, offset);
-
-            /* Write the raw audio data samples of the first plane. This works
-             * fine for packed formats (e.g. AV_SAMPLE_FMT_S16). However,
-             * most audio decoders output planar audio, which uses a separate
-             * plane of audio samples for each channel (e.g. AV_SAMPLE_FMT_S16P).
-             * In other words, this code will write only the first audio channel
-             * in these cases.
-             * You should use libswresample or libavfilter to convert the frame
-             * to packed data. */
-            rv = write(1, frame->extended_data[0] + (offset * av_get_bytes_per_sample(frame->format)), unpadded_linesize);
-
-            if (rv != unpadded_linesize) {
-                fprintf(stderr, "write error %ld", offset);
-                return -1;
-            }
-        }
+    // submit the packet to the decoder
+    ret = avcodec_send_packet(dec, pkt);
+    if (ret < 0) {
+        fprintf(stderr, "Error submitting a packet for decoding (%s)\n", av_err2str(ret));
+        return ret;
     }
 
-    return decoded;
+    // get all the available frames from the decoder
+    while (ret >= 0) {
+        ret = avcodec_receive_frame(dec, frame);
+        if (ret < 0) {
+            // those two return values are special and mean there is no output
+            // frame available, but there were no errors during decoding
+            if (ret == AVERROR_EOF || ret == AVERROR(EAGAIN))
+                return 0;
+
+            fprintf(stderr, "Error during decoding (%s)\n", av_err2str(ret));
+            return ret;
+        }
+
+        // If we haven't reached the start position, don't output anything
+        if ((frame->pts + frame->nb_samples) < seekto) {
+            av_frame_unref(frame);
+            continue;
+        }
+
+        // Write the raw audio data samples to stdout, skipping any data that's
+        // before the start position
+        int64_t offset = FFMIN((seekto - frame->pts), 0);
+        size_t unpadded_linesize = frame->nb_samples * av_get_bytes_per_sample(frame->format);
+        size_t rv = write(1, frame->extended_data[0] + (offset * av_get_bytes_per_sample(frame->format)), unpadded_linesize);
+        if (rv != unpadded_linesize) {
+            fprintf(stderr, "write error %ld", offset);
+            return -1;
+        }
+
+        av_frame_unref(frame);
+    }
+
+    return 0;
 }
 
 static int open_codec_context(int *stream_idx,
@@ -94,7 +96,7 @@ static int open_codec_context(int *stream_idx,
 {
     int ret, stream_index;
     AVStream *st;
-    AVCodec *dec = NULL;
+    const AVCodec *dec = NULL;
     AVDictionary *opts = NULL;
 
     ret = av_find_best_stream(fmt_ctx, type, -1, -1, NULL, 0);
@@ -130,8 +132,7 @@ static int open_codec_context(int *stream_idx,
             return ret;
         }
 
-        /* Init the decoders, with or without reference counting */
-        av_dict_set(&opts, "refcounted_frames", "0", 0);
+        /* Init the decoder */
         if ((ret = avcodec_open2(*dec_ctx, dec, &opts)) < 0) {
             fprintf(stderr, "Failed to open %s codec\n",
                     av_get_media_type_string(type));
@@ -145,14 +146,24 @@ static int open_codec_context(int *stream_idx,
 
 int main (int argc, char **argv)
 {
-    int ret = 0, got_frame;
+    int ret = 0;
+
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: %s input_file [start_offset_in_samples]\n",
+                argv[0]);
+        exit(1);
+    }
 
     src_filename = argv[1];
     if (argc >= 3) {
         seekto = atoll(argv[2]);
     }
 
+#if LIBAVFORMAT_VERSION_MAJOR < 59
     av_register_all();
+#else
+    // Later versions of ffmpeg register all codecs automatically
+#endif
 
     /* open input file, and allocate format context */
     if ((ret = avformat_open_input(&fmt_ctx, src_filename, NULL, NULL)) < 0) {
@@ -196,10 +207,12 @@ int main (int argc, char **argv)
         goto end;
     }
 
-    /* initialize packet, set data to NULL, let the demuxer fill it */
-    av_init_packet(&pkt);
-    pkt.data = NULL;
-    pkt.size = 0;
+    pkt = av_packet_alloc();
+    if (!pkt) {
+        fprintf(stderr, "Could not allocate packet\n");
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
 
     if (seekto) {
         uint64_t seeksec = seekto / audio_dec_ctx->sample_rate;
@@ -208,28 +221,21 @@ int main (int argc, char **argv)
     }
 
     /* read frames from the file */
-    while (av_read_frame(fmt_ctx, &pkt) >= 0) {
-        AVPacket orig_pkt = pkt;
-        do {
-            ret = decode_packet(&got_frame, 0);
-            if (ret < 0)
-                break;
-            pkt.data += ret;
-            pkt.size -= ret;
-        } while (pkt.size > 0);
-        av_packet_unref(&orig_pkt);
+    while (av_read_frame(fmt_ctx, pkt) >= 0) {
+        if (pkt->stream_index == audio_stream_idx)
+            ret = decode_packet(audio_dec_ctx, pkt);
+        av_packet_unref(pkt);
+        if (ret < 0)
+            break;
     }
 
-    /* flush cached frames */
-    pkt.data = NULL;
-    pkt.size = 0;
-    do {
-        decode_packet(&got_frame, 1);
-    } while (got_frame);
+    /* flush the decoder */
+    decode_packet(audio_dec_ctx, NULL);
 
 end:
     avcodec_free_context(&audio_dec_ctx);
     avformat_close_input(&fmt_ctx);
+    av_packet_free(&pkt);
     av_frame_free(&frame);
 
     return ret < 0;

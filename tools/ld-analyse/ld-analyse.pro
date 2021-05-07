@@ -39,8 +39,8 @@ SOURCES += \
     dropoutanalysisdialog.cpp \
     ../ld-chroma-decoder/palcolour.cpp \
     ../ld-chroma-decoder/comb.cpp \
-    ../ld-chroma-decoder/rgb.cpp \
-    ../ld-chroma-decoder/ycbcr.cpp \
+    ../ld-chroma-decoder/componentframe.cpp \
+    ../ld-chroma-decoder/outputwriter.cpp \
     ../ld-chroma-decoder/transformpal.cpp \
     ../ld-chroma-decoder/transformpal2d.cpp \
     ../ld-chroma-decoder/transformpal3d.cpp \
@@ -68,10 +68,8 @@ HEADERS += \
     dropoutanalysisdialog.h \
     ../ld-chroma-decoder/palcolour.h \
     ../ld-chroma-decoder/comb.h \
-    ../ld-chroma-decoder/rgb.h \
-    ../ld-chroma-decoder/outputframe.h \
-    ../ld-chroma-decoder/ycbcr.h \
-    ../ld-chroma-decoder/yiq.h \
+    ../ld-chroma-decoder/componentframe.h \
+    ../ld-chroma-decoder/outputwriter.h \
     ../ld-chroma-decoder/transformpal.h \
     ../ld-chroma-decoder/transformpal2d.h \
     ../ld-chroma-decoder/transformpal3d.h \

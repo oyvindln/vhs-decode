@@ -3,8 +3,7 @@
     decoder.h
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
-    Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -27,22 +26,16 @@
 #define DECODER_H
 
 #include <QAtomicInt>
+#include <QByteArray>
 #include <QDebug>
 #include <QThread>
 #include <cassert>
 
 #include "lddecodemetadata.h"
 
-#include "outputframe.h"
+#include "componentframe.h"
+#include "outputwriter.h"
 #include "sourcefield.h"
-
-static const QString Y4M_CS_YUV444P16 = QStringLiteral(" C444p16 XCOLORRANGE=LIMITED\n");
-static const QString Y4M_CS_GRAY16    = QStringLiteral(" Cmono16 XCOLORRANGE=LIMITED\n");
-static const QString Y4M_PAR_NTSC_43  = QStringLiteral("97:114");  // (4 / 3) * (485 / 760)
-static const QString Y4M_PAR_NTSC_169 = QStringLiteral("194:171"); // (16 / 9) * (485 / 760)
-static const QString Y4M_PAR_PAL_43   = QStringLiteral("384:461"); // (4 / 3) * (576 / 922)
-static const QString Y4M_PAR_PAL_169  = QStringLiteral("512:461"); // (16 / 9) * (576 / 922)
-static constexpr QChar y4mFieldOrder = 't';
 
 class DecoderPool;
 
@@ -85,40 +78,11 @@ public:
     // Construct a new worker thread
     virtual QThread *makeThread(QAtomicInt& abort, DecoderPool& decoderPool) = 0;
 
-    // All of the supported output pixel formats
-    enum PixelFormat {
-        RGB48 = 0,
-        YUV444P16,
-        GRAY16
-    };
-
-    // Return a readable output pixel format
-    virtual const char *getPixelName() const = 0;
-
-    // Return true if the decoder will output Y4M
-    virtual bool isOutputY4m() = 0;
-
-    // Generate the Y4M headers
-    virtual QString getHeaders() const = 0;
-
     // Parameters used by the decoder and its threads.
     // This may be subclassed by decoders to add extra parameters.
     struct Configuration {
-        // Parameters computed from the video metadata
         LdDecodeMetaData::VideoParameters videoParameters;
-        qint32 topPadLines;
-        qint32 bottomPadLines;
-        Decoder::PixelFormat pixelFormat = RGB48;
-        bool outputYCbCr = false;
-        bool outputY4m = false;
     };
-
-    // Compute the output frame size in Configuration, adjusting the active
-    // video region as required
-    static void setVideoParameters(Configuration &config, const LdDecodeMetaData::VideoParameters &videoParameters);
-
-    // Crop a full decoded frame to the output frame size
-    static OutputFrame cropOutputFrame(const Configuration &config, const OutputFrame &outputData);
 };
 
 // Abstract base class for chroma decoder worker threads.
@@ -130,13 +94,16 @@ public:
 protected:
     void run() override;
 
-    // Decode a sequence of fields into a sequence of frames
+    // Decode a sequence of composite fields into a sequence of component frames
     virtual void decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                              QVector<OutputFrame> &outputFrames) = 0;
+                              QVector<ComponentFrame> &componentFrames) = 0;
 
     // Decoder pool
-    QAtomicInt& abort;
-    DecoderPool& decoderPool;
+    QAtomicInt &abort;
+    DecoderPool &decoderPool;
+
+    // Output writer
+    OutputWriter &outputWriter;
 };
 
 #endif

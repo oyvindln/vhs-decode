@@ -5,7 +5,7 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018 Chad Page
     Copyright (C) 2018-2019 Simon Inns
-    Copyright (C) 2020 Adam Sampson
+    Copyright (C) 2020-2021 Adam Sampson
     Copyright (C) 2021 Phillip Blucas
 
     This file is part of ld-decode-tools.
@@ -35,12 +35,9 @@
 
 #include "lddecodemetadata.h"
 
+#include "componentframe.h"
 #include "decoder.h"
-#include "outputframe.h"
-#include "rgb.h"
 #include "sourcefield.h"
-#include "ycbcr.h"
-#include "yiq.h"
 
 class Comb
 {
@@ -50,6 +47,7 @@ public:
     // Comb filter configuration parameters
     struct Configuration {
         double chromaGain = 1.0;
+        double chromaPhase = 0.0;
         bool colorlpf = false;
         bool colorlpf_hq = true;
         bool whitePoint75 = false;
@@ -57,9 +55,6 @@ public:
         bool adaptive = true;
         bool showMap = false;
         bool phaseCompensation = false;
-	Decoder::PixelFormat pixelFormat = Decoder::PixelFormat::RGB48;
-        bool outputYCbCr = false;
-        bool outputY4m = false;
 
         double cNRLevel = 0.0;
         double yNRLevel = 1.0;
@@ -74,7 +69,7 @@ public:
 
     // Decode a sequence of fields into a sequence of interlaced frames
     void decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                      QVector<OutputFrame> &outputFrames);
+                      QVector<ComponentFrame> &componentFrames);
 
     // Maximum frame size
     static constexpr qint32 MAX_WIDTH = 910;
@@ -99,18 +94,20 @@ private:
         void split2D();
         void split3D(const FrameBuffer &previousFrame, const FrameBuffer &nextFrame);
 
+        void setComponentFrame(ComponentFrame &_componentFrame) {
+            componentFrame = &_componentFrame;
+        }
+
         void splitIQ();
         void splitIQlocked();
         void filterIQ();
         void filterIQFull();
         void adjustY();
-
         void doCNR();
         void doYNR();
+        void transformIQ(double chromaGain, double chromaPhase);
 
-        OutputFrame yiqToRGBFrame();
-        OutputFrame yiqToYUVFrame();
-        void overlayMap(const FrameBuffer &previousFrame, const FrameBuffer &nextFrame, OutputFrame &outputFrame);
+        void overlayMap(const FrameBuffer &previousFrame, const FrameBuffer &nextFrame);
 
     private:
         const LdDecodeMetaData::VideoParameters &videoParameters;
@@ -140,8 +137,8 @@ private:
             double sample;
         };
 
-        // Demodulated YIQ samples
-        YIQ yiqBuffer[MAX_HEIGHT][MAX_WIDTH];
+        // The component frame for output (if there is one)
+        ComponentFrame *componentFrame;
 
         inline qint32 getFieldID(qint32 lineNumber) const;
         inline bool getLinePhase(qint32 lineNumber) const;

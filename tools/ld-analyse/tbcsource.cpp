@@ -4,6 +4,7 @@
 
     ld-analyse - TBC output analysis
     Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -35,10 +36,12 @@ TbcSource::TbcSource(QObject *parent) : QObject(parent)
     sourceReady = false;
     frameCacheFrameNumber = -1;
 
-    // Set the chroma decoder configuration to default
+    // Configure the chroma decoder
     palConfiguration = palColour.getConfiguration();
     palConfiguration.chromaFilter = PalColour::transform2DFilter;
     ntscConfiguration = ntscColour.getConfiguration();
+    outputConfiguration.pixelFormat = OutputWriter::PixelFormat::RGB48;
+    outputConfiguration.usePadding = false;
     decoderConfigurationChanged = false;
 }
 
@@ -417,10 +420,13 @@ qint32 TbcSource::getCcData1(qint32 frameNumber)
     return secondField.ntsc.ccData1;
 }
 
-void TbcSource::setChromaConfiguration(const PalColour::Configuration &_palConfiguration, const Comb::Configuration &_ntscConfiguration)
+void TbcSource::setChromaConfiguration(const PalColour::Configuration &_palConfiguration,
+                                       const Comb::Configuration &_ntscConfiguration,
+                                       const OutputWriter::Configuration &_outputConfiguration)
 {
     palConfiguration = _palConfiguration;
     ntscConfiguration = _ntscConfiguration;
+    outputConfiguration = _outputConfiguration;
 
     // Configure the chroma decoder
     LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
@@ -429,6 +435,10 @@ void TbcSource::setChromaConfiguration(const PalColour::Configuration &_palConfi
     } else {
         ntscColour.updateConfiguration(videoParameters, ntscConfiguration);
     }
+
+    // Configure the OutputWriter.
+    // Because we have padding disabled, this won't change the VideoParameters.
+    outputWriter.updateConfiguration(videoParameters, outputConfiguration);
 
     decoderConfigurationChanged = true;
 }
@@ -441,6 +451,11 @@ const PalColour::Configuration &TbcSource::getPalConfiguration()
 const Comb::Configuration &TbcSource::getNtscConfiguration()
 {
     return ntscConfiguration;
+}
+
+const OutputWriter::Configuration &TbcSource::getOutputConfiguration()
+{
+    return outputConfiguration;
 }
 
 // Return the frame number of the start of the next chapter
@@ -535,32 +550,37 @@ QImage TbcSource::generateQImage(qint32 frameNumber)
     if (chromaOn) {
         // Chroma decode the current frame and display
 
-        // Decode colour for the current frame, to RGB 16-16-16 interlaced output
-        QVector<OutputFrame> outputFrames(1);
+        // Decode the current frame to components
+        QVector<ComponentFrame> componentFrames(1);
         if (videoParameters.isSourcePal) {
             // PAL source
-            palColour.decodeFrames(inputFields, startIndex, endIndex, outputFrames);
+            palColour.decodeFrames(inputFields, startIndex, endIndex, componentFrames);
         } else {
             // NTSC source
-            ntscColour.decodeFrames(inputFields, startIndex, endIndex, outputFrames);
+            ntscColour.decodeFrames(inputFields, startIndex, endIndex, componentFrames);
         }
 
+        // Convert component video to RGB
+        OutputFrame outputFrame;
+        outputWriter.convert(componentFrames[0], outputFrame);
+
         // Get a pointer to the RGB data
-        const quint16 *rgbPointer = outputFrames[0].RGB.data();
+        const quint16 *rgbPointer = outputFrame.data();
 
         // Fill the QImage with black
         frameImage.fill(Qt::black);
 
         // Copy the RGB16-16-16 data into the RGB888 QImage
-        for (qint32 y = videoParameters.firstActiveFrameLine; y < videoParameters.lastActiveFrameLine; y++) {
-            for (qint32 x = videoParameters.activeVideoStart; x < videoParameters.activeVideoEnd; x++) {
-                qint32 pixelOffset = ((y * videoParameters.fieldWidth) + x) * 3;
+        const qint32 activeHeight = videoParameters.lastActiveFrameLine - videoParameters.firstActiveFrameLine;
+        const qint32 activeWidth = videoParameters.activeVideoEnd - videoParameters.activeVideoStart;
+        for (qint32 y = 0; y < activeHeight; y++) {
+            const quint16 *inputLine = rgbPointer + (y * activeWidth * 3);
+            uchar *outputLine = frameImage.scanLine(y + videoParameters.firstActiveFrameLine)
+                                + (videoParameters.activeVideoStart * 3);
 
-                // Take just the MSB of the input data
-                qint32 xpp = x * 3;
-                *(frameImage.scanLine(y) + xpp + 0) = static_cast<uchar>(rgbPointer[pixelOffset + 0] / 256); // R
-                *(frameImage.scanLine(y) + xpp + 1) = static_cast<uchar>(rgbPointer[pixelOffset + 1] / 256); // G
-                *(frameImage.scanLine(y) + xpp + 2) = static_cast<uchar>(rgbPointer[pixelOffset + 2] / 256); // B
+            // Take just the MSB of the RGB input data
+            for (qint32 i = 0; i < activeWidth * 3; i++) {
+                *outputLine++ = static_cast<uchar>((*inputLine++) / 256);
             }
         }
     } else {

@@ -5,8 +5,6 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018-2019 Simon Inns
     Copyright (C) 2019 Adam Sampson
-    Copyright (C) 2021 Chad Page
-    Copyright (C) 2021 Phillip Blucas
 
     This file is part of ld-decode-tools.
 
@@ -36,8 +34,8 @@
 
 #include "lddecodemetadata.h"
 
+#include "componentframe.h"
 #include "decoder.h"
-#include "outputframe.h"
 #include "sourcefield.h"
 #include "transformpal.h"
 
@@ -58,15 +56,13 @@ public:
 
     struct Configuration {
         double chromaGain = 1.0;
+        double chromaPhase = 0.0;
         double yNRLevel = 0.5;
         bool simplePAL = false;
         ChromaFilterMode chromaFilter = palColourFilter;
         TransformPal::TransformMode transformMode = TransformPal::thresholdMode;
         double transformThreshold = 0.4;
         QVector<double> transformThresholds;
-        Decoder::PixelFormat pixelFormat = Decoder::PixelFormat::RGB48;
-        bool outputYCbCr = false;
-        bool outputY4m = false;
         bool showFFTs = false;
         qint32 showPositionX = 200;
         qint32 showPositionY = 200;
@@ -82,7 +78,7 @@ public:
 
     // Decode a sequence of fields into a sequence of interlaced frames
     void decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                      QVector<OutputFrame> &outputFrames);
+                      QVector<ComponentFrame> &outputFrames);
 
     // Maximum frame size, based on PAL
     static constexpr qint32 MAX_WIDTH = 1135;
@@ -93,17 +89,19 @@ private:
         explicit LineInfo(qint32 number);
 
         qint32 number;
+        // detectBurst computes bp, bq = cos(t), sin(t), where t is the burst phase.
+        // They're used to build a rotation matrix for the chroma signals in decodeLine.
         double bp, bq;
         double Vsw;
     };
 
     void buildLookUpTables();
-    void decodeField(const SourceField &inputField, const double *chromaData, double chromaGain, OutputFrame &outputFrame);
+    void decodeField(const SourceField &inputField, const double *chromaData, ComponentFrame &componentFrame);
     void detectBurst(LineInfo &line, const quint16 *inputData);
-    void doYNR(double *inY);
     template <typename ChromaSample, bool PREFILTERED_CHROMA>
-    void decodeLine(const SourceField &inputField, const ChromaSample *chromaData, const LineInfo &line, double chromaGain,
-                    OutputFrame &outputFrame);
+    void decodeLine(const SourceField &inputField, const ChromaSample *chromaData, const LineInfo &line,
+                    ComponentFrame &componentFrame);
+    void doYNR(double *Yline);
 
     // Configuration parameters
     bool configurationSet;
@@ -115,9 +113,6 @@ private:
 
     // The subcarrier reference signal
     double sine[MAX_WIDTH], cosine[MAX_WIDTH];
-
-    // extract luma first so it can be run through NR
-    double extractedY[MAX_WIDTH];
 
     // Coefficients for the three 2D chroma low-pass filters. There are
     // separate filters for U and V, but only the signs differ, so they can

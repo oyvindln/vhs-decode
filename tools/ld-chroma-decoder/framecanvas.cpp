@@ -3,7 +3,7 @@
     framecanvas.cpp
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -24,12 +24,11 @@
 
 #include "framecanvas.h"
 
-// Definitions of static constexpr data members, for compatibility with
-// pre-C++17 compilers
-constexpr FrameCanvas::RGB FrameCanvas::green;
-
-FrameCanvas::FrameCanvas(OutputFrame &_videoFrame, const LdDecodeMetaData::VideoParameters &_videoParameters)
-    : rgbData(_videoFrame.RGB.data()), rgbSize(_videoFrame.RGB.size()), videoParameters(_videoParameters)
+FrameCanvas::FrameCanvas(ComponentFrame &_componentFrame, const LdDecodeMetaData::VideoParameters &_videoParameters)
+    : yData(_componentFrame.y(0)), uData(_componentFrame.u(0)), vData(_componentFrame.v(0)),
+      width(_componentFrame.getWidth()), height(_componentFrame.getHeight()),
+      ireRange(_videoParameters.white16bIre - _videoParameters.black16bIre), blackIre(_videoParameters.black16bIre),
+      videoParameters(_videoParameters)
 {
 }
 
@@ -53,25 +52,41 @@ qint32 FrameCanvas::right()
     return videoParameters.activeVideoEnd;
 }
 
-FrameCanvas::RGB FrameCanvas::grey(quint16 value)
+FrameCanvas::Colour FrameCanvas::rgb(quint16 r, quint16 g, quint16 b)
 {
-    return RGB {value, value, value};
+    // Scale R'G'B' to match the IRE range
+    const double sr = (r / 65535.0) * ireRange;
+    const double sg = (g / 65535.0) * ireRange;
+    const double sb = (b / 65535.0) * ireRange;
+
+    // Convert to Y'UV form [Poynton eq 28.5 p337]
+    return Colour {
+        ((sr * 0.299)    + (sg * 0.587)     + (sb * 0.114))    + blackIre,
+        (sr * -0.147141) + (sg * -0.288869) + (sb * 0.436010),
+        (sr * 0.614975)  + (sg * -0.514965) + (sb * -0.100010)
+    };
 }
 
-void FrameCanvas::drawPoint(qint32 x, qint32 y, const RGB& colour)
+FrameCanvas::Colour FrameCanvas::grey(quint16 value)
 {
-    const qint32 offset = ((y * videoParameters.fieldWidth) + x) * 3;
-    if (x < 0 || x >= videoParameters.fieldWidth || offset < 0 || offset >= (rgbSize - 2)) {
+    // Scale Y to match the IRE range
+    return Colour {((value / 65535.0) * ireRange) + blackIre, 0.0, 0.0};
+}
+
+void FrameCanvas::drawPoint(qint32 x, qint32 y, const Colour& colour)
+{
+    if (x < 0 || x >= width || y < 0 || y >= height) {
         // Outside the frame
         return;
     }
 
-    rgbData[offset] = colour.r;
-    rgbData[offset + 1] = colour.g;
-    rgbData[offset + 2] = colour.b;
+    const qint32 offset = (y * width) + x;
+    yData[offset] = colour.y;
+    uData[offset] = colour.u;
+    vData[offset] = colour.v;
 }
 
-void FrameCanvas::drawRectangle(qint32 xStart, qint32 yStart, qint32 w, qint32 h, const RGB& colour)
+void FrameCanvas::drawRectangle(qint32 xStart, qint32 yStart, qint32 w, qint32 h, const Colour& colour)
 {
     for (qint32 y = yStart; y < yStart + h; y++) {
         drawPoint(xStart, y, colour);
@@ -83,7 +98,7 @@ void FrameCanvas::drawRectangle(qint32 xStart, qint32 yStart, qint32 w, qint32 h
     }
 }
 
-void FrameCanvas::fillRectangle(qint32 xStart, qint32 yStart, qint32 w, qint32 h, const RGB& colour)
+void FrameCanvas::fillRectangle(qint32 xStart, qint32 yStart, qint32 w, qint32 h, const Colour& colour)
 {
     for (qint32 y = yStart; y < yStart + h; y++) {
         for (qint32 x = xStart; x < xStart + w; x++) {

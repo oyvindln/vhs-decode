@@ -3,7 +3,7 @@
     framecanvas.h
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -29,14 +29,14 @@
 
 #include "lddecodemetadata.h"
 
-#include "outputframe.h"
+#include "componentframe.h"
 
-// Context for drawing on top of a full-frame RGB image.
+// Context for drawing on top of a Y'UV ComponentFrame.
 class FrameCanvas {
 public:
-    // rgbFrame is the frame to draw upon, and videoParameters gives its dimensions.
+    // componentFrame is the frame to draw upon, and videoParameters gives its parameters.
     // (Both parameters are captured by reference, not copied.)
-    FrameCanvas(OutputFrame &outputFrame, const LdDecodeMetaData::VideoParameters &videoParameters);
+    FrameCanvas(ComponentFrame &componentFrame, const LdDecodeMetaData::VideoParameters &videoParameters);
 
     // Return the edges of the active area.
     qint32 top();
@@ -44,25 +44,30 @@ public:
     qint32 left();
     qint32 right();
 
-    // Colour representation, and some useful colours.
-    struct RGB {
-        quint16 r, g, b;
+    // Colour representation
+    struct Colour {
+        double y, u, v;
     };
-    static constexpr RGB green {0, 65535, 0};
-    static RGB grey(quint16 value);
+
+    // Convert a 16-bit R'G'B' colour to Colour form
+    Colour rgb(quint16 r, quint16 g, quint16 b);
+
+    // Convert a 16-bit greyscale value to Colour form
+    Colour grey(quint16 value);
 
     // Plot a pixel
-    void drawPoint(qint32 x, qint32 y, const RGB& colour);
+    void drawPoint(qint32 x, qint32 y, const Colour& colour);
 
     // Draw an empty rectangle
-    void drawRectangle(qint32 x, qint32 y, qint32 w, qint32 h, const RGB& colour);
+    void drawRectangle(qint32 x, qint32 y, qint32 w, qint32 h, const Colour& colour);
 
     // Draw a filled rectangle
-    void fillRectangle(qint32 x, qint32 y, qint32 w, qint32 h, const RGB& colour);
+    void fillRectangle(qint32 x, qint32 y, qint32 w, qint32 h, const Colour& colour);
 
 private:
-    quint16 *rgbData;
-    qint32 rgbSize;
+    double *yData, *uData, *vData;
+    qint32 width, height;
+    double ireRange, blackIre;
     const LdDecodeMetaData::VideoParameters &videoParameters;
 };
 

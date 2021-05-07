@@ -3,7 +3,7 @@
     transformpal.h
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     Reusing code from pyctools-pal, which is:
     Copyright (C) 2014 Jim Easterbrook
@@ -33,8 +33,9 @@
 
 #include "lddecodemetadata.h"
 
+#include "componentframe.h"
 #include "framecanvas.h"
-#include "outputframe.h"
+#include "outputwriter.h"
 #include "sourcefield.h"
 
 // Abstract base class for Transform PAL filters.
@@ -71,21 +72,21 @@ public:
     virtual void filterFields(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
                               QVector<const double *> &outputFields) = 0;
 
-    // Draw a visualisation of the FFT over RGB output frames.
+    // Draw a visualisation of the FFT over component frames.
     //
     // The FFT is computed for each field, so this visualises only the first
     // field in each frame. positionX/Y specify the location to visualise in
     // frame coordinates.
     void overlayFFT(qint32 positionX, qint32 positionY,
                     const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                    QVector<OutputFrame> &rgbFrames);
+                    QVector<ComponentFrame> &componentFrames);
 
 protected:
     // Overlay a visualisation of one field's FFT.
     // Calls back to overlayFFTArrays to draw the arrays.
     virtual void overlayFFTFrame(qint32 positionX, qint32 positionY,
                                  const QVector<SourceField> &inputFields, qint32 fieldIndex,
-                                 OutputFrame &rgbFrame) = 0;
+                                 ComponentFrame &componentFrame) = 0;
 
     void overlayFFTArrays(const fftw_complex *fftIn, const fftw_complex *fftOut,
                           FrameCanvas &canvas);

@@ -5,8 +5,7 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018 Chad Page
     Copyright (C) 2018-2019 Simon Inns
-    Copyright (C) 2019-2020 Adam Sampson
-    Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -33,6 +32,7 @@
 #include <QThread>
 #include <QDebug>
 
+#include "componentframe.h"
 #include "lddecodemetadata.h"
 #include "sourcevideo.h"
 
@@ -47,9 +47,6 @@ class NtscDecoder : public Decoder {
 public:
     NtscDecoder(const Comb::Configuration &combConfig);
     bool configure(const LdDecodeMetaData::VideoParameters &videoParameters) override;
-    const char *getPixelName() const override;
-    bool isOutputY4m() override;
-    QString getHeaders() const override;
     qint32 getLookBehind() const override;
     qint32 getLookAhead() const override;
     QThread *makeThread(QAtomicInt& abort, DecoderPool& decoderPool) override;
@@ -73,7 +70,7 @@ public:
 
 protected:
     void decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                      QVector<OutputFrame> &outputFrames) override;
+                      QVector<ComponentFrame> &componentFrames) override;
 
 private:
     // Settings

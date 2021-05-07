@@ -40,6 +40,7 @@
 #include "comb.h"
 #include "monodecoder.h"
 #include "ntscdecoder.h"
+#include "outputwriter.h"
 #include "palcolour.h"
 #include "paldecoder.h"
 #include "transformpal.h"
@@ -113,7 +114,9 @@ int main(int argc, char *argv[])
                 "ld-chroma-decoder - Colourisation filter for ld-decode\n"
                 "\n"
                 "(c)2018-2020 Simon Inns\n"
-                "(c)2019-2020 Adam Sampson\n"
+                "(c)2019-2021 Adam Sampson\n"
+                "(c)2018-2021 Chad Page\n"
+                "(c)2021 Phillip Blucas\n"
                 "Contains PALcolour: Copyright (c)2018 William Andrew Steer\n"
                 "Contains Transform PAL: Copyright (c)2014 Jim Easterbrook\n"
                 "GPLv3 Open-Source - github: https://github.com/happycube/ld-decode");
@@ -154,6 +157,12 @@ int main(int argc, char *argv[])
                                         QCoreApplication::translate("main", "number"));
     parser.addOption(chromaGainOption);
 
+    // Option to specify chroma phase
+    QCommandLineOption chromaPhaseOption(QStringList() << "chroma-phase",
+                                        QCoreApplication::translate("main", "Phase rotation applied to chroma components (degrees; default 0.0)"),
+                                        QCoreApplication::translate("main", "number"));
+    parser.addOption(chromaPhaseOption);
+
     // Option to select the output format (-p)
     QCommandLineOption outputFormatOption(QStringList() << "p" << "output-format",
                                        QCoreApplication::translate("main", "Output format (rgb, yuv, y4m; default rgb); RGB48, YUV444P16, GRAY16 pixel formats are supported"),
@@ -186,7 +195,7 @@ int main(int argc, char *argv[])
 
     // Option to set the white point to 75% (rather than 100%)
     QCommandLineOption whitePointOption(QStringList() << "w" << "white",
-                                        QCoreApplication::translate("main", "NTSC: Use 75% white-point (default 100%)"));
+                                        QCoreApplication::translate("main", "Use 75% white-point (default 100%)"));
     parser.addOption(whitePointOption);
 
     // Option to set the chroma noise reduction level
@@ -236,11 +245,6 @@ int main(int argc, char *argv[])
                                       QCoreApplication::translate("main", "Use NTSC QADM decoder taking burst phase into account (BETA)"));
     parser.addOption(ntscPhaseComp);
 
-    // Option to use chroma post-filter
-    QCommandLineOption colorLPF(QStringList() << "color-lpf",
-                                      QCoreApplication::translate("main", "NTSC: Use Chroma post-filter"));
-    parser.addOption(colorLPF);
-
     // -- Positional arguments --
 
     // Positional argument to specify input video file
@@ -287,7 +291,7 @@ int main(int argc, char *argv[])
     qint32 maxThreads = QThread::idealThreadCount();
     PalColour::Configuration palConfig;
     Comb::Configuration combConfig;
-    MonoDecoder::Configuration monoConfig;
+    OutputWriter::Configuration outputConfig;
 
     if (parser.isSet(startFrameOption)) {
         startFrame = parser.value(startFrameOption).toInt();
@@ -331,39 +335,20 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (parser.isSet(setBwModeOption)) {
+    if (parser.isSet(chromaPhaseOption)) {
+        const double value = parser.value(chromaPhaseOption).toDouble();
+        palConfig.chromaPhase = value;
+        combConfig.chromaPhase = value;
+    }
+
+    bool bwMode = parser.isSet(setBwModeOption);
+    if (bwMode) {
         palConfig.chromaGain = 0.0;
         combConfig.chromaGain = 0.0;
     }
 
-    // Determine the output format
-    QString outputFormatName;
-    if (parser.isSet(outputFormatOption)) {
-        outputFormatName = parser.value(outputFormatOption);
-    } else {
-        outputFormatName = "rgb";
-    }
-    if (outputFormatName == "yuv" || outputFormatName == "y4m") {
-        if (outputFormatName == "y4m") {
-            palConfig.outputY4m = true;
-            combConfig.outputY4m = true;
-            monoConfig.outputY4m = true;
-        }
-        palConfig.outputYCbCr = true;
-        palConfig.pixelFormat = palConfig.chromaGain > 0 ? Decoder::PixelFormat::YUV444P16 :
-                                                           Decoder::PixelFormat::GRAY16;
-        combConfig.outputYCbCr = true;
-        combConfig.pixelFormat = combConfig.chromaGain > 0 ? Decoder::PixelFormat::YUV444P16 :
-                                                             Decoder::PixelFormat::GRAY16;
-        monoConfig.outputYCbCr = true;
-        monoConfig.pixelFormat = Decoder::PixelFormat::GRAY16;
-    } else if (outputFormatName != "rgb") {
-        qCritical() << "Unknown output format" << outputFormatName;
-        return -1;
-    }
-
     if (parser.isSet(whitePointOption)) {
-        combConfig.whitePoint75 = true;
+        outputConfig.whitePoint75 = true;
     }
 
     if (parser.isSet(showMapOption)) {
@@ -419,25 +404,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (parser.isSet(showFFTsOption)) {
-        palConfig.showFFTs = true;
-        if (palConfig.outputY4m) {
-            // Quit with error
-            qCritical("Y4M output not available when showFFT is enabled");
-            return -1;
-        } else if (palConfig.outputYCbCr) {
-            // Quit with error
-            qCritical("YUV output not available when showFFT is enabled");
-            return -1;
-        }
-    }
 
     if (parser.isSet(ntscPhaseComp)) {
         combConfig.phaseCompensation = true;
-    }
-
-    if (parser.isSet(colorLPF)) {
-        combConfig.colorlpf = true;
     }
 
     // Work out the metadata filename
@@ -511,14 +480,37 @@ int main(int argc, char *argv[])
         combConfig.adaptive = false;
         decoder.reset(new NtscDecoder(combConfig));
     } else if (decoderName == "mono") {
-        decoder.reset(new MonoDecoder(monoConfig));
+        decoder.reset(new MonoDecoder);
     } else {
         qCritical() << "Unknown decoder" << decoderName;
         return -1;
     }
 
+    // Select the output format
+    QString outputFormatName;
+    if (parser.isSet(outputFormatOption)) {
+        outputFormatName = parser.value(outputFormatOption);
+    } else {
+        outputFormatName = "rgb";
+    }
+    if (outputFormatName == "yuv" || outputFormatName == "y4m") {
+        if (outputFormatName == "y4m") {
+            outputConfig.outputY4m = true;
+        }
+        if (bwMode || decoderName == "mono") {
+            outputConfig.pixelFormat = OutputWriter::PixelFormat::GRAY16;
+        } else {
+            outputConfig.pixelFormat = OutputWriter::PixelFormat::YUV444P16;
+        }
+    } else if (outputFormatName == "rgb") {
+        outputConfig.pixelFormat = OutputWriter::PixelFormat::RGB48;
+    } else {
+        qCritical() << "Unknown output format" << outputFormatName;
+        return -1;
+    }
+
     // Perform the processing
-    DecoderPool decoderPool(*decoder, inputFileName, metaData, outputFileName, startFrame, length, maxThreads);
+    DecoderPool decoderPool(*decoder, inputFileName, metaData, outputConfig, outputFileName, startFrame, length, maxThreads);
     if (!decoderPool.process()) {
         return -1;
     }

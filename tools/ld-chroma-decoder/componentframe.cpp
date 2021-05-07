@@ -1,9 +1,9 @@
 /************************************************************************
 
-    outputframe.h
+    componentframe.cpp
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2020 Adam Sampson
+    Copyright (C) 2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -22,20 +22,26 @@
 
 ************************************************************************/
 
-#ifndef OUTPUTFRAME_H
-#define OUTPUTFRAME_H
+#include "componentframe.h"
 
-#include <QtGlobal>
-#include <QVector>
-
-// A decoded frame, containing triples of (R, G, B) samples or
-// planar Y, Cb, Cr samples.
-typedef struct
+ComponentFrame::ComponentFrame()
+    : width(-1), height(-1)
 {
-    QVector<quint16> RGB;
-    QVector<quint16> Y;
-    QVector<quint16> Cb;
-    QVector<quint16> Cr;
-} OutputFrame;
+}
 
-#endif // OUTPUTFRAME_H
+void ComponentFrame::init(const LdDecodeMetaData::VideoParameters &videoParameters)
+{
+    width = videoParameters.fieldWidth;
+    height = (videoParameters.fieldHeight * 2) - 1;
+
+    const qint32 size = width * height;
+
+    yData.resize(size);
+    yData.fill(0.0);
+
+    uData.resize(size);
+    uData.fill(0.0);
+
+    vData.resize(size);
+    vData.fill(0.0);
+}

@@ -16,16 +16,16 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     comb.cpp \
+    componentframe.cpp \
     decoder.cpp \
     decoderpool.cpp \
     framecanvas.cpp \
     main.cpp \
     monodecoder.cpp \
     ntscdecoder.cpp \
+    outputwriter.cpp \
     palcolour.cpp \
     paldecoder.cpp \
-    rgb.cpp \
-    ycbcr.cpp \
     sourcefield.cpp \
     transformpal.cpp \
     transformpal2d.cpp \
@@ -38,21 +38,19 @@ SOURCES += \
 
 HEADERS += \
     comb.h \
+    componentframe.h \
     decoder.h \
     decoderpool.h \
     framecanvas.h \
     monodecoder.h \
     ntscdecoder.h \
-    outputframe.h \
+    outputwriter.h \
     palcolour.h \
     paldecoder.h \
-    rgb.h \
     sourcefield.h \
     transformpal.h \
     transformpal2d.h \
     transformpal3d.h \
-    ycbcr.h \
-    yiq.h \
     ../library/filter/deemp.h \
     ../library/filter/firfilter.h \
     ../library/filter/iirfilter.h \

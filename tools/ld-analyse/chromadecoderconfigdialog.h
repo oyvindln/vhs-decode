@@ -29,6 +29,7 @@
 #include <QDialog>
 
 #include "comb.h"
+#include "outputwriter.h"
 #include "palcolour.h"
 
 namespace Ui {
@@ -43,15 +44,19 @@ public:
     explicit ChromaDecoderConfigDialog(QWidget *parent = nullptr);
     ~ChromaDecoderConfigDialog();
 
-    void setConfiguration(bool isSourcePal, const PalColour::Configuration &palConfiguration, const Comb::Configuration &ntscConfiguration);
+    void setConfiguration(bool isSourcePal, const PalColour::Configuration &palConfiguration,
+                          const Comb::Configuration &ntscConfiguration,
+                          const OutputWriter::Configuration &outputConfiguration);
     const PalColour::Configuration &getPalConfiguration();
     const Comb::Configuration &getNtscConfiguration();
+    const OutputWriter::Configuration &getOutputConfiguration();
 
 signals:
     void chromaDecoderConfigChanged();
 
 private slots:
     void on_chromaGainHorizontalSlider_valueChanged(int value);
+    void on_chromaPhaseHorizontalSlider_valueChanged(int value);
 
     void on_palFilterButtonGroup_buttonClicked(QAbstractButton *button);
     void on_thresholdModeCheckBox_clicked();
@@ -74,6 +79,7 @@ private:
     bool isSourcePal;
     PalColour::Configuration palConfiguration;
     Comb::Configuration ntscConfiguration;
+    OutputWriter::Configuration outputConfiguration;
 
     void updateDialog();
 };

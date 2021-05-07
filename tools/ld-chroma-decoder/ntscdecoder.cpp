@@ -5,8 +5,7 @@
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018 Chad Page
     Copyright (C) 2018-2019 Simon Inns
-    Copyright (C) 2019-2020 Adam Sampson
-    Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -32,9 +31,6 @@
 NtscDecoder::NtscDecoder(const Comb::Configuration &combConfig)
 {
     config.combConfig = combConfig;
-    config.outputYCbCr = combConfig.outputYCbCr;
-    config.outputY4m = combConfig.outputY4m;
-    config.pixelFormat = combConfig.pixelFormat;
 }
 
 bool NtscDecoder::configure(const LdDecodeMetaData::VideoParameters &videoParameters) {
@@ -44,35 +40,9 @@ bool NtscDecoder::configure(const LdDecodeMetaData::VideoParameters &videoParame
         return false;
     }
 
-    // Compute cropping parameters
-    setVideoParameters(config, videoParameters);
+    config.videoParameters = videoParameters;
 
     return true;
-}
-
-const char *NtscDecoder::getPixelName() const
-{
-    return config.outputYCbCr ?
-           config.combConfig.chromaGain > 0 ? "YUV444P16" : "GRAY16" : "RGB48";
-}
-
-bool NtscDecoder::isOutputY4m()
-{
-    return config.outputY4m;
-}
-
-QString NtscDecoder::getHeaders() const
-{
-    QString y4mHeader;
-    qint32 rateN = 30000;
-    qint32 rateD = 1001;
-    qint32 width = config.videoParameters.activeVideoEnd - config.videoParameters.activeVideoStart;
-    qint32 height = config.topPadLines + config.bottomPadLines +
-                    config.videoParameters.lastActiveFrameLine - config.videoParameters.firstActiveFrameLine;
-    QTextStream(&y4mHeader) << "YUV4MPEG2 W" << width << " H" << height << " F" << rateN << ":" << rateD
-                            << " I" << y4mFieldOrder << " A" << (config.videoParameters.isWidescreen ? Y4M_PAR_NTSC_169 : Y4M_PAR_NTSC_43)
-                            << (config.pixelFormat == YUV444P16 ? Y4M_CS_YUV444P16 : Y4M_CS_GRAY16);
-    return y4mHeader;
 }
 
 qint32 NtscDecoder::getLookBehind() const
@@ -99,15 +69,8 @@ NtscThread::NtscThread(QAtomicInt& _abort, DecoderPool &_decoderPool,
 }
 
 void NtscThread::decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                              QVector<OutputFrame> &outputFrames)
+                              QVector<ComponentFrame> &componentFrames)
 {
-    QVector<OutputFrame> decodedFrames(outputFrames.size());
-
     // Decode fields to frames
-    comb.decodeFrames(inputFields, startIndex, endIndex, decodedFrames);
-
-    for (qint32 i = 0; i < outputFrames.size(); i++) {
-        // Crop the frame to just the active area
-        outputFrames[i] = NtscDecoder::cropOutputFrame(config, decodedFrames[i]);
-    }
+    comb.decodeFrames(inputFields, startIndex, endIndex, componentFrames);
 }

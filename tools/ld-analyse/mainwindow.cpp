@@ -195,7 +195,8 @@ void MainWindow::updateGuiLoaded()
     aspect43On = false;
 
     // Update the chroma decoder configuration dialogue
-    chromaDecoderConfigDialog->setConfiguration(tbcSource.getIsSourcePal(), tbcSource.getPalConfiguration(), tbcSource.getNtscConfiguration());
+    chromaDecoderConfigDialog->setConfiguration(tbcSource.getIsSourcePal(), tbcSource.getPalConfiguration(),
+                                                tbcSource.getNtscConfiguration(), tbcSource.getOutputConfiguration());
 
     // Show the current frame
     showFrame();
@@ -865,7 +866,9 @@ void MainWindow::mouseScanLineSelect(qint32 oX, qint32 oY)
 void MainWindow::chromaDecoderConfigChangedSignalHandler()
 {
     // Set the new configuration
-    tbcSource.setChromaConfiguration(chromaDecoderConfigDialog->getPalConfiguration(), chromaDecoderConfigDialog->getNtscConfiguration());
+    tbcSource.setChromaConfiguration(chromaDecoderConfigDialog->getPalConfiguration(),
+                                     chromaDecoderConfigDialog->getNtscConfiguration(),
+                                     chromaDecoderConfigDialog->getOutputConfiguration());
 
     // Update the frame viewer;
     updateFrameViewer();

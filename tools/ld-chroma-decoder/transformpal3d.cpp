@@ -3,7 +3,7 @@
     transformpal3d.cpp
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     Reusing code from pyctools-pal, which is:
     Copyright (C) 2014 Jim Easterbrook
@@ -356,7 +356,7 @@ void TransformPal3D::applyFilter()
 
 void TransformPal3D::overlayFFTFrame(qint32 positionX, qint32 positionY,
                                      const QVector<SourceField> &inputFields, qint32 fieldIndex,
-                                     OutputFrame &rgbFrame)
+                                     ComponentFrame &componentFrame)
 {
     // Do nothing if the tile isn't within the frame
     if (positionX < 0 || positionX + XTILE > videoParameters.fieldWidth
@@ -375,10 +375,11 @@ void TransformPal3D::overlayFFTFrame(qint32 positionX, qint32 positionY,
     }
 
     // Create a canvas
-    FrameCanvas canvas(rgbFrame, videoParameters);
+    FrameCanvas canvas(componentFrame, videoParameters);
 
     // Outline the selected tile
-    canvas.drawRectangle(positionX - 1, positionY - 1, XTILE + 1, YTILE + 1, FrameCanvas::green);
+    const auto green = canvas.rgb(0, 0xFFFF, 0);
+    canvas.drawRectangle(positionX - 1, positionY - 1, XTILE + 1, YTILE + 1, green);
 
     // Draw the arrays
     overlayFFTArrays(fftComplexIn, fftComplexOut, canvas);

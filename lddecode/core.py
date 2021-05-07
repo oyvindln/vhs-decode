@@ -1478,12 +1478,19 @@ class Field:
 
         if line is None:
             return self.rf.linelen
-        elif line >= self.linecount + self.lineoffset:
-            return (self.linelocs[line + 0] - self.linelocs[line - 1]) / 1
+
+        if line >= self.linecount + self.lineoffset:
+            length = (self.linelocs[line + 0] - self.linelocs[line - 1]) / 1
         elif line > 0:
-            return (self.linelocs[line + 1] - self.linelocs[line - 1]) / 2
+            length = (self.linelocs[line + 1] - self.linelocs[line - 1]) / 2
         elif line == 0:
-            return (self.linelocs[line + 1] - self.linelocs[line - 0]) / 1
+            length = (self.linelocs[line + 1] - self.linelocs[line - 0]) / 1
+
+        if length <= 0:
+            # linelocs aren't monotonic -- probably TBC failure
+            return self.rf.linelen
+
+        return length
 
     def get_linefreq(self, line=None, linelocs=None):
         return self.rf.freq * (self.get_linelen(line, linelocs) / self.rf.linelen)

@@ -3,8 +3,7 @@
     monodecoder.h
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
-    Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -31,6 +30,7 @@
 #include <QThread>
 #include <QDebug>
 
+#include "componentframe.h"
 #include "lddecodemetadata.h"
 #include "sourcevideo.h"
 
@@ -43,11 +43,7 @@ class DecoderPool;
 // Decoder that passes all input through as luma, for purely monochrome sources
 class MonoDecoder : public Decoder {
 public:
-    MonoDecoder(const MonoDecoder::Configuration &monoConfig);
     bool configure(const LdDecodeMetaData::VideoParameters &videoParameters) override;
-    const char *getPixelName() const override;
-    bool isOutputY4m() override;
-    QString getHeaders() const override;
     QThread *makeThread(QAtomicInt& abort, DecoderPool& decoderPool) override;
 
 private:
@@ -64,14 +60,13 @@ public:
 
 protected:
     void decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                      QVector<OutputFrame> &outputFrames) override;
+                      QVector<ComponentFrame> &componentFrames) override;
 
 private:
+    void decodeFrame(const SourceField &firstField, const SourceField &secondField, ComponentFrame &componentFrame);
+
     // Settings
     const MonoDecoder::Configuration &config;
-
-    // The frame being assembled
-    OutputFrame outputFrame;
 };
 
 #endif // MONODECODER

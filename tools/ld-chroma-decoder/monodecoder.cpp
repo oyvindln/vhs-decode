@@ -3,8 +3,7 @@
     monodecoder.cpp
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
-    Copyright (C) 2021 Phillip Blucas
+    Copyright (C) 2019-2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -29,48 +28,12 @@
 #include "decoderpool.h"
 #include "palcolour.h"
 
-MonoDecoder::MonoDecoder(const MonoDecoder::Configuration &monoConfig)
-{
-    config = monoConfig;
-}
-
 bool MonoDecoder::configure(const LdDecodeMetaData::VideoParameters &videoParameters) {
     // This decoder works for both PAL and NTSC.
 
-    // Compute cropping parameters
-    setVideoParameters(config, videoParameters);
+    config.videoParameters = videoParameters;
 
     return true;
-}
-
-const char *MonoDecoder::getPixelName() const
-{
-    return config.outputYCbCr ? "GRAY16" : "RGB48";
-}
-
-bool MonoDecoder::isOutputY4m()
-{
-    return config.outputY4m;
-}
-
-QString MonoDecoder::getHeaders() const
-{
-    QString y4mHeader;
-    qint32 rateN = 30000;
-    qint32 rateD = 1001;
-    qint32 width = config.videoParameters.activeVideoEnd - config.videoParameters.activeVideoStart;
-    qint32 height = config.topPadLines + config.bottomPadLines +
-                    config.videoParameters.lastActiveFrameLine - config.videoParameters.firstActiveFrameLine;
-    QString y4mPixelAspect = (config.videoParameters.isWidescreen ? Y4M_PAR_NTSC_169 : Y4M_PAR_NTSC_43);
-    if (config.videoParameters.isSourcePal) {
-        rateN = 25;
-        rateD = 1;
-        y4mPixelAspect = (config.videoParameters.isWidescreen ? Y4M_PAR_PAL_169 : Y4M_PAR_PAL_43);
-    }
-    QTextStream(&y4mHeader) << "YUV4MPEG2 W" << width << " H" << height << " F" << rateN << ":" << rateD
-                            << " I" << y4mFieldOrder << " A" << y4mPixelAspect
-                            << (config.pixelFormat == YUV444P16 ? Y4M_CS_YUV444P16 : Y4M_CS_GRAY16);
-    return y4mHeader;
 }
 
 QThread *MonoDecoder::makeThread(QAtomicInt& abort, DecoderPool& decoderPool) {
@@ -78,56 +41,35 @@ QThread *MonoDecoder::makeThread(QAtomicInt& abort, DecoderPool& decoderPool) {
 }
 
 MonoThread::MonoThread(QAtomicInt& _abort, DecoderPool& _decoderPool,
-                     const MonoDecoder::Configuration &_config, QObject *parent)
+                       const MonoDecoder::Configuration &_config, QObject *parent)
     : DecoderThread(_abort, _decoderPool, parent), config(_config)
 {
-    // Resize and clear the output buffers
-    const qint32 frameHeight = (config.videoParameters.fieldHeight * 2) - 1;
-    if (config.outputYCbCr) {
-        outputFrame.Y.resize(config.videoParameters.fieldWidth * frameHeight);
-        outputFrame.Y.fill(16 * 256);
-        outputFrame.Cb.resize(0);
-        outputFrame.Cr.resize(0);
-    } else {
-        outputFrame.RGB.resize(config.videoParameters.fieldWidth * frameHeight * 3);
-        outputFrame.RGB.fill(0);
-    }
 }
 
 void MonoThread::decodeFrames(const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                              QVector<OutputFrame> &outputFrames)
+                              QVector<ComponentFrame> &componentFrames)
 {
-    // Work out black-white scaling factors
-    const LdDecodeMetaData::VideoParameters &videoParameters = config.videoParameters;
-    const quint16 blackOffset = videoParameters.black16bIre;
-
     for (qint32 fieldIndex = startIndex, frameIndex = 0; fieldIndex < endIndex; fieldIndex += 2, frameIndex++) {
-        // Interlace the active lines of the two input fields to produce an output frame
-        for (qint32 y = config.videoParameters.firstActiveFrameLine; y < config.videoParameters.lastActiveFrameLine; y++) {
-            const SourceVideo::Data &inputFieldData = (y % 2) == 0 ? inputFields[fieldIndex].data : inputFields[fieldIndex + 1].data;
-            const quint16 *inputLine = inputFieldData.data() + ((y / 2) * videoParameters.fieldWidth);
-            if (config.outputYCbCr) {
-                const double whiteScale = 219.0 * 257.0 / (videoParameters.white16bIre - blackOffset);
-                for (qint32 x = videoParameters.activeVideoStart; x < videoParameters.activeVideoEnd; x++) {
-                    quint16 value = static_cast<quint16>(qBound(1.0 * 256.0, (inputLine[x] - blackOffset) * whiteScale + 16 * 256, 254.75 * 256.0));
-                    quint16 *outputLine = outputFrame.Y.data() + (y * videoParameters.fieldWidth);
-                    outputLine[x] = value;
-                }
-            } else {
-                // Each quint16 input becomes three RGB quint16 outputs
-                const double whiteScale = 65535.0 / (videoParameters.white16bIre - blackOffset);
-                for (qint32 x = videoParameters.activeVideoStart; x < videoParameters.activeVideoEnd; x++) {
-                    quint16 value = static_cast<quint16>(qBound(0.0, (inputLine[x] - blackOffset) * whiteScale, 65535.0));
-                    quint16 *outputLine = outputFrame.RGB.data() + (y * videoParameters.fieldWidth * 3);
-                    const qint32 outputPos = x * 3;
-                    outputLine[outputPos] = value;
-                    outputLine[outputPos + 1] = value;
-                    outputLine[outputPos + 2] = value;
-                }
-            }
-        }
+        decodeFrame(inputFields[fieldIndex], inputFields[fieldIndex + 1], componentFrames[frameIndex]);
+    }
+}
 
-        // Crop the frame to just the active area
-        outputFrames[frameIndex] = MonoDecoder::cropOutputFrame(config, outputFrame);
+void MonoThread::decodeFrame(const SourceField &firstField, const SourceField &secondField, ComponentFrame &componentFrame)
+{
+    const LdDecodeMetaData::VideoParameters &videoParameters = config.videoParameters;
+
+    // Initialise and clear the component frame
+    componentFrame.init(videoParameters);
+
+    // Interlace the active lines of the two input fields to produce a component frame
+    for (qint32 y = videoParameters.firstActiveFrameLine; y < videoParameters.lastActiveFrameLine; y++) {
+        const SourceVideo::Data &inputFieldData = (y % 2) == 0 ? firstField.data : secondField.data;
+        const quint16 *inputLine = inputFieldData.data() + ((y / 2) * videoParameters.fieldWidth);
+
+        // Copy the whole composite signal to Y (leaving U and V blank)
+        double *outY = componentFrame.y(y);
+        for (qint32 x = videoParameters.activeVideoStart; x < videoParameters.activeVideoEnd; x++) {
+            outY[x] = inputLine[x];
+        }
     }
 }

@@ -3,7 +3,7 @@
     transformpal.cpp
 
     ld-chroma-decoder - Colourisation filter for ld-decode
-    Copyright (C) 2019 Adam Sampson
+    Copyright (C) 2019-2021 Adam Sampson
 
     Reusing code from pyctools-pal, which is:
     Copyright (C) 2014 Jim Easterbrook
@@ -67,11 +67,11 @@ void TransformPal::updateConfiguration(const LdDecodeMetaData::VideoParameters &
 
 void TransformPal::overlayFFT(qint32 positionX, qint32 positionY,
                               const QVector<SourceField> &inputFields, qint32 startIndex, qint32 endIndex,
-                              QVector<OutputFrame> &rgbFrames)
+                              QVector<ComponentFrame> &componentFrames)
 {
-    // Visualise the first field for each output frame
+    // Visualise the first field for each frame
     for (int fieldIndex = startIndex, outputIndex = 0; fieldIndex < endIndex; fieldIndex += 2, outputIndex++) {
-        overlayFFTFrame(positionX, positionY, inputFields, fieldIndex, rgbFrames[outputIndex]);
+        overlayFFTFrame(positionX, positionY, inputFields, fieldIndex, componentFrames[outputIndex]);
     }
 }
 
@@ -79,6 +79,9 @@ void TransformPal::overlayFFT(qint32 positionX, qint32 positionY,
 void TransformPal::overlayFFTArrays(const fftw_complex *fftIn, const fftw_complex *fftOut,
                                     FrameCanvas &canvas)
 {
+    // Colours
+    const auto green = canvas.rgb(0, 0xFFFF, 0);
+
     // How many pixels to draw for each bin
     const qint32 xScale = 2;
     const qint32 yScale = 2;
@@ -102,7 +105,7 @@ void TransformPal::overlayFFTArrays(const fftw_complex *fftIn, const fftw_comple
             const qint32 xStart = canvas.right() - ((2 - column) * ((xScale * xComplex) + 1)) - 1;
 
             // Outline the array
-            canvas.drawRectangle(xStart, yStart, (xScale * xComplex) + 2, (yScale * yComplex) + 2, canvas.green);
+            canvas.drawRectangle(xStart, yStart, (xScale * xComplex) + 2, (yScale * yComplex) + 2, green);
 
             // Draw the bins in the array
             for (qint32 y = 0; y < yComplex; y++) {

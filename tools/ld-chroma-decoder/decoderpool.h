@@ -37,18 +37,25 @@
 #include "sourcevideo.h"
 
 #include "decoder.h"
+#include "outputwriter.h"
 #include "sourcefield.h"
 
 class DecoderPool
 {
 public:
     explicit DecoderPool(Decoder &decoder, QString inputFileName,
-                         LdDecodeMetaData &ldDecodeMetaData, QString outputFileName,
+                         LdDecodeMetaData &ldDecodeMetaData,
+                         OutputWriter::Configuration &outputConfig, QString outputFileName,
                          qint32 startFrame, qint32 length, qint32 maxThreads);
 
     // Decode fields to frames as specified by the constructor args.
     // Returns true on success; on failure, prints a message and returns false.
     bool process();
+
+    // For worker threads: get the configured OutputWriter
+    OutputWriter &getOutputWriter() {
+        return outputWriter;
+    }
 
     // For worker threads: get the next batch of data from the input file.
     //
@@ -81,8 +88,9 @@ private:
     static constexpr qint32 DEFAULT_BATCH_SIZE = 16;
 
     // Parameters
-    Decoder& decoder;
+    Decoder &decoder;
     QString inputFileName;
+    OutputWriter::Configuration outputConfig;
     QString outputFileName;
     qint32 startFrame;
     qint32 length;
@@ -105,6 +113,7 @@ private:
     QMutex outputMutex;
     qint32 outputFrameNumber;
     QMap<qint32, OutputFrame> pendingOutputFrames;
+    OutputWriter outputWriter;
     QFile targetVideo;
     QElapsedTimer totalTimer;
 };
