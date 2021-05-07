@@ -90,7 +90,7 @@ class Resync:
             pulse_hz_min = field.rf.iretohz(sync_ire)
             pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
         else:
-            # pass one using standard levels
+            # pass one using standard levels (fallback sync logic)
             # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
             pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
             pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
