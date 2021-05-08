@@ -152,9 +152,10 @@ class VsyncSerration:
             # validates it by time length, range must be calculated
             if 17e3 < len(serration) < 23e3:
                 self.push_levels(self.get_serration_sync_levels(serration))
-                #sync, blank = self.get_levels()
-                #marker = np.ones(len(serration)) * blank
-                #dualplot_scope(serration, marker, title='VBI EQ serration + measured blanking level')
+                if self.show_decoded:
+                    sync, blank = self.get_levels()
+                    marker = np.ones(len(serration)) * blank
+                    dualplot_scope(serration, marker, title='VBI EQ serration + measured blanking level')
                 return True, data_s, data_e
             else:
                 return False, None, None
@@ -187,7 +188,7 @@ class VsyncSerration:
                         mask_len = serr_len - serr_loc
 
                 if self.show_decoded:
-                    data_copy = self.remove_bias(data)
+                    data_copy = data.copy()  # self.remove_bias(data)
                     if len(serration_locs) > 0:
                         mask = self.mutemask(np.array(serration_locs), len(data_copy), mask_len)
                         dualplot_scope(data_copy, np.clip(mask * max(data_copy), a_max=max(data_copy), a_min=min(data_copy)), title="VBI position")

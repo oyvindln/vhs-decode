@@ -75,8 +75,6 @@ class Resync:
                 blank, sync = self.field_state.getLevels()
 
             if not field.rf.disable_dc_offset:
-                # sync_reference = self.VsyncSerration.remove_bias(sync_reference) + sync
-                # demod_data = self.VsyncSerration.remove_bias(demod_data) + sync
                 dc_offset = field.rf.SysParams["ire0"] - blank
                 sync_reference += dc_offset
                 demod_data += dc_offset
@@ -99,10 +97,10 @@ class Resync:
             mean_bias = self.VsyncSerration.mean_bias()
             if not field.rf.disable_dc_offset and not \
                     pulse_hz_min < mean_bias < field.rf.iretohz(field.rf.SysParams["vsync_ire"]):
-                field.data["video"]["demod_05"] = self.VsyncSerration.remove_bias(sync_reference) + field.rf.iretohz(
-                    field.rf.SysParams["vsync_ire"])
-                field.data["video"]["demod"] = self.VsyncSerration.remove_bias(demod_data) + field.rf.iretohz(
-                    field.rf.SysParams["vsync_ire"])
+                field.data["video"]["demod_05"] = sync_reference - mean_bias + \
+                    field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+                field.data["video"]["demod"] = demod_data - mean_bias + \
+                    field.rf.iretohz(field.rf.SysParams["vsync_ire"])
 
 
         # utils.plot_scope(field.data["video"]["demod_05"])
