@@ -74,6 +74,7 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
     if (json.size({"videoParameters"}) > 0) {
         videoParameters.numberOfSequentialFields = json.value({"videoParameters", "numberOfSequentialFields"}).toInt();
         videoParameters.isSourcePal = json.value({"videoParameters", "isSourcePal"}).toBool();
+        videoParameters.isSourcePalM = json.value({"videoParameters", "isSourcePalM"}, false).toBool();
         videoParameters.isSubcarrierLocked = json.value({"videoParameters", "isSubcarrierLocked"}).toBool();
         videoParameters.isWidescreen = json.value({"videoParameters", "isWidescreen"}).toBool();
 
@@ -97,7 +98,7 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
     }
 
     // Add in the active field line range psuedo-metadata
-    if (videoParameters.isSourcePal) {
+    if (videoParameters.isSourcePal && !videoParameters.isSourcePalM) {
         // PAL
         videoParameters.firstActiveFieldLine = 22;
         videoParameters.lastActiveFieldLine = 308;

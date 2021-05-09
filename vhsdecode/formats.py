@@ -1,5 +1,11 @@
 import copy
-from lddecode.core import RFParams_PAL, RFParams_NTSC, SysParams_PAL, SysParams_NTSC
+from lddecode.core import (
+    RFParams_PAL,
+    RFParams_NTSC,
+    SysParams_PAL,
+    SysParams_NTSC,
+    calclinelen,
+)
 
 # We base the parameters off the original laserdisc ones and override the ones
 # we need.
@@ -222,7 +228,16 @@ SysParams_NTSC_VHS["burst_abs_ref"] = 1750
 
 # PAL-M sysparams override (From JVC Video technical guide)
 SysParams_MPAL_VHS = copy.deepcopy(SysParams_NTSC_VHS)
-SysParams_MPAL_VHS["fsc_mhz"] = 3.575611
+SysParams_MPAL_VHS["fsc_mhz"] = 3.575611888111
+SysParams_MPAL_VHS["fieldPhases"] = 8
+
+## Should be the same as NTSC in practice
+SysParams_MPAL_VHS["line_period"] = 1 / (SysParams_MPAL_VHS["fsc_mhz"] / (909 / 4.0))
+SysParams_MPAL_VHS["activeVideoUS"] = (9.45, SysParams_MPAL_VHS["line_period"] - 1.0)
+# SysParams_NTSC["FPS"] = 1000000 / (525 * SysParams_MPAL_VHS["line_period"])
+
+SysParams_MPAL_VHS["outlinelen"] = calclinelen(SysParams_MPAL_VHS, 4, "fsc_mhz")
+SysParams_MPAL_VHS["outfreq"] = 4 * SysParams_MPAL_VHS["fsc_mhz"]
 
 # PAL and NTSC "regular-band" use the same frequencies, but
 # not sure if PAL sync being -43 and ntsc being -40 makes

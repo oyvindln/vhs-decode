@@ -26,14 +26,18 @@ class FieldState:
 
     def getSyncLevel(self):
         if np.size(self.synclevels) > 0:
-            synclevel, self.synclevels = utils.moving_average(self.synclevels, window=self.field_average)
+            synclevel, self.synclevels = utils.moving_average(
+                self.synclevels, window=self.field_average
+            )
             return synclevel
         else:
             return None
 
     def getLevels(self):
         if np.size(self.blanklevels) > 0:
-            blacklevel, self.blanklevels = utils.moving_average(self.blanklevels, window=self.field_average)
+            blacklevel, self.blanklevels = utils.moving_average(
+                self.blanklevels, window=self.field_average
+            )
             return blacklevel, self.getSyncLevel()
         else:
             return None, None
@@ -45,7 +49,10 @@ class FieldState:
         return self.locs
 
     def hasLevels(self):
-        return np.size(self.blanklevels) > self.min_watermark and np.size(self.synclevels) > self.min_watermark
+        return (
+            np.size(self.blanklevels) > self.min_watermark
+            and np.size(self.synclevels) > self.min_watermark
+        )
 
 
 class Resync:
@@ -65,7 +72,9 @@ class Resync:
         sync_reference = field.data["video"]["demod_05"]
         self.VsyncSerration.work(sync_reference)
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
-        demod_data = self.VsyncSerration.safe_sync_clip(sync_reference, field.data["video"]["demod"])
+        demod_data = self.VsyncSerration.safe_sync_clip(
+            sync_reference, field.data["video"]["demod"]
+        )
 
         # if has levels, then compensate blanking bias
         if self.VsyncSerration.has_levels() or self.field_state.hasLevels():
@@ -82,7 +91,9 @@ class Resync:
                 # forced blank
                 # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
-            field.data["video"]["demod_05"] = np.clip(sync_reference, a_min=sync, a_max=blank)
+            field.data["video"]["demod_05"] = np.clip(
+                sync_reference, a_min=sync, a_max=blank
+            )
             field.data["video"]["demod"] = demod_data
             sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
             pulse_hz_min = field.rf.iretohz(sync_ire)
@@ -95,13 +106,22 @@ class Resync:
 
             # checks if the DC offset is abnormal before correcting it
             mean_bias = self.VsyncSerration.mean_bias()
-            if not field.rf.disable_dc_offset and not \
-                    pulse_hz_min < mean_bias < field.rf.iretohz(field.rf.SysParams["vsync_ire"]):
-                field.data["video"]["demod_05"] = sync_reference - mean_bias + \
-                    field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-                field.data["video"]["demod"] = demod_data - mean_bias + \
-                    field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-
+            if (
+                not field.rf.disable_dc_offset
+                and not pulse_hz_min
+                < mean_bias
+                < field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+            ):
+                field.data["video"]["demod_05"] = (
+                    sync_reference
+                    - mean_bias
+                    + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+                )
+                field.data["video"]["demod"] = (
+                    demod_data
+                    - mean_bias
+                    + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+                )
 
         # utils.plot_scope(field.data["video"]["demod_05"])
         pulses = lddu.findpulses(
@@ -122,9 +142,9 @@ class Resync:
                 vsync_means.append(
                     np.mean(
                         field.data["video"]["demod_05"][
-                        int(p.start + field.rf.freq): int(
-                            p.start + p.len - field.rf.freq
-                        )
+                            int(p.start + field.rf.freq) : int(
+                                p.start + p.len - field.rf.freq
+                            )
                         ]
                     )
                 )
@@ -162,9 +182,9 @@ class Resync:
                 black_means.append(
                     np.mean(
                         field.data["video"]["demod_05"][
-                        int(p.start + (field.rf.freq * 5)): int(
-                            p.start + (field.rf.freq * 20)
-                        )
+                            int(p.start + (field.rf.freq * 5)) : int(
+                                p.start + (field.rf.freq * 20)
+                            )
                         ]
                     )
                 )
@@ -185,4 +205,6 @@ class Resync:
         pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
         pulse_hz_max = (blacklevel + synclevel) / 2
 
-        return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
+        return lddu.findpulses(
+            field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
+        )

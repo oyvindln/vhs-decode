@@ -139,6 +139,13 @@ def common_parser(meta_title):
         default=10.0,
         help="Q factor for notch filter",
     )
+    parser.add_argument(
+        "--debug",
+        dest="debug",
+        action="store_true",
+        default=False,
+        help="Set log legel to DEBUG.",
+    )
     return parser
 
 

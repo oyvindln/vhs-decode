@@ -40,13 +40,15 @@ def chroma_to_u16(chroma):
 def replace_spikes(demod, demod_diffed, max_value, replace_start=4, replace_end=20):
     """Go through and replace spikes and some samples after them with data
     from the diff demod pass"""
-    assert len(demod) == len(demod_diffed), "diff demod length doesn't match demod length"
+    assert len(demod) == len(
+        demod_diffed
+    ), "diff demod length doesn't match demod length"
     too_high = max_value
     to_fix = np.where(demod > too_high)[0]
 
     for i in to_fix:
         start = max(i - replace_start, 0)
-        end = min(i + replace_end, len(demod_diffed) -1)
+        end = min(i + replace_end, len(demod_diffed) - 1)
         demod[start:end] = demod_diffed[start:end]
 
     return demod
@@ -194,7 +196,7 @@ def process_chroma(field, track_phase, disable_deemph=False):
     )
 
     # For NTSC, the color burst amplitude is doubled when recording, so we have to undo that.
-    if field.rf.system == "NTSC" and not disable_deemph:
+    if field.rf.color_system == "NTSC" and not disable_deemph:
         chroma = burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea)
 
     # Track 2 is rotated ccw in both NTSC and PAL for VHS
@@ -204,15 +206,15 @@ def process_chroma(field, track_phase, disable_deemph=False):
     starting_phase = 0
 
     if track_phase is not None and field.rf.field_number % 2 == track_phase:
-        if field.rf.system == "PAL":
+        if field.rf.color_system == "PAL" or field.rf.color_system == "MPAL":
             # For PAL, track 1 has no rotation.
             phase_rotation = 0
-        elif field.rf.system == "NTSC":
+        elif field.rf.color_system == "NTSC":
             # For NTSC, track 1 rotates cw
             phase_rotation = 1
             starting_phase = 1
         else:
-            raise Exception("Unknown video system!", field.rf.system)
+            raise Exception("Unknown video system!", field.rf.color_system)
 
     uphet = upconvert_chroma(
         chroma,
@@ -234,7 +236,7 @@ def process_chroma(field, track_phase, disable_deemph=False):
     uphet = utils.filter_simple(uphet, field.rf.Filters["FChromaFinal"])
 
     # Basic comb filter for NTSC to calm the color a little.
-    if field.rf.system == "NTSC":
+    if field.rf.color_system == "NTSC":
         uphet = comb_c_ntsc(uphet, outwidth)
     #    else:
     #        uphet = comb_c_pal(uphet, outwidth)
@@ -265,7 +267,7 @@ def decode_chroma_vhs(field):
 
     # If we moved significantly more than the length of one field, re-check phase
     # as we may have skipped fields.
-    if raw_loc - rf.last_raw_loc > 2.0:
+    if raw_loc - rf.last_raw_loc > 1.3:
         if rf.detect_track:
             ldd.logger.info("Possibly skipped a track, re-checking phase..")
             rf.needs_detect = True
@@ -450,7 +452,7 @@ def detect_burst_pal_line(
     # Normalise the magnitude of the bp/bq vector to 1.
     # Kill colour if burst too weak.
     # XXX magic number 130000 !!! check!
-    burst_norm = max(math.sqrt(line.bp * line.bp + line.bq * line.bq), 130000.0 / 128)
+    burst_norm = max(math.sqrt(line.bp * line.bp + line.bq * line.bq), 10000.0 / 128)
     line.burst_norm = burst_norm
     line.bp /= burst_norm
     line.bq /= burst_norm
@@ -760,7 +762,57 @@ def check_increment_field_no(rf):
     if raw_loc > rf.last_raw_loc:
         rf.field_number += 1
     else:
-        ldd.logger.info("Raw data loc didn't advance.")
+        ldd.logger.debug("Raw data loc didn't advance.")
+
+
+def try_detect_track_vhs_pal(field):
+    """Try to detect what video track we are on.
+
+    VHS tapes have two tracks with different azimuth that alternate and are read by alternating
+    heads on the video drum. The phase of the color heterodyne varies depending on what track is
+    being read from to avoid chroma crosstalk.
+    Additionally, most tapes are recorded with a luma half-shift which shifts the fm-encoded
+    luma frequencies slightly depending on the track to avoid luma crosstalk.
+    """
+    ldd.logger.debug("Trying to detect track phase...")
+    burst_area = (
+        math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0])),
+        math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])),
+    )
+
+    # Upconvert chroma twice, once for each possible track phase
+    uphet = [process_chroma(field, 0), process_chroma(field, 1)]
+
+    sine_wave = field.rf.fsc_wave
+    cosine_wave = field.rf.fsc_cos_wave
+
+    # Try to decode the color burst from each of the upconverted chroma signals
+    phase0, phase0_mean = detect_burst_pal(
+        uphet[0],
+        sine_wave,
+        cosine_wave,
+        burst_area,
+        field.outlinelen,
+        field.outlinecount,
+    )
+    phase1, phase1_mean = detect_burst_pal(
+        uphet[1],
+        sine_wave,
+        cosine_wave,
+        burst_area,
+        field.outlinelen,
+        field.outlinecount,
+    )
+
+    # We use the one where the phase of the chroma vectors make the most sense.
+    assumed_phase = int(phase0_mean < phase1_mean)
+
+    ldd.logger.info("Phase previously set: %i", field.rf.track_phase)
+    ldd.logger.info("phase0 mean: %d", phase0_mean)
+    ldd.logger.info("phase1 mean: %d", phase1_mean)
+    ldd.logger.info("assumed_phase: %d", assumed_phase)
+
+    return assumed_phase
 
 
 class FieldPALVHS(ldd.FieldPAL):
@@ -789,53 +841,7 @@ class FieldPALVHS(ldd.FieldPAL):
         return 1.0
 
     def try_detect_track(self):
-        """Try to detect what video track we are on.
-
-        VHS tapes have two tracks with different azimuth that alternate and are read by alternating
-        heads on the video drum. The phase of the color heterodyne varies depending on what track is
-        being read from to avoid chroma crosstalk.
-        Additionally, most tapes are recorded with a luma half-shift which shifts the fm-encoded
-        luma frequencies slightly depending on the track to avoid luma crosstalk.
-        """
-        ldd.logger.info("Trying to detect track phase...")
-        burst_area = (
-            math.floor(self.usectooutpx(self.rf.SysParams["colorBurstUS"][0])),
-            math.ceil(self.usectooutpx(self.rf.SysParams["colorBurstUS"][1])),
-        )
-
-        # Upconvert chroma twice, once for each possible track phase
-        uphet = [process_chroma(self, 0), process_chroma(self, 1)]
-
-        sine_wave = self.rf.fsc_wave
-        cosine_wave = self.rf.fsc_cos_wave
-
-        # Try to decode the color burst from each of the upconverted chroma signals
-        phase0, phase0_mean = detect_burst_pal(
-            uphet[0],
-            sine_wave,
-            cosine_wave,
-            burst_area,
-            self.outlinelen,
-            self.outlinecount,
-        )
-        phase1, phase1_mean = detect_burst_pal(
-            uphet[1],
-            sine_wave,
-            cosine_wave,
-            burst_area,
-            self.outlinelen,
-            self.outlinecount,
-        )
-
-        # We use the one where the phase of the chroma vectors make the most sense.
-        assumed_phase = int(phase0_mean < phase1_mean)
-
-        ldd.logger.info("Phase previously set: %i", self.rf.track_phase)
-        ldd.logger.info("phase0 mean: %d", phase0_mean)
-        ldd.logger.info("phase1 mean: %d", phase1_mean)
-        ldd.logger.info("assumed_phase: %d", assumed_phase)
-
-        return assumed_phase
+        return try_detect_track_vhs_pal(self)
 
     def determine_field_number(self):
         """Workaround to shut down phase id mismatch warnings, the actual code
@@ -942,7 +948,7 @@ class FieldNTSCVHS(ldd.FieldNTSC):
         sum will be much higher. This seem to give a reasonably good guess, but could probably
         be improved.
         """
-        ldd.logger.info("Trying to detect track phase...")
+        ldd.logger.debug("Trying to detect track phase...")
         burst_area = (
             math.floor(self.usectooutpx(self.rf.SysParams["colorBurstUS"][0])),
             math.ceil(self.usectooutpx(self.rf.SysParams["colorBurstUS"][1])),
@@ -994,6 +1000,14 @@ class FieldNTSCVHS(ldd.FieldNTSC):
     def compute_deriv_error(self, linelocs, baserr):
         """Disabled this for now as line starts can vary widely."""
         return baserr
+
+
+class FieldMPALVHS(FieldNTSCVHS):
+    def __init__(self, *args, **kwargs):
+        super(FieldMPALVHS, self).__init__(*args, **kwargs)
+
+    def try_detect_track(self):
+        return try_detect_track_vhs_pal(self)
 
 
 class FieldNTSCUMatic(ldd.FieldNTSC):
@@ -1094,16 +1108,18 @@ class VHSDecode(ldd.LDdecode):
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
-        if parent_system(system) == "PAL":
+        if system == "PAL":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldPALUMatic
             else:
                 self.FieldClass = FieldPALVHS
-        elif parent_system(system) == "NTSC":
+        elif system == "NTSC":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldNTSCUMatic
             else:
                 self.FieldClass = FieldNTSCVHS
+        elif system == "MPAL" and tape_format == "VHS":
+            self.FieldClass = FieldMPALVHS
         else:
             raise Exception("Unknown video system!", system)
 
@@ -1170,8 +1186,13 @@ class VHSDecode(ldd.LDdecode):
     def build_json(self, f):
         try:
             jout = super(VHSDecode, self).build_json(f)
+
             black = jout["videoParameters"]["black16bIre"]
             white = jout["videoParameters"]["white16bIre"]
+
+            if self.rf.color_system == "MPAL":
+                jout["videoParameters"]["isSourcePal"] = True
+                jout["videoParameters"]["isSourcePalM"] = True
 
             jout["videoParameters"]["black16bIre"] = black * (1 - self.level_adjust)
             jout["videoParameters"]["white16bIre"] = white * (1 + self.level_adjust)
@@ -1192,6 +1213,11 @@ class VHSRFDecode(ldd.RFDecode):
             has_analog_audio=False,
         )
 
+        # Store a separate setting for *color* system as opposed to 525/625 line here.
+        # TODO: Fix upstream so we don't have to fake tell ld-decode code that we are using ntsc for
+        # palm to avoid it throwing errors.
+        self.color_system = system
+
         # controls the sharpness EQ gain
         self.sharpness_level = (
             rf_options.get("sharpness", vhs_formats.DEFAULT_SHARPNESS) / 100
@@ -1210,12 +1236,8 @@ class VHSRFDecode(ldd.RFDecode):
         high_boost = rf_options.get("high_boost", None)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
-        self.disable_diff_demod = (
-            rf_options.get("disable_diff_demod", False)
-        )
-        self.disable_dc_offset = (
-            rf_options.get("disable_dc_offset", False)
-        )
+        self.disable_diff_demod = rf_options.get("disable_diff_demod", False)
+        self.disable_dc_offset = rf_options.get("disable_dc_offset", False)
 
         if track_phase is None:
             self.track_phase = 0
