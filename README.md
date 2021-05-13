@@ -1,5 +1,4 @@
 # vhs-decode
-----
 
 A fork of ld-decode, the decoding software powering the Domesday86 project.  
 This version has been modified to work with the differences found in RF signals taken from videotapes; it is not possible to use both ld-decode and vhs-decode side by side without reinstalling either one at runtime.
