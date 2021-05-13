@@ -1,4 +1,4 @@
-<h1> Advanced flags
+Advanced flags
 ----
 
 ```--debug``` sets logger verbosity level to *debug*. Useful for debugging.
