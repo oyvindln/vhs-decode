@@ -1104,6 +1104,7 @@ class VHSDecode(ldd.LDdecode):
             tape_format=tape_format,
             inputfreq=inputfreq,
             rf_options=rf_options,
+            extra_options=extra_options,
         )
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
@@ -1203,7 +1204,7 @@ class VHSDecode(ldd.LDdecode):
 
 
 class VHSRFDecode(ldd.RFDecode):
-    def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
+    def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}, extra_options={}):
 
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
@@ -1238,6 +1239,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.notch_q = rf_options.get("notch_q", 10.0)
         self.disable_diff_demod = rf_options.get("disable_diff_demod", False)
         self.disable_dc_offset = rf_options.get("disable_dc_offset", False)
+        self.useAGC = extra_options.get("useAGC", True)
 
         if track_phase is None:
             self.track_phase = 0
@@ -1731,5 +1733,11 @@ class VHSRFDecode(ldd.RFDecode):
         rv["video"] = (
             video_out[self.blockcut : -self.blockcut_end] if cut else video_out
         )
+
+        # data block length check
+        assert len(data) == len(out_video) == len(out_video05) == len(out_chroma) == len(env) == self.blocklen, \
+            "Block length mismatch at demodblock(): " + \
+            "raw data %d, luma %d, sync ref %d, chroma %d, envelope %d, blocklen %d" % \
+            (len(data), len(out_video), len(out_video05), len(out_chroma), len(env), self.blocklen)
 
         return rv

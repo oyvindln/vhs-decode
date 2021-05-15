@@ -60,24 +60,42 @@ class FieldState:
 class Resync:
     def __init__(self, fs, sysparams):
         self.samp_rate = fs
-        self.SysParams = sysparams
+        self.SysParams = sysparams.copy()
         self.VsyncSerration = VsyncSerration(fs, sysparams)
         self.field_state = FieldState()
 
-    def debug_field(self, sysParams, sync_reference):
+    def debug_field(self, sync_reference):
         ldd.logger.debug("Hashed field sync reference %s" % hashlib.md5(sync_reference.tobytes('C')).hexdigest())
-        sysparams_json = json.dumps(sysParams, indent=4).encode('utf-8')
-        ldd.logger.debug("Hashed field SysParams %s" % hashlib.md5(sysparams_json).hexdigest())
+
+    # checks for SysParams consistency
+    def sysparams_consistency_checks(self, field):
+        # AGC is allowed to change two sysparams
+        if field.rf.useAGC:
+            if field.rf.SysParams["ire0"] != self.SysParams["ire0"]:
+                ldd.logger.debug("AGC changed SysParams[ire0]: %.02f Hz", field.rf.SysParams["ire0"])
+                self.SysParams["ire0"] = field.rf.SysParams["ire0"].copy()
+            if field.rf.SysParams["hz_ire"] != self.SysParams["hz_ire"]:
+                ldd.logger.debug("AGC changed SysParams[hz_ire]: %.02f Hz", field.rf.SysParams["hz_ire"])
+                self.SysParams["hz_ire"] = field.rf.SysParams["hz_ire"].copy()
+
+        if self.SysParams != field.rf.SysParams:
+            ldd.logger.error('SysParams changed during runtime!')
+            ldd.logger.debug('Original: %s' % self.SysParams)
+            ldd.logger.debug('Altered : %s' % field.rf.SysParams)
+            assert False, "SysParams changed during runtime!"
+
 
     def getpulses_override(self, field):
         """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
-        # measures the serration levels if possible
-        sync_reference = field.data["video"]["demod_05"]
-        self.debug_field(field.rf.SysParams, sync_reference)
+        self.sysparams_consistency_checks(field)
 
+        sync_reference = field.data["video"]["demod_05"]
+        self.debug_field(sync_reference)
+
+        # measures the serration levels if possible
         self.VsyncSerration.work(sync_reference)
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
         demod_data = self.VsyncSerration.safe_sync_clip(
