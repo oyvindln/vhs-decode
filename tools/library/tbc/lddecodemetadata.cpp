@@ -98,7 +98,7 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
     }
 
     // Add in the active field line range psuedo-metadata
-    if (videoParameters.isSourcePal && !videoParameters.isSourcePalM) {
+    if (videoParameters.fieldHeight == 313) {
         // PAL
         videoParameters.firstActiveFieldLine = 22;
         videoParameters.lastActiveFieldLine = 308;
@@ -107,7 +107,7 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
         videoParameters.firstActiveFrameLine = 44;
         // Interlaced line 619 is PAL line 623 (the last active half-line)
         videoParameters.lastActiveFrameLine = 620;
-    } else {
+    } else if (videoParameters.fieldHeight == 263) {
         // NTSC
         videoParameters.firstActiveFieldLine = 20;
         videoParameters.lastActiveFieldLine = 259;
@@ -116,6 +116,15 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
         videoParameters.firstActiveFrameLine = 40;
         // Interlaced line 524 is NTSC line 263 (the last active half-line).
         videoParameters.lastActiveFrameLine = 525;
+    } else {
+        // Unknown video system, guessing some stuff for now instead of risking going out of bounds.
+        qCritical("Unknown video system! Output may not be correct!");
+
+        videoParameters.firstActiveFieldLine = 20;
+        videoParameters.lastActiveFieldLine = videoParameters.fieldHeight - 5;
+
+        videoParameters.firstActiveFrameLine = videoParameters.firstActiveFieldLine * 2;
+        videoParameters.lastActiveFrameLine = videoParameters.lastActiveFieldLine * 2;
     }
 
     return videoParameters;

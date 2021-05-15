@@ -145,10 +145,22 @@ void PalColour::buildLookUpTables()
     //   the chroma information centred on 0 Hz
     // - working out what the phase of the subcarrier is on each line,
     //   so we can rotate the chroma samples to put U/V on the right axes
-    for (qint32 i = 0; i < videoParameters.fieldWidth; i++) {
-        const double rad = 2 * M_PI * i * videoParameters.fsc / videoParameters.sampleRate;
-        sine[i] = sin(rad);
-        cosine[i] = cos(rad);
+    if(videoParameters.fieldHeight != 263) {
+        for (qint32 i = 0; i < videoParameters.fieldWidth; i++) {
+            const double rad = 2 * M_PI * i * videoParameters.fsc / videoParameters.sampleRate;
+            sine[i] = sin(rad);
+            cosine[i] = cos(rad);
+        }
+    }
+    else {
+        // HACK - For whatever reason Pal-M ends up with the vectors swapped and out of phase
+        // swapping the cos and sin references seem to work around that.
+        // TODO: Find a proper solution to this.
+        for (qint32 i = 0; i < videoParameters.fieldWidth; i++) {
+            const double rad = 2 * M_PI * i * videoParameters.fsc / videoParameters.sampleRate;
+            sine[i] = cos(rad);
+            cosine[i] = sin(rad);
+        }
     }
 
     // Create filter profiles for colour filtering.

@@ -18,12 +18,17 @@ setup(
         'Topic :: Multimedia :: Video :: Capture',
     ],
 
-    packages=['lddecode'],
+    packages=['lddecode', 'vhsdecode', 'vhsdecode/addons', 'cvbsdecode'],
     scripts=[
         'cx-expander',
         'ld-cut',
         'ld-decode',
         'scripts/ld-compress',
+        'vhs-decode',
+        'cvbs-decode',
+        'gen_chroma_vid_pal.sh',
+        'gen_chroma_vid_palm.sh',
+        'gen_chroma_vid_ntsc.sh'
     ],
 
     # These are just the minimal runtime dependencies for the Python scripts --

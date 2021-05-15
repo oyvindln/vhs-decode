@@ -238,6 +238,7 @@ SysParams_MPAL_VHS["activeVideoUS"] = (9.45, SysParams_MPAL_VHS["line_period"] -
 
 SysParams_MPAL_VHS["outlinelen"] = calclinelen(SysParams_MPAL_VHS, 4, "fsc_mhz")
 SysParams_MPAL_VHS["outfreq"] = 4 * SysParams_MPAL_VHS["fsc_mhz"]
+SysParams_MPAL_VHS["burst_abs_ref"] = 3500
 
 # PAL and NTSC "regular-band" use the same frequencies, but
 # not sure if PAL sync being -43 and ntsc being -40 makes
