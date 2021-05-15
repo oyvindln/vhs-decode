@@ -4,8 +4,10 @@ import vhsdecode.utils as utils
 import lddecode.utils as lddu
 import itertools
 from lddecode.utils import inrange
+import lddecode.core as ldd
+import json
 import math
-
+import hashlib
 
 # stores the last valid blacklevel, synclevel and vsynclocs state
 # preliminary solution to fix spurious decoding halts (numpy error case)
@@ -62,14 +64,20 @@ class Resync:
         self.VsyncSerration = VsyncSerration(fs, sysparams)
         self.field_state = FieldState()
 
+    def debug_field(self, sysParams, sync_reference):
+        ldd.logger.debug("Hashed field sync reference %s" % hashlib.md5(sync_reference.tobytes('C')).hexdigest())
+        sysparams_json = json.dumps(sysParams, indent=4).encode('utf-8')
+        ldd.logger.debug("Hashed field SysParams %s" % hashlib.md5(sysparams_json).hexdigest())
+
     def getpulses_override(self, field):
         """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
-
         # measures the serration levels if possible
         sync_reference = field.data["video"]["demod_05"]
+        self.debug_field(field.rf.SysParams, sync_reference)
+
         self.VsyncSerration.work(sync_reference)
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
         demod_data = self.VsyncSerration.safe_sync_clip(
