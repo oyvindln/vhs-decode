@@ -5,7 +5,7 @@ from vhsdecode.utils import (
     plot_scope,
     dualplot_scope,
     zero_cross_det,
-    moving_average,
+    StackableMA,
 )
 import numpy as np
 from scipy.signal import argrelextrema
@@ -56,27 +56,23 @@ class VsyncSerration:
         self.vsynclen = round(t_to_samples(self.samp_rate, self.fv))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
         self.pid = getpid()
-        self.levels = list(), list()  # sync, blanking
-        self.level_average = 30
+        self.levels = StackableMA(min_watermark=2), StackableMA(min_watermark=2)  # sync, blanking
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
-        self.min_watermark = 2
 
     def get_levels(self):
-        sync, sync_list = moving_average(self.levels[0], window=self.level_average)
-        blank, blank_list = moving_average(self.levels[1], window=self.level_average)
-        self.levels = sync_list, blank_list
+        sync, blank = self.levels[0].pull(), self.levels[1].pull()
         return sync, blank
 
     def has_levels(self):
         return (
-            len(self.levels[0]) > self.min_watermark
-            and len(self.levels[1]) > self.min_watermark
+            self.levels[0].has_values()
+            and self.levels[1].has_values()
         )
 
     def push_levels(self, levels):
         for ix, level in enumerate(levels):
-            self.levels[ix].append(level)
+            self.levels[ix].push(level)
 
     def mutemask(self, raw_locs, blocklen, pulselen):
         mask = np.zeros(blocklen)
@@ -258,7 +254,7 @@ class VsyncSerration:
             ldd.logger.debug(
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (
-                    len(self.levels[0]),
+                    self.levels[0].size(),
                     self.get_levels()[0] / 1e3,
                     self.get_levels()[1] / 1e3,
                 )

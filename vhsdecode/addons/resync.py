@@ -5,44 +5,32 @@ import lddecode.utils as lddu
 import itertools
 from lddecode.utils import inrange
 import lddecode.core as ldd
-import json
 import math
 import hashlib
+
 
 # stores the last valid blacklevel, synclevel and vsynclocs state
 # preliminary solution to fix spurious decoding halts (numpy error case)
 class FieldState:
     def __init__(self):
-        self.blanklevels = np.array([])
-        self.synclevels = np.array([])
+        self.blanklevels = utils.StackableMA()
+        self.synclevels = utils.StackableMA()
         self.locs = None
-        self.field_average = 30
-        self.min_watermark = 3
 
     def setSyncLevel(self, level):
-        self.synclevels = np.append(self.synclevels, level)
+        self.synclevels.push(level)
 
     def setLevels(self, blank, sync):
-        self.blanklevels = np.append(self.blanklevels, blank)
+        self.blanklevels.push(blank)
         self.setSyncLevel(sync)
 
     def getSyncLevel(self):
-        if np.size(self.synclevels) > 0:
-            synclevel, self.synclevels = utils.moving_average(
-                self.synclevels, window=self.field_average
-            )
-            return synclevel
-        else:
-            return None
+        return self.synclevels.pull()
 
     def getLevels(self):
-        if np.size(self.blanklevels) > 0:
-            blacklevel, self.blanklevels = utils.moving_average(
-                self.blanklevels, window=self.field_average
-            )
-            return blacklevel, self.getSyncLevel()
-        else:
-            return None, None
+        blevels = self.blanklevels.pull()
+        if blevels is not None:
+            return blevels, self.getSyncLevel()
 
     def setLocs(self, locs):
         self.locs = locs
@@ -52,8 +40,8 @@ class FieldState:
 
     def hasLevels(self):
         return (
-            np.size(self.blanklevels) > self.min_watermark
-            and np.size(self.synclevels) > self.min_watermark
+            self.blanklevels.has_values()
+            and self.synclevels.has_values()
         )
 
 

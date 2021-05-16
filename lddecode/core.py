@@ -10,6 +10,8 @@ from multiprocessing import Process, Queue, JoinableQueue, Pipe
 import numpy as np
 import scipy.signal as sps
 import scipy.interpolate as spi
+from vhsdecode.utils import StackableMA
+
 
 # Use PyFFTW's faster FFT implementation if available
 try:
@@ -346,6 +348,9 @@ class RFDecode:
         # The 0.5mhz filter is rolled back to align with the data, so there
         # are a few unusable samples at the end.
         self.blockcut_end = self.Filters["F05_offset"]
+
+        # adds two moving averages for the AGC values
+        self.AGClevels = StackableMA(window_average=15), StackableMA(window_average=15)
 
     def computefilters(self):
         """ (re)compute the filter sets """
@@ -3472,10 +3477,13 @@ class LDdecode:
 
                     if max(sync_ire_diff, ire0_diff) > acceptable_diff:
                         redo = True
-
-                        self.rf.SysParams["ire0"] = ire0_hz
+                        self.rf.AGClevels[0].push(ire0_hz)
                         # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
-                        self.rf.SysParams["hz_ire"] = (sync_hz - ire0_hz) / vsync_ire
+                        self.rf.AGClevels[1].push((sync_hz - ire0_hz) / vsync_ire)
+
+                        if self.rf.AGClevels[0].has_values() and self.rf.AGClevels[1].has_values():
+                            self.rf.SysParams["ire0"] = self.rf.AGClevels[0].pull()
+                            self.rf.SysParams["hz_ire"] = self.rf.AGClevels[1].pull()
 
                 if adjusted == False and redo == True:
                     self.demodcache.flush_demod()
