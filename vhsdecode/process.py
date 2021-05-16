@@ -1569,6 +1569,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
         self.Resync = Resync(self.freq_hz, self.SysParams)
+        self.diff_demod_check_value = self.iretohz(100) * 2
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -1655,7 +1656,7 @@ class VHSRFDecode(ldd.RFDecode):
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
         # replace the spikes with data from the diffed demod.
         if not self.disable_diff_demod:
-            check_value = self.iretohz(100) * 2
+            check_value = self.diff_demod_check_value  # self.iretohz(100) * 2
 
             if np.max(demod[20:-20]) > check_value:
                 demod_b = unwrap_hilbert(

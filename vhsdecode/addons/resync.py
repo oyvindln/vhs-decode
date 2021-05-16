@@ -57,11 +57,14 @@ class Resync:
 
     # checks for SysParams consistency
     def sysparams_consistency_checks(self, field):
+        reclamp_ire0 = False
         # AGC is allowed to change two sysparams
         if field.rf.useAGC:
             if field.rf.SysParams["ire0"] != self.SysParams["ire0"]:
                 ldd.logger.debug("AGC changed SysParams[ire0]: %.02f Hz", field.rf.SysParams["ire0"])
                 self.SysParams["ire0"] = field.rf.SysParams["ire0"].copy()
+                reclamp_ire0 = True
+
             if field.rf.SysParams["hz_ire"] != self.SysParams["hz_ire"]:
                 ldd.logger.debug("AGC changed SysParams[hz_ire]: %.02f Hz", field.rf.SysParams["hz_ire"])
                 self.SysParams["hz_ire"] = field.rf.SysParams["hz_ire"].copy()
@@ -72,13 +75,99 @@ class Resync:
             ldd.logger.debug('Altered : %s' % field.rf.SysParams)
             assert False, "SysParams changed during runtime!"
 
+        return reclamp_ire0
+
+    def fallback_vsync_loc_means(self, field, pulses):
+        # determine sync pulses from vsync
+        vsync_locs = []
+        vsync_means = []
+
+        for i, p in enumerate(pulses):
+            if p.len > field.usectoinpx(10):
+                vsync_locs.append(i)
+                vsync_means.append(
+                    np.mean(
+                        field.data["video"]["demod_05"][
+                            int(p.start + field.rf.freq) : int(
+                                p.start + p.len - field.rf.freq
+                            )
+                        ]
+                    )
+                )
+
+        return vsync_locs, vsync_means
+
+    # search for black level
+    def fallback_black_level(self, field, pulses, vsync_locs):
+        # take the eq pulses before and after vsync
+        r1 = range(vsync_locs[0] - 5, vsync_locs[0])
+        r2 = range(vsync_locs[-1] + 1, vsync_locs[-1] + 6)
+
+        black_means = []
+
+        for i in itertools.chain(r1, r2):
+            if i < 0 or i >= len(pulses):
+                continue
+
+            p = pulses[i]
+            if inrange(p.len, field.rf.freq * 0.75, field.rf.freq * 3):
+                black_means.append(
+                    np.mean(
+                        field.data["video"]["demod_05"][
+                            int(p.start + (field.rf.freq * 5)) : int(
+                                p.start + (field.rf.freq * 20)
+                            )
+                        ]
+                    )
+                )
+
+        return black_means
+
+    def fallback_levels(self, field, pulses):
+        vsync_locs, vsync_means = self.fallback_vsync_loc_means(field, pulses)
+
+        if len(vsync_means) == 0:
+            synclevel = self.field_state.getSyncLevel()
+            if synclevel is None:
+                return None, None
+        else:
+            synclevel = np.median(vsync_means)
+            self.field_state.setSyncLevel(synclevel)
+            self.field_state.setLocs(vsync_locs)
+
+        if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
+            # sync level is close enough to use
+            return np.nan, np.nan
+
+        if vsync_locs is None or not len(vsync_locs):
+            vsync_locs = self.field_state.getLocs()
+
+        # Now compute black level and try again
+        black_means = self.fallback_black_level(field, pulses, vsync_locs)
+
+        # Set to nan if empty to avoid warning.
+        blacklevel = math.nan if len(black_means) == 0 else np.median(black_means)
+
+        if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
+            # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
+            bl, sl = self.field_state.getLevels()
+            if bl is not None and sl is not None:
+                blacklevel, synclevel = bl, sl
+            else:
+                return None, None
+        else:
+            self.field_state.setLevels(blacklevel, synclevel)
+
+        pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
+        pulse_hz_max = (blacklevel + synclevel) / 2
+
+        return pulse_hz_min, pulse_hz_max
 
     def getpulses_override(self, field):
         """Find sync pulses in the demodulated video signal
 
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
-        self.sysparams_consistency_checks(field)
 
         sync_reference = field.data["video"]["demod_05"]
         self.debug_field(sync_reference)
@@ -98,11 +187,15 @@ class Resync:
                 blank, sync = self.field_state.getLevels()
 
             if not field.rf.disable_dc_offset:
+                # if AGC is used, ire0 parameter floats
+                if self.sysparams_consistency_checks(field):
+                    field.rf.SysParams["ire0"] = blank
                 dc_offset = field.rf.SysParams["ire0"] - blank
                 sync_reference += dc_offset
                 demod_data += dc_offset
                 sync, blank = sync + dc_offset, blank + dc_offset
-                # forced blank
+
+            # forced blank
                 # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
             field.data["video"]["demod_05"] = np.clip(
@@ -146,78 +239,14 @@ class Resync:
             # can't do anything about this
             return pulses
 
-        # determine sync pulses from vsync
-        vsync_locs = []
-        vsync_means = []
-
-        for i, p in enumerate(pulses):
-            if p.len > field.usectoinpx(10):
-                vsync_locs.append(i)
-                vsync_means.append(
-                    np.mean(
-                        field.data["video"]["demod_05"][
-                            int(p.start + field.rf.freq) : int(
-                                p.start + p.len - field.rf.freq
-                            )
-                        ]
-                    )
-                )
-
-        if len(vsync_means) == 0:
-            synclevel = self.field_state.getSyncLevel()
-            if synclevel is None:
+        # calls the fallback auto-levels
+        if not self.VsyncSerration.has_levels():
+            f_pulse_hz_min, f_pulse_hz_max = self.fallback_levels(field, pulses)
+            if f_pulse_hz_min is None or f_pulse_hz_max is None:
                 return None
-        else:
-            synclevel = np.median(vsync_means)
-            self.field_state.setSyncLevel(synclevel)
-            self.field_state.setLocs(vsync_locs)
-
-        if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
-            # sync level is close enough to use
-            return pulses
-
-        if vsync_locs is None or not len(vsync_locs):
-            vsync_locs = self.field_state.getLocs()
-
-        # Now compute black level and try again
-
-        # take the eq pulses before and after vsync
-        r1 = range(vsync_locs[0] - 5, vsync_locs[0])
-        r2 = range(vsync_locs[-1] + 1, vsync_locs[-1] + 6)
-
-        black_means = []
-
-        for i in itertools.chain(r1, r2):
-            if i < 0 or i >= len(pulses):
-                continue
-
-            p = pulses[i]
-            if inrange(p.len, field.rf.freq * 0.75, field.rf.freq * 3):
-                black_means.append(
-                    np.mean(
-                        field.data["video"]["demod_05"][
-                            int(p.start + (field.rf.freq * 5)) : int(
-                                p.start + (field.rf.freq * 20)
-                            )
-                        ]
-                    )
-                )
-
-        # Set to nan if empty to avoid warning.
-        blacklevel = math.nan if len(black_means) == 0 else np.median(black_means)
-
-        if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
-            # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
-            bl, sl = self.field_state.getLevels()
-            if bl is not None and sl is not None:
-                blacklevel, synclevel = bl, sl
-            else:
-                return None
-        else:
-            self.field_state.setLevels(blacklevel, synclevel)
-
-        pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
-        pulse_hz_max = (blacklevel + synclevel) / 2
+            if f_pulse_hz_min is np.nan or f_pulse_hz_max is np.nan:
+                return pulses
+            pulse_hz_min, pulse_hz_max = f_pulse_hz_min, f_pulse_hz_max
 
         return lddu.findpulses(
             field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
