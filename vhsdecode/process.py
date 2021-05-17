@@ -816,18 +816,217 @@ def try_detect_track_vhs_pal(field):
     return assumed_phase
 
 
-class FieldPALVHS(ldd.FieldPAL):
+class FieldShared:
+    def compute_linelocs(self):
+        self.rawpulses = self.getpulses()
+        if self.rawpulses is None or len(self.rawpulses) == 0:
+            ldd.logger.error("Unable to find any sync pulses, jumping 100 ms")
+            return None, None, int(self.rf.freq_hz / 10)
+
+        self.validpulses = validpulses = self.refinepulses()
+
+        line0loc, lastlineloc, self.isFirstField = self.getLine0(validpulses)
+        self.linecount = 263 if self.isFirstField else 262
+
+        # Number of lines to actually process.  This is set so that the entire following
+        # VSYNC is processed
+        proclines = self.outlinecount + self.lineoffset + 10
+        if self.rf.system == "PAL":
+            proclines += 3
+
+        # It's possible for getLine0 to return None for lastlineloc
+        if lastlineloc is not None:
+            numlines = (lastlineloc - line0loc) / self.inlinelen
+            self.skipdetected = numlines < (self.linecount - 5)
+        else:
+            self.skipdetected = False
+
+        linelocs_dict = {}
+        linelocs_dist = {}
+
+        if line0loc is None:
+            if self.initphase is False:
+                ldd.logger.error("Unable to determine start of field - dropping field")
+
+            return None, None, self.inlinelen * 200
+
+        meanlinelen = self.computeLineLen(validpulses)
+        self.meanlinelen = meanlinelen
+
+        # If we don't have enough data at the end, move onto the next field
+        lastline = (self.rawpulses[-1].start - line0loc) / meanlinelen
+        if lastline < proclines:
+            return None, None, line0loc - (meanlinelen * 20)
+
+        for p in validpulses:
+            lineloc = (p[1].start - line0loc) / meanlinelen
+            rlineloc = ldd.nb_round(lineloc)
+            lineloc_distance = np.abs(lineloc - rlineloc)
+
+            if self.skipdetected:
+                lineloc_end = self.linecount - (
+                    (lastlineloc - p[1].start) / meanlinelen
+                )
+                rlineloc_end = ldd.nb_round(lineloc_end)
+                lineloc_end_distance = np.abs(lineloc_end - rlineloc_end)
+
+                if (
+                    p[0] == 0
+                    and rlineloc > 23
+                    and lineloc_end_distance < lineloc_distance
+                ):
+                    lineloc = lineloc_end
+                    rlineloc = rlineloc_end
+                    lineloc_distance = lineloc_end_distance
+
+            # only record if it's closer to the (probable) beginning of the line
+            if lineloc_distance > self.rf.hsync_tolerance or (
+                rlineloc in linelocs_dict and lineloc_distance > linelocs_dist[rlineloc]
+            ):
+                continue
+
+            # also skip non-regular lines (non-hsync) that don't seem to be in valid order (p[2])
+            # (or hsync lines in the vblank area)
+            if rlineloc > 0 and not p[2]:
+                if p[0] > 0 or (p[0] == 0 and rlineloc < 10):
+                    continue
+
+            linelocs_dict[rlineloc] = p[1].start
+            linelocs_dist[rlineloc] = lineloc_distance
+
+        rv_err = np.full(proclines, False)
+
+        # Convert dictionary into list, then fill in gaps
+        linelocs = [
+            linelocs_dict[l] if l in linelocs_dict else -1 for l in range(0, proclines)
+        ]
+        linelocs_filled = linelocs.copy()
+
+        self.linelocs0 = linelocs.copy()
+
+
+        if linelocs_filled[0] < 0:
+            # logger.info("linelocs_filled[0] < 0, %s", linelocs_filled)
+            next_valid = None
+            for i in range(0, self.outlinecount + 1):
+                if linelocs[i] > 0:
+                    next_valid = i
+                    break
+
+            if next_valid is None:
+                # If we don't find anything valid, guess something to avoid dropping fields
+                prev_line0 = np.int64(self.prevfield.linelocs0[0])
+                ldd.logger.info("prev line0 %s", self.prevfield.linelocs0[0])
+                if prev_line0 > 0:
+                    linelocs_filled = self.prevfield.linelocs0 - prev_line0 + line0loc
+                else:
+                    linelocs_filled[0] = line0loc
+                linelocs = linelocs_filled
+                ldd.logger.warning(
+                    "no valid lines found! Guessing or using values for previous field so result will probably be garbled!"
+                )
+                rv_err[1:] = True
+            else:
+                linelocs_filled[0] = linelocs_filled[next_valid] - (
+                    next_valid * meanlinelen
+                )
+
+            if linelocs_filled[0] < self.inlinelen:
+                ldd.logger.info("linelocs_filled[0] too short! %s", self.inlinelen)
+                return None, None, line0loc + (self.inlinelen * self.outlinecount - 7)
+
+        for l in range(1, proclines):
+            if linelocs_filled[l] < 0:
+                rv_err[l] = True
+
+                prev_valid = None
+                next_valid = None
+
+                for i in range(l, -1, -1):
+                    if linelocs[i] > 0:
+                        prev_valid = i
+                        break
+                for i in range(l, self.outlinecount + 1):
+                    if linelocs[i] > 0:
+                        next_valid = i
+                        break
+
+                if prev_valid is None:
+                    avglen = self.inlinelen
+                    linelocs_filled[l] = linelocs[next_valid] - (
+                        avglen * (next_valid - l)
+                    )
+                elif next_valid is not None:
+                    avglen = (linelocs[next_valid] - linelocs[prev_valid]) / (
+                        next_valid - prev_valid
+                    )
+                    linelocs_filled[l] = linelocs[prev_valid] + (
+                        avglen * (l - prev_valid)
+                    )
+                else:
+                    avglen = self.inlinelen
+                    linelocs_filled[l] = linelocs[prev_valid] + (
+                        avglen * (l - prev_valid)
+                    )
+
+        # *finally* done :)
+
+        rv_ll = [linelocs_filled[l] for l in range(0, proclines)]
+
+        if self.vblank_next is None:
+            nextfield = linelocs_filled[self.outlinecount - 7]
+        else:
+            nextfield = self.vblank_next - (self.inlinelen * 8)
+
+        return rv_ll, rv_err, nextfield
+
+    def calc_burstmedian(self):
+        # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
+        return 1.0
+
+    def getpulses(self):
+        """Find sync pulses in the demodulated video signal
+
+        NOTE: TEMPORARY override until an override for the value itself is added upstream.
+        """
+        return getpulses_override(self)
+
+    def compute_deriv_error(self, linelocs, baserr):
+        """Disabled this for now as tapes have large variations in line pos
+        Due to e.g head switch.
+        compute errors based off the second derivative - if it exceeds 1 something's wrong,
+        and if 4 really wrong...
+        """
+        return baserr
+
+    def dropout_detect(self):
+        return detect_dropouts_rf(self)
+
+
+class FieldPALShared(FieldShared, ldd.FieldPAL):
     def __init__(self, *args, **kwargs):
-        super(FieldPALVHS, self).__init__(*args, **kwargs)
+        super(FieldPALShared, self).__init__(*args, **kwargs)
 
     def refine_linelocs_pilot(self, linelocs=None):
-        """Override this as standard vhs does not use have a pilot burst."""
+        """Override this as most regular band tape formats does not use have a pilot burst.
+        Tape formats that do have it will need separate logic for it anyhow.
+        """
         if linelocs is None:
             linelocs = self.linelocs2.copy()
         else:
             linelocs = linelocs.copy()
 
         return linelocs
+
+    def determine_field_number(self):
+        """Workaround to shut down phase id mismatch warnings, the actual code
+        doesn't work properly with the vhs output at the moment."""
+        return 1 + (self.rf.field_number % 8)
+
+
+class FieldPALVHS(FieldPALShared):
+    def __init__(self, *args, **kwargs):
+        super(FieldPALVHS, self).__init__(*args, **kwargs)
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldPALVHS, self).downscale(
@@ -837,49 +1036,13 @@ class FieldPALVHS(ldd.FieldPAL):
 
         return (dsout, dschroma), dsaudio, dsefm
 
-    def calc_burstmedian(self):
-        # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
-        return 1.0
-
     def try_detect_track(self):
         return try_detect_track_vhs_pal(self)
 
-    def determine_field_number(self):
-        """Workaround to shut down phase id mismatch warnings, the actual code
-        doesn't work properly with the vhs output at the moment."""
-        return 1 + (self.rf.field_number % 8)
 
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as tapes have large variations in line pos
-        Due to e.g head switch.
-        compute errors based off the second derivative - if it exceeds 1 something's wrong,
-        and if 4 really wrong...
-        """
-        return baserr
-
-    def dropout_detect(self):
-        return detect_dropouts_rf(self)
-
-
-class FieldPALUMatic(ldd.FieldPAL):
+class FieldPALUMatic(FieldPALShared):
     def __init__(self, *args, **kwargs):
         super(FieldPALUMatic, self).__init__(*args, **kwargs)
-
-    def refine_linelocs_pilot(self, linelocs=None):
-        """Override this as regular-band u-matic does not have a pilot burst."""
-        if linelocs is None:
-            linelocs = self.linelocs2.copy()
-        else:
-            linelocs = linelocs.copy()
-
-        return linelocs
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldPALUMatic, self).downscale(
@@ -889,37 +1052,10 @@ class FieldPALUMatic(ldd.FieldPAL):
 
         return (dsout, dschroma), dsaudio, dsefm
 
-    def calc_burstmedian(self):
-        # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
-        return 1.0
 
-    def determine_field_number(self):
-        """Workaround to shut down phase id mismatch warnings, the actual code
-        doesn't work properly with the vhs output at the moment."""
-        return 1 + (self.rf.field_number % 8)
-
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as tapes have large variations in line pos
-        Due to e.g head switch.
-        compute errors based off the second derivative - if it exceeds 1 something's wrong,
-        and if 4 really wrong...
-        """
-        return baserr
-
-    def dropout_detect(self):
-        return detect_dropouts_rf(self)
-
-
-class FieldNTSCVHS(ldd.FieldNTSC):
+class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
     def __init__(self, *args, **kwargs):
-        super(FieldNTSCVHS, self).__init__(*args, **kwargs)
+        super(FieldNTSCShared, self).__init__(*args, **kwargs)
         self.fieldPhaseID = 0
 
     def refine_linelocs_burst(self, linelocs=None):
@@ -934,9 +1070,10 @@ class FieldNTSCVHS(ldd.FieldNTSC):
 
         return linelocs
 
-    def calc_burstmedian(self):
-        # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
-        return 1.0
+
+class FieldNTSCVHS(FieldNTSCShared):
+    def __init__(self, *args, **kwargs):
+        super(FieldNTSCVHS, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
         """Try to detect which track the current field was read from.
@@ -988,20 +1125,6 @@ class FieldNTSCVHS(ldd.FieldNTSC):
 
         return (dsout, dschroma), dsaudio, dsefm
 
-    def dropout_detect(self):
-        return detect_dropouts_rf(self)
-
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as line starts can vary widely."""
-        return baserr
-
 
 class FieldMPALVHS(FieldNTSCVHS):
     def __init__(self, *args, **kwargs):
@@ -1011,26 +1134,9 @@ class FieldMPALVHS(FieldNTSCVHS):
         return try_detect_track_vhs_pal(self)
 
 
-class FieldNTSCUMatic(ldd.FieldNTSC):
+class FieldNTSCUMatic(FieldNTSCShared):
     def __init__(self, *args, **kwargs):
         super(FieldNTSCUMatic, self).__init__(*args, **kwargs)
-        self.fieldPhaseID = 0
-
-    def refine_linelocs_burst(self, linelocs=None):
-        """Override this as it's LD specific
-        At some point in the future we could maybe use the burst location to improve hsync accuracy,
-        but ignore it for now.
-        """
-        if linelocs is None:
-            linelocs = self.linelocs2
-        else:
-            linelocs = linelocs.copy()
-
-        return linelocs
-
-    def calc_burstmedian(self):
-        # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
-        return 1.0
 
     def downscale(self, linesoffset=0, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldNTSCUMatic, self).downscale(
@@ -1041,20 +1147,6 @@ class FieldNTSCUMatic(ldd.FieldNTSC):
         self.fieldPhaseID = self.fieldPhaseID = get_field_phase_id(self)
 
         return (dsout, dschroma), dsaudio, dsefm
-
-    def dropout_detect(self):
-        return detect_dropouts_rf(self)
-
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as line starts can vary widely."""
-        return baserr
 
 
 def parent_system(system):
@@ -1105,7 +1197,6 @@ class VHSDecode(ldd.LDdecode):
             tape_format=tape_format,
             inputfreq=inputfreq,
             rf_options=rf_options,
-            extra_options=extra_options,
         )
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
@@ -1205,7 +1296,7 @@ class VHSDecode(ldd.LDdecode):
 
 
 class VHSRFDecode(ldd.RFDecode):
-    def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}, extra_options={}):
+    def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
 
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
@@ -1213,6 +1304,12 @@ class VHSRFDecode(ldd.RFDecode):
             parent_system(system),
             decode_analog_audio=False,
             has_analog_audio=False,
+        )
+
+        # No idea if this is a common pythonic way to accomplish it but this gives us values that
+        # can't be changed later.
+        self.options = namedtuple("Options", "diff_demod_check_value tape_format")(
+            self.iretohz(100) * 2, tape_format
         )
 
         # Store a separate setting for *color* system as opposed to 525/625 line here.
@@ -1240,7 +1337,6 @@ class VHSRFDecode(ldd.RFDecode):
         self.notch_q = rf_options.get("notch_q", 10.0)
         self.disable_diff_demod = rf_options.get("disable_diff_demod", False)
         self.disable_dc_offset = rf_options.get("disable_dc_offset", False)
-        self.useAGC = extra_options.get("useAGC", True)
 
         if track_phase is None:
             self.track_phase = 0
@@ -1570,7 +1666,6 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
         self.Resync = Resync(self.freq_hz, self.SysParams)
-        self.diff_demod_check_value = self.iretohz(100) * 2
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -1657,7 +1752,7 @@ class VHSRFDecode(ldd.RFDecode):
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
         # replace the spikes with data from the diffed demod.
         if not self.disable_diff_demod:
-            check_value = self.diff_demod_check_value  # self.iretohz(100) * 2
+            check_value = self.options.diff_demod_check_value
 
             if np.max(demod[20:-20]) > check_value:
                 demod_b = unwrap_hilbert(
@@ -1735,11 +1830,5 @@ class VHSRFDecode(ldd.RFDecode):
         rv["video"] = (
             video_out[self.blockcut : -self.blockcut_end] if cut else video_out
         )
-
-        # data block length check
-        assert len(data) == len(out_video) == len(out_video05) == len(out_chroma) == len(env) == self.blocklen, \
-            "Block length mismatch at demodblock(): " + \
-            "raw data %d, luma %d, sync ref %d, chroma %d, envelope %d, blocklen %d" % \
-            (len(data), len(out_video), len(out_video05), len(out_chroma), len(env), self.blocklen)
 
         return rv
