@@ -5,16 +5,36 @@ from vhsdecode.utils import (
     plot_scope,
     dualplot_scope,
     zero_cross_det,
-    StackableMA,
+    moving_average,
 )
 import numpy as np
 from scipy.signal import argrelextrema
 from os import getpid
+from numba import njit
+
 import lddecode.core as ldd
 
 
 def t_to_samples(samp_rate, value):
     return samp_rate / value
+
+
+@njit(cache=True)
+def _safe_sync_clip(sync_ref, data, levels, eq_pulselen):
+    sync, blank = levels
+    mid_sync = (sync + blank) / 2
+    where_all_picture = np.where(sync_ref > mid_sync)[0]
+    locs_len = np.diff(where_all_picture)
+    min_synclen = eq_pulselen * 3 / 4
+    max_synclen = eq_pulselen * 3
+    is_sync = np.bitwise_and(locs_len > min_synclen, locs_len < max_synclen)
+    where_all_syncs = np.where(is_sync)[0]
+    clip_from = where_all_picture[where_all_syncs]
+    clip_len = locs_len[where_all_syncs]
+    for ix, begin in enumerate(clip_from):
+        data[begin : begin + clip_len[ix]] = sync
+
+    return data
 
 
 class VsyncSerration:
@@ -56,23 +76,27 @@ class VsyncSerration:
         self.vsynclen = round(t_to_samples(self.samp_rate, self.fv))
         self.linelen = round(t_to_samples(self.samp_rate, self.fh))
         self.pid = getpid()
-        self.levels = StackableMA(min_watermark=2), StackableMA(min_watermark=2)  # sync, blanking
+        self.levels = list(), list()  # sync, blanking
+        self.level_average = 30
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
+        self.min_watermark = 2
 
     def get_levels(self):
-        sync, blank = self.levels[0].pull(), self.levels[1].pull()
+        sync, sync_list = moving_average(self.levels[0], window=self.level_average)
+        blank, blank_list = moving_average(self.levels[1], window=self.level_average)
+        self.levels = sync_list, blank_list
         return sync, blank
 
     def has_levels(self):
         return (
-            self.levels[0].has_values()
-            and self.levels[1].has_values()
+            len(self.levels[0]) > self.min_watermark
+            and len(self.levels[1]) > self.min_watermark
         )
 
     def push_levels(self, levels):
         for ix, level in enumerate(levels):
-            self.levels[ix].push(level)
+            self.levels[ix].append(level)
 
     def mutemask(self, raw_locs, blocklen, pulselen):
         mask = np.zeros(blocklen)
@@ -81,37 +105,36 @@ class VsyncSerration:
             mask[loc : loc + pulselen] = [1] * pulselen
         return mask[:blocklen]
 
-    def levels_minima(self, lo_part):
-        where_min = argrelextrema(lo_part, np.less)[0]
-        return np.mean(lo_part[where_min])
-
     def vsync_envelope_simple(self, data):
-        hi_filtered = self.vsyncEnvFilter.filtfilt(data)
-        cut_level = np.min(hi_filtered)
-        lo_part = np.clip(data, a_min=0, a_max=cut_level)
-        lo_level = self.levels_minima(lo_part)
-        return hi_filtered, lo_level
+        hi_part = np.clip(data, a_max=np.max(data), a_min=0)
+        # inv_data = np.multiply(data, -1)#np.negative(data)
+        # lo_part_inv = np.clip(inv_data, a_max=np.max(inv_data), a_min=0)
+        # lo_part = np.multiply(lo_part_inv, -1)
+        lo_part = np.full_like(hi_part, np.min(data))
+        hi_filtered = self.vsyncEnvFilter.filtfilt(hi_part)
+        lo_filtered = self.vsyncEnvFilter.filtfilt(lo_part)
+        return hi_filtered, lo_filtered
 
     def vsync_envelope_double(self, data):
         forward = self.vsync_envelope_simple(data)
         reverse_t = self.vsync_envelope_simple(np.flip(data))
-        reverse = np.flip(reverse_t[0]), reverse_t[1]
+        reverse = np.flip(reverse_t[0]), np.flip(reverse_t[1])
         half = int(len(data) / 2)
         # end of forward + beginning of reverse
-        result = np.append(reverse[0][:half], forward[0][half:]), np.ones(len(data)) * forward[1]
+        result = np.append(reverse[0][:half], forward[0][half:]), np.append(
+            reverse[1][:half], forward[1][half:]
+        )
         # dualplot_scope(forward[0], forward[1])
         # dualplot_scope(result[0], result[1], title="VBI envelope")
         return result
 
     def chainfiltfilt(self, data, filters):
-        for filter in filters:
-            data = filter.filtfilt(data)
+        for filt in filters:
+            data = filt.filtfilt(data)
         return data
 
     def power_ratio_search(self, data):
-        first_harmonic = np.power(
-            self.chainfiltfilt(data, self.serrationFilter_base), 2
-        )
+        first_harmonic = np.square(self.chainfiltfilt(data, self.serrationFilter_base))
         first_harmonic = self.serrationFilter_envelope.filtfilt(first_harmonic)
         return argrelextrema(first_harmonic, np.less)[0]
 
@@ -254,7 +277,7 @@ class VsyncSerration:
             ldd.logger.debug(
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (
-                    self.levels[0].size(),
+                    len(self.levels[0]),
                     self.get_levels()[0] / 1e3,
                     self.get_levels()[1] / 1e3,
                 )
@@ -269,17 +292,5 @@ class VsyncSerration:
     # safe clips the bottom of the sync pulses, but not the picture area
     def safe_sync_clip(self, sync_ref, data):
         if self.has_levels():
-            sync, blank = self.get_levels()
-            mid_sync = (sync + blank) / 2
-            where_all_picture = np.where(sync_ref > mid_sync)[0]
-            locs_len = np.diff(where_all_picture)
-            min_synclen = self.eq_pulselen * 3 / 4
-            max_synclen = self.eq_pulselen * 3
-            is_sync = np.bitwise_and(locs_len > min_synclen, locs_len < max_synclen)
-            where_all_syncs = np.where(is_sync)[0]
-            clip_from = where_all_picture[where_all_syncs]
-            clip_len = locs_len[where_all_syncs]
-            for ix, begin in enumerate(clip_from):
-                data[begin : begin + clip_len[ix]] = sync
-
+            data = _safe_sync_clip(sync_ref, data, self.get_levels(), self.eq_pulselen)
         return data
