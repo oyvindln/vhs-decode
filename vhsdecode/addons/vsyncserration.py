@@ -81,24 +81,24 @@ class VsyncSerration:
             mask[loc : loc + pulselen] = [1] * pulselen
         return mask[:blocklen]
 
+    def levels_minima(self, lo_part):
+        where_min = argrelextrema(lo_part, np.less)[0]
+        return np.mean(lo_part[where_min])
+
     def vsync_envelope_simple(self, data):
-        hi_part = np.clip(data, a_max=np.max(data), a_min=0)
-        inv_data = np.multiply(data, -1)
-        lo_part_inv = np.clip(inv_data, a_max=np.max(inv_data), a_min=0)
-        lo_part = np.multiply(lo_part_inv, -1)
-        hi_filtered = self.vsyncEnvFilter.filtfilt(hi_part)
-        lo_filtered = self.vsyncEnvFilter.filtfilt(lo_part)
-        return hi_filtered, lo_filtered
+        hi_filtered = self.vsyncEnvFilter.filtfilt(data)
+        cut_level = np.min(hi_filtered)
+        lo_part = np.clip(data, a_min=0, a_max=cut_level)
+        lo_level = self.levels_minima(lo_part)
+        return hi_filtered, lo_level
 
     def vsync_envelope_double(self, data):
         forward = self.vsync_envelope_simple(data)
         reverse_t = self.vsync_envelope_simple(np.flip(data))
-        reverse = np.flip(reverse_t[0]), np.flip(reverse_t[1])
+        reverse = np.flip(reverse_t[0]), reverse_t[1]
         half = int(len(data) / 2)
         # end of forward + beginning of reverse
-        result = np.append(reverse[0][:half], forward[0][half:]), np.append(
-            reverse[1][:half], forward[1][half:]
-        )
+        result = np.append(reverse[0][:half], forward[0][half:]), np.ones(len(data)) * forward[1]
         # dualplot_scope(forward[0], forward[1])
         # dualplot_scope(result[0], result[1], title="VBI envelope")
         return result
