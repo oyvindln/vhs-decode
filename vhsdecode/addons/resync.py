@@ -31,6 +31,8 @@ class FieldState:
         blevels = self.blanklevels.pull()
         if blevels is not None:
             return blevels, self.getSyncLevel()
+        else:
+            return None, None
 
     def setLocs(self, locs):
         self.locs = locs
@@ -195,7 +197,7 @@ class Resync:
                 demod_data += dc_offset
                 sync, blank = sync + dc_offset, blank + dc_offset
 
-            # forced blank
+                # forced blank
                 # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
 
             field.data["video"]["demod_05"] = np.clip(
