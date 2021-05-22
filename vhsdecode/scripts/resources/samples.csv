@@ -1,0 +1,31 @@
+Type,Parameters,Sample Path,Notes
+VHSH,--doDOD --recheck_phase -t 6 --10cxadc3 -p,~/vault/VHS/jetix_chewed_sample.r16,PALB (bad tape)
+VHS,--doDOD -t 6 --10cxadc3 -p ,~/vault/VHS/MxFycefn.vhs,PALB
+VHS,--doDOD -t 6 --10cxadc3 -p,~/vault/VHS/relAdEqP.r16,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/numpy-error.r8,PALB
+VHS,--doDOD --10cxadc3 -t 6 -p,~/vault/VHS/filmnetlp/filmnet2.vhs,"PALB, LP"
+VHS,--doDOD --noAGC --cxadc -t 6 -p,~/vault/VHS/noisy_sample_causing_sync_issue_on_new_code_cxadc_8bit.vhs,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/field_drop_issue_starting_at_frame_18_and_some_more_ capture26739-26911_2291x625_25Hz_8bit.flac,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/crash_samples/sample_1_14.12.2020.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p ,~/vault/VHS/crash_samples/sample_2_14.12.2020.r8 ,PALB
+VHS,--doDOD --cxadc3 -t 6 -p ,~/vault/VHS/vsync-roll_pal_cxadc3.r8,PALB (bad vsync)
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/field_issues.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/broken_vcr_recording.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/field_issue2.r8,PALB
+VHS,--doDOD --recheck_phase --cxadc3 -t 6 -p,~/vault/VHS/no_fieldissues_testclip.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/nosync.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/divzero-brokenpipe-calczc.r8,PALB
+VHS,--doDOD --cxadc3 -t 6 -p,~/vault/VHS/brightness-jump.r8 ,PALB
+VHS,--noAGC --doDOD --cxadc3 -t 6 -p ,~/vault/VHS/chroma-outage_pal_cxadc3.r8,PALB
+VHS,--doDOD --recheck_phase --cxadc -t 6 -p,~/vault/VHS/YKPAÏHA.r8,PALB
+VHS,--doDOD -sl 30 -t 6 --cxadc -n,~/vault/VHS/VR620-NTSC-multiburst.r8,NTSC
+VHS,--doDOD -t 6 -sl 30 --cxadc -n,~/vault/VHS/straight-to-card-bnc-filter.r8,NTSC
+VHS,--doDOD -t 6 -sl 30 --cxadc3 -n,~/vault/VHS/CXADC_Zenith_XBV342_35.8MSPS_NTSC_test_captures/NTSC_test_pattern.r8,NTSC
+VHS,--doDOD -t 6 -p --noAGC,~/vault/VHS/colorbars_PAL.r16,PALB
+VHS,--doDOD -t 6 --10cxadc3 -pm,~/vault/VHS/palMsample.r16,PALM (noisy capture)
+VHS,--doDOD -sl 30 -t 6 --10cxadc -pm,~/vault/VHS/dobr_sample_10bit_palm.vhs.flac,PALM
+VHS,--doDOD -t 6 -sl 70 --10cxadc3 -p,~/vault/VHS/V280-multiburst-calibration/v280-sp-rf.vhs,PALB
+UMATIC,--doDOD -t 6 -n -U,~/vault/U-Matic/color_bars2.r16 ,NTSC
+UMATIC,--doDOD -t 6 -n -U,~/vault/U-Matic/monoscope.r16 ,NTSC
+UMATIC,--doDOD -sl 70 --cxadc -n -U,~/vault/U-Matic/rf_sweep.r8,NTSC
+UMATIC,--doDOD --cxadc -n -U,~/vault/U-Matic/bars.r8 ,NTSC

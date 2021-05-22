@@ -265,3 +265,6 @@ DEFAULT_HYSTERESIS = 1.25
 DOD_MERGE_THRESHOLD = 30
 DOD_MIN_LENGTH = 10
 DEFAULT_SHARPNESS = 0
+BLANK_LENGTH_THRESHOLD = 9
+# lddecode uses 0.5 - upping helps decode some tapes with bad vsync.
+EQ_PULSE_TOLERANCE = 0.7
