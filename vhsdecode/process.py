@@ -1617,6 +1617,22 @@ class VHSRFDecode(ldd.RFDecode):
         SF = self.Filters
         SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * SF["F05"]
 
+        # SF["NLHighPass"] = sps.butter(
+        #     1,
+        #     [(DP["video_lpf_freq"] * 0.5) / self.freq_hz_half],
+        #     btype="highpass",
+        #     output="sos",
+        # )
+
+        # SF["NLHighPassF"] = lddu.filtfft(
+        #     sps.butter(
+        #         1,
+        #         [(DP["video_lpf_freq"] * 0.66) / self.freq_hz_half],
+        #         btype="highpass",
+        #     ),
+        #     self.blocklen,
+        # )
+
         # Filter to pick out color-under chroma component.
         # filter at about twice the carrier. (This seems to be similar to what VCRs do)
         # TODO: Needs tweaking
@@ -1827,6 +1843,17 @@ class VHSRFDecode(ldd.RFDecode):
         out_video = npfft.irfft(
             demod_fft * self.Filters["FVideo"][0 : (self.blocklen // 2) + 1]
         ).real
+
+        # out_video_orig = out_video
+
+        # out_video_fft = npfft.rfft(out_video)
+        # hf_part = npfft.irfft(out_video_fft * self.Filters["NLHighPassF"][0 : (self.blocklen // 2) + 1])
+
+        # hf_part = utils.filter_simple(out_video, self.Filters["NLHighPass"])
+        # hf_part = (hf_part * hf_part * hf_part) / 2
+        # hf_part = np.clip(hf_part, -10000, 10000)
+        # hf_part = np.where(abs(hf_part) < 8000, hf_part, 0)
+        # out_video -= hf_part# + self.iretohz(50)
 
         out_video05 = npfft.irfft(
             demod_fft * self.Filters["FVideo05"][0 : (self.blocklen // 2) + 1]
