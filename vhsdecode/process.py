@@ -32,7 +32,7 @@ def chroma_to_u16(chroma):
     """Scale the chroma output array to a 16-bit value for output."""
     S16_ABS_MAX = 32767
 
-    if np.max(chroma) > S16_ABS_MAX or abs(np.min(chroma)) > S16_ABS_MAX:
+    if np.max(chroma) > S16_ABS_MAX:
         ldd.logger.warning("Chroma signal clipping.")
     return np.uint16(chroma + S16_ABS_MAX)
 
@@ -93,6 +93,7 @@ def comb_c_pal(data, line_len):
     """Very basic comb filter, adds the signal together with a signal delayed by 2H,
     and one advanced by 2H
     line by line. VCRs do this to reduce crosstalk.
+    Helps chroma stability on LP tapes in particular.
     """
 
     data2 = data.copy()
@@ -104,8 +105,8 @@ def comb_c_pal(data, line_len):
         # Let the delayed signal contribute 1/4 and advanced 1/4.
         # Could probably make the filtering configurable later.
         data[line_num * line_len : (line_num + 1) * line_len] = (
-            (line_slice) - (delayed2h) - adv2h
-        ) / 3
+            (line_slice * 2) - (delayed2h) - adv2h
+        ) / 4
     return data
 
 
@@ -183,7 +184,7 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
     return chroma
 
 
-def process_chroma(field, track_phase, disable_deemph=False):
+def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False):
     # Run TBC/downscale on chroma.
     chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
 
@@ -227,8 +228,6 @@ def process_chroma(field, track_phase, disable_deemph=False):
         starting_phase,
     )
 
-    # uphet = comb_c_pal(uphet,outwidth)
-
     # Filter out unwanted frequencies from the final chroma signal.
     # Mixing the signals will produce waves at the difference and sum of the
     # frequencies. We only want the difference wave which is at the correct color
@@ -237,10 +236,11 @@ def process_chroma(field, track_phase, disable_deemph=False):
     uphet = utils.filter_simple(uphet, field.rf.Filters["FChromaFinal"])
 
     # Basic comb filter for NTSC to calm the color a little.
-    if field.rf.color_system == "NTSC":
-        uphet = comb_c_ntsc(uphet, outwidth)
-    #    else:
-    #        uphet = comb_c_pal(uphet, outwidth)
+    if not disable_comb:
+        if field.rf.color_system == "NTSC":
+            uphet = comb_c_ntsc(uphet, outwidth)
+        else:
+            uphet = comb_c_pal(uphet, outwidth)
 
     # Final automatic chroma gain.
     uphet = acc(
@@ -277,7 +277,7 @@ def decode_chroma_vhs(field):
         rf.track_phase = field.try_detect_track()
         rf.needs_detect = False
 
-    uphet = process_chroma(field, rf.track_phase)
+    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     rf.last_raw_loc = raw_loc
@@ -293,7 +293,7 @@ def decode_chroma_umatic(field):
 
     check_increment_field_no(field.rf)
 
-    uphet = process_chroma(field, None, True)
+    uphet = process_chroma(field, None, True, field.rf.options.disable_comb)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     field.rf.last_raw_loc = raw_loc
@@ -782,7 +782,7 @@ def try_detect_track_vhs_pal(field):
     )
 
     # Upconvert chroma twice, once for each possible track phase
-    uphet = [process_chroma(field, 0), process_chroma(field, 1)]
+    uphet = [process_chroma(field, 0, True, True), process_chroma(field, 1, True, True)]
 
     sine_wave = field.rf.fsc_wave
     cosine_wave = field.rf.fsc_cos_wave
@@ -1060,6 +1060,21 @@ class FieldShared:
         LT["eq"] = (eq_min, eq_max)
 
         return LT
+
+    def computewow(self, lineinfo):
+        """Compute how much the line deviates fron expected
+        Overridden to limit the result so we don't get super-bright lines at head switch.
+        TODO: Better solution to that
+        """
+        wow = np.ones(len(lineinfo))
+
+        for l in range(0, len(wow) - 1):
+            wow[l] = min(self.get_linelen(l) / self.inlinelen, 1.06)
+
+        for l in range(self.lineoffset, self.lineoffset + 10):
+            wow[l] = np.median(wow[l : l + 4])
+
+        return wow
 
 
 class FieldPALShared(FieldShared, ldd.FieldPAL):
@@ -1368,9 +1383,9 @@ class VHSRFDecode(ldd.RFDecode):
 
         # No idea if this is a common pythonic way to accomplish it but this gives us values that
         # can't be changed later.
-        self.options = namedtuple("Options", "diff_demod_check_value tape_format")(
-            self.iretohz(100) * 2, tape_format
-        )
+        self.options = namedtuple(
+            "Options", "diff_demod_check_value tape_format disable_comb"
+        )(self.iretohz(100) * 2, tape_format, rf_options.get("disable_comb", False))
 
         # Store a separate setting for *color* system as opposed to 525/625 line here.
         # TODO: Fix upstream so we don't have to fake tell ld-decode code that we are using ntsc for
@@ -1853,7 +1868,7 @@ class VHSRFDecode(ldd.RFDecode):
         # hf_part = (hf_part * hf_part * hf_part) / 2
         # hf_part = np.clip(hf_part, -10000, 10000)
         # hf_part = np.where(abs(hf_part) < 8000, hf_part, 0)
-        # out_video -= hf_part# + self.iretohz(50)
+        # out_video -= hf_part # + self.iretohz(50)
 
         out_video05 = npfft.irfft(
             demod_fft * self.Filters["FVideo05"][0 : (self.blocklen // 2) + 1]

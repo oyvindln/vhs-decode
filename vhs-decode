@@ -108,6 +108,14 @@ parser.add_argument(
     default=False,
     help="Disable blanking DC offset clamping/compensation",
 )
+parser.add_argument(
+    "-nocomb",
+    "--no_comb",
+    dest="disable_comb",
+    action="store_true",
+    default=False,
+    help="Disable internal chroma comb filter.",
+)
 
 args = parser.parse_args()
 
@@ -136,6 +144,7 @@ rf_options["recheck_phase"] = args.recheck_phase
 rf_options["high_boost"] = args.high_boost
 rf_options["disable_diff_demod"] = args.disable_diff_demod
 rf_options["disable_dc_offset"] = args.disable_dc_offset
+rf_options["disable_comb"] = args.disable_comb
 
 extra_options = get_extra_options(args)
 

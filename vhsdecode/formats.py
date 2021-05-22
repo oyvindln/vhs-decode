@@ -36,7 +36,7 @@ RFParams_PAL_VHS["video_hpf_extra"] = 1520000
 RFParams_PAL_VHS["video_hpf_extra_order"] = 1
 
 # Low-pass filter on Y after demodulation
-RFParams_PAL_VHS["video_lpf_freq"] = 3200000
+RFParams_PAL_VHS["video_lpf_freq"] = 3500000
 RFParams_PAL_VHS["video_lpf_order"] = 1
 
 # PAL color under carrier is 40H + 1953
@@ -211,7 +211,7 @@ SysParams_PAL_VHS["max_ire"] = 100
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.
 # This has to be low enough to avoid clipping, so we have to
 # tell the chroma decoder to boost it by a bit afterwards.
-SysParams_PAL_VHS["burst_abs_ref"] = 2500
+SysParams_PAL_VHS["burst_abs_ref"] = 3000
 
 # 0 IRE level after demodulation
 SysParams_NTSC_VHS["ire0"] = 3685000
@@ -245,7 +245,7 @@ SysParams_MPAL_VHS["burst_abs_ref"] = 3500
 # a difference on these parameters.
 SysParams_PAL_UMATIC["ire0"] = 4257143
 SysParams_PAL_UMATIC["hz_ire"] = 1600000 / 140.0
-SysParams_PAL_UMATIC["burst_abs_ref"] = 2750
+SysParams_PAL_UMATIC["burst_abs_ref"] = 3750
 
 SysParams_NTSC_UMATIC["ire0"] = 4257143
 SysParams_NTSC_UMATIC["hz_ire"] = 1600000 / 140.0
@@ -268,3 +268,4 @@ DEFAULT_SHARPNESS = 0
 BLANK_LENGTH_THRESHOLD = 9
 # lddecode uses 0.5 - upping helps decode some tapes with bad vsync.
 EQ_PULSE_TOLERANCE = 0.7
+MAX_WOW = 1.06
