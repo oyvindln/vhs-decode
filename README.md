@@ -29,6 +29,7 @@ then, all Python modules:
 after, compile and install ld-decode and its tools:
 
 ```make```
+
 ```sudo make install```
 
 and finally, run vhs-decode by either ```python3 vhs-decode [arguments] <infile> <outfile> ``` or ```./vhs-decode [arguments] <infile> <outfile> ```.
@@ -63,6 +64,7 @@ Supported formats
 ***Tape formats***
 
 VHS: SP, EP/LP functional but not officially supported
+
 U-Matic
 
 ***File formats***
