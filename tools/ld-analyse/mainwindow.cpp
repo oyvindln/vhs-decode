@@ -52,7 +52,7 @@ MainWindow::MainWindow(QString inputFilenameParam, QWidget *parent) :
     currentFrameNumber = 1;
 
     // Set the initial aspect
-    aspectRatio = 0;
+    aspectRatio = 1;
 
     // Connect to the scan line changed signal from the oscilloscope dialogue
     connect(oscilloscopeDialog, &OscilloscopeDialog::scanLineChanged, this, &MainWindow::scanLineChangedSignalHandler);
@@ -167,7 +167,8 @@ void MainWindow::updateGuiLoaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("SAR 1:1"));
+
+    ui->aspectPushButton->setText(tr("DAR 4:3"));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -192,7 +193,7 @@ void MainWindow::updateGuiLoaded()
     sourceVideoStatus.setText(statusText);
 
     // Reset the aspect setting
-    aspectRatio = 0;
+    aspectRatio = 1;
 
     // Update the chroma decoder configuration dialogue
     chromaDecoderConfigDialog->setConfiguration(tbcSource.getIsSourcePal(), tbcSource.getPalConfiguration(),
@@ -252,7 +253,7 @@ void MainWindow::updateGuiUnloaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("SAR 1:1"));
+    ui->aspectPushButton->setText(tr("DAR 4:3"));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -350,7 +351,7 @@ void MainWindow::updateFrameViewer()
     
     if (aspectRatio == 2) {
         if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
-        else adjustment = 129; // NTSC 16:9
+        else adjustment = 122; // NTSC 16:9
     }
 
     // Scale and apply the pixmap
@@ -530,7 +531,7 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
             // Scale to 16:9 aspect
             qint32 adjustment = 0;
             if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
-            else adjustment = 129; // NTSC 16:9
+            else adjustment = 122; // NTSC 16:9
 
             imageToSave = imageToSave.scaled((imageToSave.size().width() + adjustment),
                                              (imageToSave.size().height()),
