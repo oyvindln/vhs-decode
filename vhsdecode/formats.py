@@ -69,6 +69,10 @@ RFParams_PAL_VHS["boost_bpf_high"] = 5600000
 # Multiplier for the boosted signal to add in.
 RFParams_PAL_VHS["boost_bpf_mult"] = 2
 
+RFParams_PAL_VHS["nonlinear_highpass_freq"] = 800000
+RFParams_PAL_VHS["nonlinear_highpass_limit_h"] = 5000
+RFParams_PAL_VHS["nonlinear_highpass_limit_l"] = -20000
+
 # NTSC VHS section
 
 # Band-pass filter for Video rf.
@@ -113,6 +117,16 @@ RFParams_NTSC_VHS["boost_bpf_low"] = 4100000
 RFParams_NTSC_VHS["boost_bpf_high"] = 5000000
 RFParams_NTSC_VHS["boost_bpf_mult"] = 1
 
+RFParams_NTSC_VHS["nonlinear_highpass_freq"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_freq"
+]
+RFParams_NTSC_VHS["nonlinear_highpass_limit_h"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_h"
+]
+RFParams_NTSC_VHS["nonlinear_highpass_limit_l"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_l"
+]
+
 # PAL-M VHS section
 RFParams_MPAL_VHS = copy.deepcopy(RFParams_NTSC_VHS)
 RFParams_MPAL_VHS["color_under_carrier"] = 631.337e3
@@ -150,6 +164,15 @@ RFParams_PAL_UMATIC["deemph_gain"] = 10.8
 RFParams_PAL_UMATIC["boost_bpf_low"] = 5000000
 RFParams_PAL_UMATIC["boost_bpf_high"] = 5800000
 RFParams_PAL_UMATIC["boost_bpf_mult"] = 1
+
+# Needs to be tweaked, just using some random values for now.
+RFParams_PAL_UMATIC["nonlinear_highpass_freq"] = 1000000
+RFParams_PAL_UMATIC["nonlinear_highpass_limit_h"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_h"
+]
+RFParams_PAL_UMATIC["nonlinear_highpass_limit_l"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_l"
+]
 
 RFParams_PAL_UMATIC_HI["video_bpf_low"] = 0
 RFParams_PAL_UMATIC_HI["video_bpf_high"] = 0
@@ -193,6 +216,15 @@ RFParams_NTSC_UMATIC["boost_bpf_low"] = 5000000
 RFParams_NTSC_UMATIC["boost_bpf_high"] = 5800000
 RFParams_NTSC_UMATIC["boost_bpf_mult"] = 1
 
+# Needs to be tweaked, just using some random values for now.
+RFParams_NTSC_UMATIC["nonlinear_highpass_freq"] = 1000000
+RFParams_NTSC_UMATIC["nonlinear_highpass_limit_h"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_h"
+]
+RFParams_NTSC_UMATIC["nonlinear_highpass_limit_l"] = RFParams_PAL_VHS[
+    "nonlinear_highpass_limit_l"
+]
+
 SysParams_PAL_VHS = {**SysParams_PAL}
 SysParams_NTSC_VHS = {**SysParams_NTSC}
 SysParams_PAL_UMATIC = {**SysParams_PAL}
@@ -204,23 +236,17 @@ SysParams_PAL_VHS["ire0"] = 4100000
 # frequency/ire IRE change pr frequency (Is this labeled correctly?)
 SysParams_PAL_VHS["hz_ire"] = 700000 / 100.0
 
-# Top/white point defined by the standard 4.8 MHz
-SysParams_PAL_VHS["max_ire"] = 100
-
 # Mean absolute value of color burst for Automatic Chroma Control.
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.
 # This has to be low enough to avoid clipping, so we have to
 # tell the chroma decoder to boost it by a bit afterwards.
-SysParams_PAL_VHS["burst_abs_ref"] = 3000
+SysParams_PAL_VHS["burst_abs_ref"] = 2500
 
 # 0 IRE level after demodulation
 SysParams_NTSC_VHS["ire0"] = 3685000
 
 # frequency/ire IRE change pr frequency (Is this labeled correctly?)
 SysParams_NTSC_VHS["hz_ire"] = 715000 / 100.0
-
-# Top/white point defined by the standard
-SysParams_NTSC_VHS["max_ire"] = 100
 
 # Mean absolute value of color burst for Automatic Chroma Control.
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.

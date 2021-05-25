@@ -11,6 +11,7 @@ import numpy as np
 import scipy.signal as sps
 import scipy.interpolate as spi
 
+
 # Use PyFFTW's faster FFT implementation if available
 try:
     import pyfftw.interfaces.numpy_fft as npfft
@@ -3472,7 +3473,6 @@ class LDdecode:
 
                     if max(sync_ire_diff, ire0_diff) > acceptable_diff:
                         redo = True
-
                         self.rf.SysParams["ire0"] = ire0_hz
                         # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
                         self.rf.SysParams["hz_ire"] = (sync_hz - ire0_hz) / vsync_ire

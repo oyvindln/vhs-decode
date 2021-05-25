@@ -165,6 +165,7 @@ def filter_plot(iir_b, iir_a, samp_rate, type, title):
     plt.show()
 
 
+# assembles the current filter design on a pipe-able filter
 class FiltersClass:
     def __init__(self, iir_b, iir_a, samp_rate):
         self.iir_b, self.iir_a = iir_b, iir_a
@@ -181,3 +182,31 @@ class FiltersClass:
     def lfilt(self, data):
         output, self.z = signal.lfilter(self.iir_b, self.iir_a, data, zi=self.z)
         return output
+
+
+# stacks and returns the moving average of the last window_average elements
+# has_values() method returns true if the stack has more than min_watermark elements
+class StackableMA:
+    def __init__(self, min_watermark=3, window_average=30):
+        self.window_average = window_average
+        self.min_watermark = min_watermark
+        self.stack = np.array([])
+
+    def push(self, value):
+        self.stack = np.append(self.stack, value)
+
+    def pull(self):
+        if np.size(self.stack) > 0:
+            value, self.stack = moving_average(
+                self.stack, window=self.window_average
+            )
+            return value
+        else:
+            return None
+
+    def has_values(self):
+        return np.size(self.stack) > self.min_watermark
+
+    def size(self):
+        return np.size(self.stack)
+

@@ -116,6 +116,14 @@ parser.add_argument(
     default=False,
     help="Disable internal chroma comb filter.",
 )
+parser.add_argument(
+    "-nld",
+    "--non_linear_deemphasis",
+    dest="nldeemp",
+    action="store_true",
+    default=False,
+    help="Enable non-linear deemphasis, can help reduce ringing and oversharpening. (WIP).",
+)
 
 args = parser.parse_args()
 
@@ -145,6 +153,7 @@ rf_options["high_boost"] = args.high_boost
 rf_options["disable_diff_demod"] = args.disable_diff_demod
 rf_options["disable_dc_offset"] = args.disable_dc_offset
 rf_options["disable_comb"] = args.disable_comb
+rf_options["nldeemp"] = args.nldeemp
 
 extra_options = get_extra_options(args)
 
