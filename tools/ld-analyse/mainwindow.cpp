@@ -53,6 +53,7 @@ MainWindow::MainWindow(QString inputFilenameParam, QWidget *parent) :
 
     // Set the initial aspect
     aspectRatio = 1;
+    if (tbcSource.getIsWidescreen()) aspectRatio = 2;
 
     // Connect to the scan line changed signal from the oscilloscope dialogue
     connect(oscilloscopeDialog, &OscilloscopeDialog::scanLineChanged, this, &MainWindow::scanLineChangedSignalHandler);
@@ -167,7 +168,6 @@ void MainWindow::updateGuiLoaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-
     ui->aspectPushButton->setText(tr("DAR 4:3"));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
@@ -194,6 +194,10 @@ void MainWindow::updateGuiLoaded()
 
     // Reset the aspect setting
     aspectRatio = 1;
+    if (tbcSource.getIsWidescreen()) {
+        aspectRatio = 2;
+        ui->aspectPushButton->setText(tr("DAR 16:9"));
+    }
 
     // Update the chroma decoder configuration dialogue
     chromaDecoderConfigDialog->setConfiguration(tbcSource.getIsSourcePal(), tbcSource.getPalConfiguration(),
@@ -253,7 +257,8 @@ void MainWindow::updateGuiUnloaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("DAR 4:3"));
+    aspectRatio = 1;
+    ui->aspectPushButton->setText(tr("DAR 4:3"));;
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
