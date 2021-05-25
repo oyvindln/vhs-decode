@@ -106,11 +106,11 @@ class VsyncSerration:
         return np.mean(lo_part[where_min])
 
     def vsync_envelope_simple(self, data):
-        hi_filtered = self.vsyncEnvFilter.filtfilt(data)
-        cut_level = np.min(hi_filtered)
-        lo_part = np.clip(data, a_min=0, a_max=cut_level)
-        lo_level = self.levels_minima(lo_part)
-        return hi_filtered, lo_level
+        hi_part = np.clip(data, a_max=np.max(data), a_min=0)
+        lo_part = np.full_like(hi_part, np.min(data))
+        hi_filtered = self.vsyncEnvFilter.filtfilt(hi_part)
+        lo_filtered = self.vsyncEnvFilter.filtfilt(lo_part)
+        return hi_filtered, np.median(lo_filtered)
 
     def vsync_envelope_double(self, data):
         forward = self.vsync_envelope_simple(data)
