@@ -217,6 +217,13 @@ qint32 TbcSource::getNumberOfFields()
     return ldDecodeMetaData.getNumberOfFields();
 }
 
+// Method returns true if the TBC source is anamorphic (false for 4:3)
+bool TbcSource::getIsWidescreen()
+{
+    if (!sourceReady) return false;
+    return ldDecodeMetaData.getVideoParameters().isWidescreen;
+}
+
 // Method returns true if the TBC source is PAL (false for NTSC)
 bool TbcSource::getIsSourcePal()
 {
