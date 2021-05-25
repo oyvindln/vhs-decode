@@ -383,7 +383,7 @@
            <item>
             <widget class="QPushButton" name="aspectPushButton">
              <property name="text">
-              <string>1:1</string>
+              <string>DAR 4:3</string>
              </property>
             </widget>
            </item>
