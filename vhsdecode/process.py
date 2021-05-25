@@ -1413,6 +1413,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.disable_diff_demod = rf_options.get("disable_diff_demod", False)
         self.disable_dc_offset = rf_options.get("disable_dc_offset", False)
         self.useAGC = extra_options.get("useAGC", True)
+        self.debug = extra_options.get("debug", True)
 
         if track_phase is None:
             self.track_phase = 0
@@ -1757,7 +1758,7 @@ class VHSRFDecode(ldd.RFDecode):
         }
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        self.Resync = Resync(self.freq_hz, self.SysParams)
+        self.Resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
 
     def computedelays(self, mtf_level=0):
         """Override computedelays

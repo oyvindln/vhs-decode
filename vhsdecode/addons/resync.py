@@ -48,7 +48,8 @@ class FieldState:
 
 
 class Resync:
-    def __init__(self, fs, sysparams):
+    def __init__(self, fs, sysparams, debug=False):
+        self.debug = debug
         self.samp_rate = fs
         self.SysParams = sysparams.copy()
         self.VsyncSerration = VsyncSerration(fs, sysparams)
@@ -172,7 +173,8 @@ class Resync:
         """
 
         sync_reference = field.data["video"]["demod_05"]
-        self.debug_field(sync_reference)
+        if self.debug:
+            self.debug_field(sync_reference)
 
         # measures the serration levels if possible
         self.VsyncSerration.work(sync_reference)
