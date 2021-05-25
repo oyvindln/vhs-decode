@@ -52,7 +52,7 @@ MainWindow::MainWindow(QString inputFilenameParam, QWidget *parent) :
     currentFrameNumber = 1;
 
     // Set the initial aspect
-    aspect43On = false;
+    aspectRatio = 0;
 
     // Connect to the scan line changed signal from the oscilloscope dialogue
     connect(oscilloscopeDialog, &OscilloscopeDialog::scanLineChanged, this, &MainWindow::scanLineChangedSignalHandler);
@@ -167,7 +167,7 @@ void MainWindow::updateGuiLoaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("1:1"));
+    ui->aspectPushButton->setText(tr("SAR 1:1"));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -192,7 +192,7 @@ void MainWindow::updateGuiLoaded()
     sourceVideoStatus.setText(statusText);
 
     // Reset the aspect setting
-    aspect43On = false;
+    aspectRatio = 0;
 
     // Update the chroma decoder configuration dialogue
     chromaDecoderConfigDialog->setConfiguration(tbcSource.getIsSourcePal(), tbcSource.getPalConfiguration(),
@@ -252,7 +252,7 @@ void MainWindow::updateGuiUnloaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("1:1"));
+    ui->aspectPushButton->setText(tr("SAR 1:1"));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -343,13 +343,18 @@ void MainWindow::updateFrameViewer()
 
     // Get the pixmap width and height (and apply scaling and aspect ratio adjustment if required)
     qint32 adjustment = 0;
-    if (aspect43On) {
-        if (tbcSource.getIsSourcePal()) adjustment = 196; // PAL
-        else adjustment = 150; // NTSC
+    if (aspectRatio == 1) {
+        if (tbcSource.getIsSourcePal()) adjustment = -196; // PAL 4:3
+        else adjustment = -150; // NTSC 4:3
+    }
+    
+    if (aspectRatio == 2) {
+        if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
+        else adjustment = 129; // NTSC 16:9
     }
 
     // Scale and apply the pixmap
-    ui->frameViewerLabel->setPixmap(ui->frameViewerLabel->pixmap()->scaled((scaleFactor * (ui->frameViewerLabel->pixmap()->size().width() - adjustment)),
+    ui->frameViewerLabel->setPixmap(ui->frameViewerLabel->pixmap()->scaled((scaleFactor * (ui->frameViewerLabel->pixmap()->size().width() + adjustment)),
                                                                            (scaleFactor * ui->frameViewerLabel->pixmap()->size().height()),
                                                                            Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
 
@@ -490,7 +495,8 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
     if (!tbcSource.getChromaDecoder()) filenameSuggestion += tr("source_");
     else filenameSuggestion += tr("chroma_");
 
-    if (aspect43On) filenameSuggestion += tr("ar43_");
+    if (aspectRatio == 1) filenameSuggestion += tr("ar43_");
+    if (aspectRatio == 2) filenameSuggestion += tr("ar169_");
 
     filenameSuggestion += QString::number(currentFrameNumber) + tr(".png");
 
@@ -508,13 +514,25 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
         QImage imageToSave = tbcSource.getFrameImage(currentFrameNumber);
 
         // Change to 4:3 aspect ratio?
-        if (aspect43On) {
+        if (aspectRatio == 1) {
             // Scale to 4:3 aspect
             qint32 adjustment = 0;
-            if (tbcSource.getIsSourcePal()) adjustment = 196; // PAL
-            else adjustment = 150; // NTSC
+            if (tbcSource.getIsSourcePal()) adjustment = -196; // PAL 4:3
+            else adjustment = -150; // NTSC 4:3
 
-            imageToSave = imageToSave.scaled((imageToSave.size().width() - adjustment),
+            imageToSave = imageToSave.scaled((imageToSave.size().width() + adjustment),
+                                             (imageToSave.size().height()),
+                                             Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
+        
+        // Change to 16:9 aspect ratio?
+        if (aspectRatio == 2) {
+            // Scale to 16:9 aspect
+            qint32 adjustment = 0;
+            if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
+            else adjustment = 129; // NTSC 16:9
+
+            imageToSave = imageToSave.scaled((imageToSave.size().width() + adjustment),
                                              (imageToSave.size().height()),
                                              Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         }
@@ -750,13 +768,13 @@ void MainWindow::on_mouseModePushButton_clicked()
 // Aspect ratio button clicked
 void MainWindow::on_aspectPushButton_clicked()
 {
-    if (aspect43On) {
-        aspect43On = false;
-        ui->aspectPushButton->setText(tr("1:1"));
-    } else {
-        aspect43On = true;
-        ui->aspectPushButton->setText(tr("4:3"));
-    }
+    aspectRatio += 1;
+    
+    if (aspectRatio > 2) aspectRatio = 0;
+    
+    if (aspectRatio == 0) ui->aspectPushButton->setText(tr("SAR 1:1"));
+    if (aspectRatio == 1) ui->aspectPushButton->setText(tr("DAR 4:3"));
+    if (aspectRatio == 2) ui->aspectPushButton->setText(tr("DAR 16:9"));
 
     // Show the current frame (why isn't this option passed?)
     showFrame();

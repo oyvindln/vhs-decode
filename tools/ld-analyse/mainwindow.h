@@ -124,13 +124,13 @@ private:
     QLabel sourceVideoStatus;
     QLabel fieldNumberStatus;
     TbcSource tbcSource;
+    qint32 aspectRatio;
     qint32 lastScopeLine;
     qint32 lastScopeDot;
     qint32 currentFrameNumber;
     qreal scaleFactor;
     QPalette buttonPalette;
     QString lastFilename;
-    bool aspect43On;
 
     // Update GUI methods
     void updateGuiLoaded();
