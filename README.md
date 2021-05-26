@@ -99,7 +99,7 @@ Useful for recovering decoding after a crash, or by limiting process time by pro
 ```-l``` limits decode length to *n* frames.
 
 ```-t```: defines the number of processing threads to use during decoding.
-By default, the main vhs-decode script allocates only one thread, though the gen_chroma_vid scripts allocate two.
+By default, the main VHS-Decode script allocates only one thread, though the gen_chroma_vid scripts allocate two.
 The ```make``` rule of thumb of "number of logical processors, plus one" generally applies here,
 though it mainly depends on the amount of memory available to the decoder.
 
