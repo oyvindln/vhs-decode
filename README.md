@@ -6,6 +6,8 @@ A fork of [LD-Decode](https://github.com/happycube/ld-decode), the decoding soft
 This version has been modified to work with the differences found in RF signals taken directly from videotapes
 (not to be confused with the antenna connector on the back of the VCR!).
 
+![vhs-decode thumbnail](https://cdn.lbryplayer.xyz/api/v4/streams/free/vhs-decode-thumbnail/0cfb657312d9a725c20ecce33f1a06bd4895fe40/4b3544)
+
 Currently, only (S-)VHS and U-Matic format tapes are supported;
 of those, only NTSC and PAL variants are supported, with plans and/or ongoing work to support more formats and systems.
 
@@ -105,14 +107,14 @@ though it mainly depends on the amount of memory available to the decoder.
 
 # Debug features
 
-See [Advanced_Flags](advanced_flags.md) for more information.
+See [Advanced Flags](advanced_flags.md) for more information.
 
 
 # Supported formats
 
 Tapes:
 
-(S-)VHS 625-line and 525-line, PAL and NTSC (SECAM WIP).
+(S-)VHS 625-line and 525-line, PAL and NTSC.
 U-Matic 625-line and 525-line Low Band, PAL and NTSC.
 
 Input file formats:
@@ -142,6 +144,6 @@ Additionaly useful for troubleshooting .log and .json frame descriptor table fil
 # Documentation
 Documentation is available via the GitHub wiki. This includes installation and usage instructions. Start with the wiki if you have any questions.
 
-https://github.com/happycube/ld-decode/wiki
+[Wiki](https://github.com/happycube/ld-decode/wiki)
 
 ## *If in doubt - Read the Wiki!*
