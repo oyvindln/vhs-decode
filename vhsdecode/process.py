@@ -1148,6 +1148,12 @@ class FieldPALVHS(FieldPALShared):
         return try_detect_track_vhs_pal(self)
 
 
+class FieldPALSVHS(FieldPALVHS):
+    """Add PAL SVHS-specific stuff (deemp, pilot burst etc here)"""
+    def __init__(self, *args, **kwargs):
+        super(FieldPALSVHS, self).__init__(*args, **kwargs)
+
+
 class FieldPALUMatic(FieldPALShared):
     def __init__(self, *args, **kwargs):
         super(FieldPALUMatic, self).__init__(*args, **kwargs)
@@ -1313,6 +1319,8 @@ class VHSDecode(ldd.LDdecode):
         if system == "PAL":
             if tape_format == "UMATIC":
                 self.FieldClass = FieldPALUMatic
+            elif tape_format == "SVHS":
+                self.FieldClass = FieldPALSVHS
             else:
                 self.FieldClass = FieldPALVHS
         elif system == "NTSC":
@@ -1336,8 +1344,6 @@ class VHSDecode(ldd.LDdecode):
             self.outfile_chroma = open(fname_out + "_chroma.tbc", "wb")
         else:
             self.outfile_chroma = None
-
-        self.AGClevels = StackableMA(window_average=15), StackableMA(window_average=15)
 
     # Override to avoid NaN in JSON.
     def calcsnr(self, f, snrslice, psnr=False):
@@ -1583,6 +1589,10 @@ class VHSRFDecode(ldd.RFDecode):
             if tape_format == "UMATIC":
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_PAL_UMATIC)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_PAL_UMATIC)
+            elif tape_format == "SVHS":
+                # Give the decoder it's separate own full copy to be on the safe side.
+                self.SysParams = copy.deepcopy(vhs_formats.SysParams_PAL_SVHS)
+                self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_PAL_SVHS)
             else:
                 # Give the decoder it's separate own full copy to be on the safe side.
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_PAL_VHS)
@@ -1591,10 +1601,16 @@ class VHSRFDecode(ldd.RFDecode):
             if tape_format == "UMATIC":
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_UMATIC)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_UMATIC)
+            elif tape_format == "SVHS":
+                ldd.logger.warning("NTSC SVHS has not been tested yet!")
+                self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_SVHS)
+                self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_SVHS)
             else:
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_VHS)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_VHS)
         elif system == "MPAL":
+            if tape_format != "VHS":
+                ldd.logger.warning("Tape format \"%s\" not supported for MPAL yet", tape_format)
             self.SysParams = copy.deepcopy(vhs_formats.SysParams_MPAL_VHS)
             self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_MPAL_VHS)
         else:
@@ -1933,6 +1949,7 @@ class VHSRFDecode(ldd.RFDecode):
             if self.chroma_trap
             else None
         )
+        self.AGClevels = StackableMA(window_average=15), StackableMA(window_average=15)
         self.Resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
 
     def computedelays(self, mtf_level=0):
@@ -2084,11 +2101,11 @@ class VHSRFDecode(ldd.RFDecode):
             # print("Vsync IRE", self.SysParams["vsync_ire"])
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
-            ax1.plot(out_video_orig)
+            ax1.plot(hilbert)
+            ax1.axhline(0)
             # ax1.plot(demod_b, color="#000000")
-            ax1.plot(out_video, color="#FF0000")
-            ax2.plot(hf_part_limited - hf_part)
-            ax3.plot(hf_part)
+            ax2.plot(demod)
+            ax3.plot(out_video)
             # ax3.axhline(0)
             # ax4.plot(np.pad(np.diff(hilbert), (0, 1), mode="constant"))
             # ax4.axhline(0)
