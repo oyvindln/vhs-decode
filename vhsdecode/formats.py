@@ -77,31 +77,31 @@ RFParams_PAL_VHS["nonlinear_highpass_limit_l"] = -20000
 
 RFParams_PAL_SVHS = copy.deepcopy(RFParams_PAL_VHS)
 # 5.4-7.0 ± 0.1 mhz
-RFParams_PAL_SVHS["video_bpf_low"] = 2000000
-RFParams_PAL_SVHS["video_bpf_high"] = 8680000
+RFParams_PAL_SVHS["video_bpf_low"] = 2500000
+RFParams_PAL_SVHS["video_bpf_high"] = 8980000
 
 # Band-pass filter order.
 # Order may be fine as is.
 RFParams_PAL_SVHS["video_bpf_order"] = 1
 # Sharper upper cutoff to get rid of high-frequency junk.
-RFParams_PAL_SVHS["video_lpf_extra"] = 9010000
+RFParams_PAL_SVHS["video_lpf_extra"] = 9210000
 RFParams_PAL_SVHS["video_lpf_extra_order"] = 3
 
 RFParams_PAL_SVHS["video_hpf_extra"] = 1520000
-RFParams_PAL_SVHS["video_hpf_extra_order"] = 1
+RFParams_PAL_SVHS["video_hpf_extra_order"] = 3
 
 # Low-pass filter on Y after demodulation
 RFParams_PAL_SVHS["video_lpf_freq"] = 5500000
 RFParams_PAL_SVHS["video_lpf_order"] = 1
 
-RFParams_PAL_SVHS["boost_bpf_low"] = 7000000
-RFParams_PAL_SVHS["boost_bpf_high"] = 8000000
+RFParams_PAL_SVHS["boost_bpf_low"] = 6600000
+RFParams_PAL_SVHS["boost_bpf_high"] = 8400000
 # Multiplier for the boosted signal to add in.
 RFParams_PAL_SVHS["boost_bpf_mult"] = 0.1
 
 #RFParams_PAL_SVHS["nonlinear_highpass_freq"] = RFParams_PAL_VHS["nonlinear_highpass_freq"]
-RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
-RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -30000
+RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 10000
+RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -40000
 
 # Main deemph and chroma is the same as for normal VHS
 

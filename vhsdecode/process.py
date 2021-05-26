@@ -2057,7 +2057,7 @@ class VHSRFDecode(ldd.RFDecode):
                 * self.Filters["NLHighPassF"][0 : (self.blocklen // 2) + 1]
             )
             # Limit it to preserve sharp transitions
-            limited_hf_part = np.clip(hf_part, -20000, 5000)
+            limited_hf_part = np.clip(hf_part, self.DecoderParams["nonlinear_highpass_limit_l"], self.DecoderParams["nonlinear_highpass_limit_h"])
             # And subtract it from the output signal.
             out_video -= limited_hf_part
             # out_video = hf_part + self.iretohz(50)
@@ -2102,6 +2102,7 @@ class VHSRFDecode(ldd.RFDecode):
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
             ax1.plot(hilbert)
+            ax1.plot(env, color="#00FF00")
             ax1.axhline(0)
             # ax1.plot(demod_b, color="#000000")
             ax2.plot(demod)
