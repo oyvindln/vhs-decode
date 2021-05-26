@@ -25,7 +25,7 @@ For capturing, VHS-Decode supports both the [Domesday Duplicator](https://github
 
 Install all dependencies required by LD-Decode and VHS-Decode:
 
-    sudo apt install -y build-essential git ffmpeg flac libavcodec-dev libavformat-dev qt5-default libqwt-qt5-dev qt5-qmake qtbase5-dev python3 python3-pip python3-distutils libfftw3-dev openssl && sudo pip3 install -y numba pandas matplotlib scipy numpy samplerate
+    sudo apt install -y build-essential git ffmpeg flac libavcodec-dev libavformat-dev libqwt-qt5-dev qt5-qmake qtbase5-dev python3 python3-pip python3-distutils libfftw3-dev openssl && sudo pip3 install -y numba pandas matplotlib scipy numpy samplerate
 
 Download VHS-Decode:
 
@@ -66,17 +66,13 @@ Reduce size of captured CXADC 8-bit data (by 50-60%):
 
 # Generating video files
 
-VHS-Decode produces .tbc, .json and .log files, usable only with the LD-Decode family of tools (ld-analyse, ld-process-vbi, and ld-process-vits).
+VHS-Decode produces timebase corrected 16-bit headerless video signal in .tbc format plus .json and .log files, usable with the LD-Decode family of tools (ld-analyse, ld-process-vbi, and ld-process-vits), VBI data recovery software like [VHS-Teletext](https://github.com/ali1234/vhs-teletext/) or other utilities allowing to recover closed captions and tape-based [arcade games](https://vhs.thenvm.org/resources-research/).
 To generate .mkv files viewable in most media players, simply use the scripts found in the root folder:
 
-    ~/./vhs-decode/gen_chroma_vid_pal.sh capture
+    ~/./vhs-decode/gen_chroma_vid.sh -v <pal/ntsc> -s <skip n frames> -l <n frames long> -a <capture>.flac -i <capture>
 
-And:
-
-    ~/./vhs-decode/gen_chroma_vid_ntsc.sh capture
-
-These will use decoded .tbc files, generate a lossless, interlaced and high-bitrate (roughly 100-150 Mb/s) files which,
-although ideal for archival and reducing further loss in quality, are unsuitable for sharing online.
+This will use decoded .tbc files, generate a lossless, interlaced and high-bitrate (roughly 100-150 Mb/s) video which,
+although ideal for archival and reducing further loss in quality, may be unsuitable for sharing online.
 An additional processing mode is included in the script files, but commented out.
 
 # Terminal arguments
