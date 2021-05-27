@@ -25,7 +25,7 @@ For capturing, VHS-Decode supports both the [Domesday Duplicator](https://github
 
 Install all dependencies required by LD-Decode and VHS-Decode:
 
-    sudo apt install -y build-essential git ffmpeg flac libavcodec-dev libavformat-dev libqwt-qt5-dev qt5-qmake qtbase5-dev python3 python3-pip python3-distutils libfftw3-dev openssl && sudo pip3 install -y numba pandas matplotlib scipy numpy samplerate
+    sudo apt install build-essential git ffmpeg flac libavcodec-dev libavformat-dev libqwt-qt5-dev qt5-qmake qtbase5-dev python3 python3-pip python3-distutils libfftw3-dev openssl && sudo pip3 install numba pandas matplotlib scipy numpy samplerate
 
 Download VHS-Decode:
 
@@ -33,7 +33,7 @@ Download VHS-Decode:
 
 Compile and install Domesday tools:
 
-    make -j8 all && sudo make install && make clean
+    cd vhs-decode && make -j8 all && sudo make install && make clean
     
 See live preview of tape signal being received by CXADC card from video heads (PAL framing for 35.8 MHz/8-bit mode):
 
