@@ -17,6 +17,8 @@ from vhsdecode.cmdcommons import (
     get_extra_options,
 )
 
+supported_tape_formats = {"VHS", "SVHS", "UMATIC"}
+
 parser = common_parser("Extracts video from raw VHS rf captures")
 parser.add_argument(
     "--doDOD",
@@ -78,6 +80,13 @@ parser.add_argument(
     help="Re-check phase on every field.",
 )
 parser.add_argument(
+    "-tf",
+    "--tape_format",
+    metavar="tape_format",
+    default="VHS",
+    help="Tape format, currently VHS (Default), SVHS or UMATIC are supported.",
+)
+parser.add_argument(
     "-U",
     "--u-matic",
     dest="umatic",
@@ -116,11 +125,18 @@ parser.add_argument(
     default=False,
     help="Disable internal chroma comb filter.",
 )
+parser.add_argument(
+    "-nld",
+    "--non_linear_deemphasis",
+    dest="nldeemp",
+    action="store_true",
+    default=False,
+    help="Enable non-linear deemphasis, can help reduce ringing and oversharpening. (WIP).",
+)
 
 args = parser.parse_args()
 
 filename, outname, firstframe, req_frames = get_basics(args)
-tape_format = "UMATIC" if args.umatic else "VHS"
 
 system = select_system(args)
 sample_freq = select_sample_freq(args)
@@ -145,6 +161,7 @@ rf_options["high_boost"] = args.high_boost
 rf_options["disable_diff_demod"] = args.disable_diff_demod
 rf_options["disable_dc_offset"] = args.disable_dc_offset
 rf_options["disable_comb"] = args.disable_comb
+rf_options["nldeemp"] = args.nldeemp
 
 extra_options = get_extra_options(args)
 
@@ -153,6 +170,11 @@ extra_options = get_extra_options(args)
 original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 logger = init_logging(outname + ".log")
+
+tape_format = "UMATIC" if args.umatic else args.tape_format.upper()
+if tape_format not in supported_tape_formats:
+    logger.warning("Tape format %s not supported! Defaulting to VHS", tape_format)
+    tape_format = "VHS"
 
 # Initialize VHS decoder
 # Note, we pass 40 as sample frequency, as any other will be resampled by the
