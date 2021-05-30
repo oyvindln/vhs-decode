@@ -1,22 +1,24 @@
 Type,Standard,Parameters,Sample Path,ChromaScript,Notes
-VHS,PALB,--10cxadc3,~/vault/VHS/MxFycefn.vhs,gen_chroma_vid_pal.sh,
-VHS,PALB,--10cxadc3,~/vault/VHS/relAdEqP.r16,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/numpy-error.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/field_drop_issue_starting_at_frame_18_and_some_more_ capture26739-26911_2291x625_25Hz_8bit.flac,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/crash_samples/sample_1_14.12.2020.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/crash_samples/sample_2_14.12.2020.r8 ,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/vsync-roll_pal_cxadc3.r8,gen_chroma_vid_pal.sh,"Bad Vsync, AGC issues"
-VHS,PALB,--cxadc3,~/vault/VHS/field_issues.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/broken_vcr_recording.r8,gen_chroma_vid_pal.sh,Misaligned VCR
-VHS,PALB,--cxadc3,~/vault/VHS/field_issue2.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--recheck_phase --cxadc3,~/vault/VHS/no_fieldissues_testclip.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/nosync.r8,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3 --noAGC,~/vault/VHS/divzero-brokenpipe-calczc.r8,gen_chroma_vid_pal.sh,Vsync and AGC issues
-VHS,PALB,--cxadc3,~/vault/VHS/brightness-jump.r8 ,gen_chroma_vid_pal.sh,
-VHS,PALB,--cxadc3,~/vault/VHS/chroma-outage_pal_cxadc3.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--10cxadc3,~/vault/VHS/MxFycefn.vhs,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/tape02_26_sat1_voyager.flac,gen_chroma_vid_pal.sh,Unlaces tape at ending
+VHS,PAL,--cxadc3,~/vault/VHS/snell_wilcox.r8,,
+VHS,PAL,--10cxadc3,~/vault/VHS/relAdEqP.r16,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/numpy-error.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/field_drop_issue_starting_at_frame_18_and_some_more_ capture26739-26911_2291x625_25Hz_8bit.flac,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/crash_samples/sample_1_14.12.2020.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/crash_samples/sample_2_14.12.2020.r8 ,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/vsync-roll_pal_cxadc3.r8,gen_chroma_vid_pal.sh,"Bad Vsync, AGC issues"
+VHS,PAL,--cxadc3,~/vault/VHS/field_issues.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/broken_vcr_recording.r8,gen_chroma_vid_pal.sh,Misaligned VCR
+VHS,PAL,--cxadc3,~/vault/VHS/field_issue2.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--recheck_phase --cxadc3,~/vault/VHS/no_fieldissues_testclip.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/nosync.r8,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3 --noAGC,~/vault/VHS/divzero-brokenpipe-calczc.r8,gen_chroma_vid_pal.sh,Vsync and AGC issues
+VHS,PAL,--cxadc3,~/vault/VHS/brightness-jump.r8 ,gen_chroma_vid_pal.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/chroma-outage_pal_cxadc3.r8,gen_chroma_vid_pal.sh,
 VHS,NTSC,-sl 30 --cxadc,~/vault/VHS/straight-to-card-bnc-filter.r8,gen_chroma_vid_ntsc.sh,
-VHS,PALB,,~/vault/VHS/colorbars_PAL.r16,gen_chroma_vid_pal.sh,
+VHS,PAL,,~/vault/VHS/colorbars_PAL.r16,gen_chroma_vid_pal.sh,
 VHS,PALM,-sl 30  --10cxadc,~/vault/VHS/dobr_sample_10bit_palm.vhs.flac,gen_chroma_vid_palm.sh,
-UMATIC,NTSC,,~/vault/U-Matic/color_bars2.r16,gen_chroma_vid_ntsc.sh,
-UMATIC,NTSC,-sl 70 --cxadc,~/vault/U-Matic/rf_sweep.r8,gen_chroma_vid_ntsc.sh,
+UMATIC,NTSC,-ct,~/vault/U-Matic/monoscope.r16,gen_chroma_vid_ntsc.sh,
+UMATIC,NTSC,--cxadc -ct,~/vault/U-Matic/rf_sweep.r8,gen_chroma_vid_ntsc.sh,
 UMATIC,NTSC,--cxadc,~/vault/U-Matic/bars.r8,gen_chroma_vid_ntsc.sh,

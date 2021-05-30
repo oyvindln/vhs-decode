@@ -2,9 +2,9 @@ Type,Standard,Parameters,Sample Path,ChromaScript,Notes
 VHS,PALB,--10cxadc3,~/vault/VHS/filmnetlp/filmnet2.vhs,gen_chroma_vid_pal.sh,"LP, hangs at EOF"
 VHS,PALB,--noAGC --cxadc,~/vault/VHS/noisy_sample_causing_sync_issue_on_new_code_cxadc_8bit.vhs,gen_chroma_vid_pal.sh,hangs at EOF
 VHS,PALB,--recheck_phase --10cxadc3,~/vault/VHS/jetix_chewed_sample.r16,gen_chroma_vid_pal.sh,"Bad tape, hangs at EOF"
-VHS,PALB,--recheck_phase --cxadc,~/vault/VHS/YKPAÏHA.r8,gen_chroma_vid_pal.sh,Not syncs
+VHS,PALB,--cxadc,~/vault/VHS/Ukraine.r8,gen_chroma_vid_pal.sh,Not syncs
 VHS,NTSC,-sl 30 --cxadc3,~/vault/VHS/CXADC_Zenith_XBV342_35.8MSPS_NTSC_test_captures/NTSC_test_pattern.r8,gen_chroma_vid_ntsc.sh,hangs at EOF
 VHS,PALM,--10cxadc3,~/vault/VHS/palMsample.r16,gen_chroma_vid_palm.sh,"Noisy capture,  hangs at EOF"
 VHS,PALB,-sl 70 --10cxadc3,~/vault/VHS/V280-multiburst-calibration/v280-sp-rf.vhs,gen_chroma_vid_pal.sh,hangs at JSON saving
 VHS,NTSC,-sl 30 --cxadc,~/vault/VHS/VR620-NTSC-multiburst.r8,gen_chroma_vid_ntsc.sh,invalid value encountered in multiply
-UMATIC,NTSC,,~/vault/U-Matic/monoscope.r16,gen_chroma_vid_ntsc.sh,
+VHS,PAL,--cxadc3,~/vault/VHS/tape02_25_sat1_werbung.flac,gen_chroma_vid_pal.sh,hangs at EOF

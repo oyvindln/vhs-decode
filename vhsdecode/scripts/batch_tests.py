@@ -16,6 +16,7 @@ LOGFILE = "batch_tests.log"
 RESOURCES_FILE = 'resources/samples.csv'
 TTF_FONT = path.abspath('resources/Vintage2513ROM.ttf')
 FONT_SIZE = 32
+SUBTITLES_POSITION = 110, 220  # x and y position of the test chart subtitles
 BACKGROUND_IMAGE = path.abspath('resources/PAL_testchart.png')
 PRESENTATION_CHART = 'presentation.mkv'
 GREETING_ENDING_CHART = 'ending_greeting.mkv'
@@ -95,9 +96,9 @@ def paramsCompose(params):
         return params
 
 def getVHSFlags(standard, params):
-    if standard.upper() == "PALM":
+    if standard.upper().strip() == "PALM":
         standard_flags = "-pm"
-    elif standard.upper() == "NTSC":
+    elif standard.upper().strip() == "NTSC":
         standard_flags = "-n"
     else:
         standard_flags = "-p"
@@ -106,16 +107,27 @@ def getVHSFlags(standard, params):
         standard_flags = "%s %s" % (standard_flags, "--doDOD")
 
     params = cleanParams(params)
-
     demod_t = "-t %d" % DEMODTHREADS
 
     return paramsCompose("%s %s %s" % (standard_flags, params, demod_t))
 
+def isVHSVariant(type):
+    return type.upper().strip()[-3:] == "VHS"
+
+def isSVHS(type):
+    return type.upper().strip() == "SVHS" or type.upper().strip() == "S-VHS"
+
+def isVHSDecodable(type):
+    return isVHSVariant(type) or \
+        type.upper().strip() == "UMATIC"
+
 def getVHSDecodeCommand(type, standard, args, sample):
-    if type.upper() == "VHS":
-        return "vhs-decode %s \"%s\"" % (getVHSFlags(standard, args), sample)
+    if isVHSVariant(type) and not isSVHS(type):
+        return "vhs-decode %s \"%s\"" % (getVHSFlags(standard, args), sample.strip())
+    elif isSVHS(type):
+        return "vhs-decode -tf SVHS %s \"%s\"" % (getVHSFlags(standard, args), sample.strip())
     else:
-        return "vhs-decode -U %s \"%s\"" % (getVHSFlags(standard, args), sample)
+        return "vhs-decode -U %s \"%s\"" % (getVHSFlags(standard, args), sample.strip())
 
 def getGENCommand(script, sample):
     return "%s %s" % (script, sample)
@@ -136,7 +148,7 @@ def returnAndExit():
 def decodeLoop(resources):
     for index, entry in resources.iterrows():
         if index > args.skip:
-            if entry['Type'].upper().strip() == "VHS" or entry['Type'].upper().strip() =="UMATIC":
+            if isVHSDecodable(entry['Type']):
                 command = '%s %s' % (
                     getVHSDecodeCommand(
                         entry['Type'],
@@ -217,7 +229,7 @@ def genInitSlide(git_info):
         text = "Test run %s\n- Branch %s\n- Commit %s\n%s" % (
             git_info['date'], git_info['branch'], git_info['commit'], args.welcome_notes.strip()
         )
-    command = ffmpeg_base + osdText(110, 220, text)
+    command = ffmpeg_base + osdText(SUBTITLES_POSITION[0], SUBTITLES_POSITION[1], text)
     command += " %s" % PRESENTATION_CHART
     logger.info('Executing: %s' % command)
     if DRY_RUN:
@@ -260,7 +272,7 @@ def genSampleSlide(type, samplefile, standard, parameters, notes, framecount, ou
         text = "%s %s %s\n%s\n%s\n%s" % \
                (standard, type, framecount, sample, params, notes)
 
-    command = ffmpeg_base + osdText(110, 220, text)
+    command = ffmpeg_base + osdText(SUBTITLES_POSITION[0], SUBTITLES_POSITION[1], text)
     command += " %s.mkv" % outname
     logger.info('Executing: %s' % command)
     if DRY_RUN:
@@ -271,7 +283,7 @@ def genSampleSlide(type, samplefile, standard, parameters, notes, framecount, ou
 def genSampleSlides(resources):
     for index, entry in resources.iterrows():
         if index > args.skip:
-            if entry['Type'].upper().strip() == "VHS" or entry['Type'].upper().strip() =="UMATIC":
+            if isVHSDecodable(entry['Type']):
                 genSampleSlide(
                     entry['Type'].upper().strip(),
                     pathLeaf(entry['Sample Path'].strip()),
@@ -285,7 +297,7 @@ def genSampleSlides(resources):
 def genGreetings():
     ffmpeg_base = "ffmpeg -y -r 1/5 -i \"%s\" -c:v libx264 -crf 0 -vf \"fps=25,format=yuv420p\" " % BACKGROUND_IMAGE
     text = "Thanks for watching\\!\n\nSee description for more info."
-    command = ffmpeg_base + osdText(110, 220, text)
+    command = ffmpeg_base + osdText(SUBTITLES_POSITION[0], SUBTITLES_POSITION[1], text)
     command += " %s" % GREETING_ENDING_CHART
     logger.info('Executing: %s' % command)
     if DRY_RUN:

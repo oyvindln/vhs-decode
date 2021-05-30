@@ -1464,12 +1464,8 @@ class VHSDecode(ldd.LDdecode):
                         # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
                         self.rf.AGClevels[1].push((sync_hz - ire0_hz) / vsync_ire)
 
-                        if (
-                            self.rf.AGClevels[0].has_values()
-                            and self.rf.AGClevels[1].has_values()
-                        ):
-                            self.rf.SysParams["ire0"] = self.rf.AGClevels[0].pull()
-                            self.rf.SysParams["hz_ire"] = self.rf.AGClevels[1].pull()
+                        self.rf.SysParams["ire0"] = self.rf.AGClevels[0].pull()
+                        self.rf.SysParams["hz_ire"] = self.rf.AGClevels[1].pull()
 
                 if adjusted == False and redo == True:
                     self.demodcache.flush_demod()
