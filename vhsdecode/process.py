@@ -15,6 +15,7 @@ import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.addons.resync import Resync
+from vhsdecode.addons.chromaAFC import ChromaAFC
 
 from numba import njit
 
@@ -1846,8 +1847,6 @@ class VHSRFDecode(ldd.RFDecode):
         fsc_mhz = self.SysParams["fsc_mhz"]
         out_sample_rate_mhz = fsc_mhz * 4
         out_frequency_half = out_sample_rate_mhz / 2
-        het_freq = fsc_mhz + cc
-        fieldlen = self.SysParams["outlinelen"] * max(self.SysParams["field_lines"])
 
         # Final band-pass filter for chroma output.
         # Mostly to filter out the higher-frequency wave that results from signal mixing.
@@ -1864,6 +1863,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
         self.Filters["FChromaFinal"] = chroma_bandpass_final
 
+        # this might need to be part of chromaAFC
         self.Filters["FBurstNarrow"] = sps.butter(
             2,
             [
@@ -1874,52 +1874,10 @@ class VHSRFDecode(ldd.RFDecode):
             output="sos",
         )
 
-        # Bandpass filter to select heterodyne frequency from the mixed fsc and color carrier signal
-        het_filter = sps.butter(
-            1,
-            [
-                (het_freq - 0.001) / out_frequency_half,
-                (het_freq + 0.001) / out_frequency_half,
-            ],
-            btype="bandpass",
-            output="sos",
-        )
-        samples = np.arange(fieldlen)
-
-        # As this is done on the tbced signal, we need the sampling frequency of that,
-        # which is 4fsc for NTSC and approx. 4 fsc for PAL.
-        # TODO: Correct frequency for pal?
-        cc_wave_scale = cc / out_sample_rate_mhz
-        self.cc_ratio = cc_wave_scale
-        # 0 phase downconverted color under carrier wave
-        self.cc_wave = np.sin(2 * np.pi * cc_wave_scale * samples)
-        # +90 deg and so on phase wave for track2 phase rotation
-        cc_wave_90 = np.sin((2 * np.pi * cc_wave_scale * samples) + (np.pi / 2))  #
-        cc_wave_180 = np.sin((2 * np.pi * cc_wave_scale * samples) + np.pi)
-        cc_wave_270 = np.sin(
-            (2 * np.pi * cc_wave_scale * samples) + np.pi + (np.pi / 2)
-        )
-
-        # Standard frequency color carrier wave.
-        self.fsc_wave = utils.gen_wave_at_frequency(
-            fsc_mhz, out_sample_rate_mhz, fieldlen
-        )
-        self.fsc_cos_wave = utils.gen_wave_at_frequency(
-            fsc_mhz, out_sample_rate_mhz, fieldlen, np.cos
-        )
-
-        # Heterodyne wave
-        # We combine the color carrier with a wave with a frequency of the
-        # subcarrier + the downconverted chroma carrier to get the original
-        # color wave back.
-        self.chroma_heterodyne = np.array(
-            [
-                sps.sosfiltfilt(het_filter, self.cc_wave * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_90 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_180 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_270 * self.fsc_wave),
-            ]
-        )
+        # Heterodyne wave related
+        self.chromaAFC = ChromaAFC(self.SysParams, self.DecoderParams['color_under_carrier'])
+        self.chroma_heterodyne = self.chromaAFC.getChromaHet()
+        self.fsc_wave, self.fsc_cos_wave = self.chromaAFC.getFSCWaves()
 
         # Increase the cutoff at the end of blocks to avoid edge distortion from filters
         # making it through.
