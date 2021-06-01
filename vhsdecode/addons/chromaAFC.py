@@ -1,6 +1,8 @@
 from vhsdecode import utils
 import numpy as np
 import scipy.signal as sps
+from lddecode.utils import unwrap_hilbert
+from pyhht.utils import inst_freq
 
 twopi = 2 * np.pi
 
@@ -9,12 +11,14 @@ twopi = 2 * np.pi
 # The output sample rate is at approx 4fsc
 class ChromaAFC:
 
-    def __init__(self, sys_params, colour_under_carrier):
+    def __init__(self, fc, sys_params, colour_under_carrier):
         self.SysParams = sys_params
         self.cc = 0
+        self.color_under = colour_under_carrier
         self.setCC(colour_under_carrier)
         self.fsc_mhz = self.SysParams["fsc_mhz"]
         self.out_sample_rate_mhz = self.fsc_mhz * 4
+        self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.out_frequency_half = self.out_sample_rate_mhz / 2
         self.fieldlen = self.SysParams["outlinelen"] * max(self.SysParams["field_lines"])
         self.samples = np.arange(self.fieldlen)
@@ -29,6 +33,25 @@ class ChromaAFC:
 
         self.chroma_heterodyne = np.array([])
         self.genHetC()
+
+        iir_bandpass = utils.firdes_bandpass(
+            self.samp_rate,
+            colour_under_carrier * 0.9,
+            50e3,
+            colour_under_carrier * 1.1,
+            50e3
+        )
+
+        self.bandpass = utils.FiltersClass(iir_bandpass[0], iir_bandpass[1], self.samp_rate)
+        self.chroma_drift = utils.StackableMA(
+            min_watermark=0,
+            window_average=30
+        )
+        self.chroma_bias_drift = utils.StackableMA(
+            min_watermark=0,
+            window_average=30
+        )
+
 
     # fcc in Hz
     def setCC(self, fcc_hz):
@@ -82,3 +105,21 @@ class ChromaAFC:
 
     def getFSCWaves(self):
         return self.fsc_wave, self.fsc_cos_wave
+
+    def hhtdeFM(self, data):
+        instf, t = inst_freq(data)
+        return np.add(np.multiply(instf, -self.samp_rate), self.samp_rate / 2)
+
+    def deFM(self, chroma):
+        return self.hhtdeFM(chroma)
+        # return unwrap_hilbert(chroma, self.samp_rate)
+
+    def freqOffset(self, chroma):
+        freq_cc = np.mean(self.deFM(self.bandpass.lfilt(chroma)))
+        self.chroma_bias_drift.push(self.color_under / freq_cc)
+        gain = self.chroma_bias_drift.pull()
+        meas = freq_cc * gain
+        self.chroma_drift.push(meas)
+        self.setCC(self.chroma_drift.pull())
+        self.genHetC()
+        return self.color_under, meas, self.color_under - meas

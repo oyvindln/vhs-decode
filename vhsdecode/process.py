@@ -207,6 +207,14 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
     # Run TBC/downscale on chroma.
     chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
 
+    if field.rf.cafc:
+        spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
+        ldd.logger.debug(
+            "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset: %.02f Hz" %
+            (spec / 1e3, meas / 1e3, offset)
+        )
+        #field.rf.chromaAFC.freqOffset(chroma)
+
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
     outwidth = field.outlinelen
@@ -252,7 +260,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
         lineoffset,
         linesout,
         outwidth,
-        field.rf.chroma_heterodyne,
+        field.rf.chromaAFC.getChromaHet() if field.rf.cafc else field.rf.chroma_heterodyne,
         phase_rotation,
         starting_phase,
     )
@@ -1565,6 +1573,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.disable_dc_offset = rf_options.get("disable_dc_offset", False)
         self.useAGC = extra_options.get("useAGC", True)
         self.debug = extra_options.get("debug", True)
+        self.cafc = rf_options.get("cafc", False)
 
         if track_phase is None:
             self.track_phase = 0
@@ -1875,7 +1884,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         # Heterodyne wave related
-        self.chromaAFC = ChromaAFC(self.SysParams, self.DecoderParams['color_under_carrier'])
+        self.chromaAFC = ChromaAFC(self.freq_hz, self.SysParams, self.DecoderParams['color_under_carrier'])
         self.chroma_heterodyne = self.chromaAFC.getChromaHet()
         self.fsc_wave, self.fsc_cos_wave = self.chromaAFC.getFSCWaves()
 
