@@ -16,8 +16,6 @@ class ChromaAFC:
         self.color_under = colour_under_carrier
         self.setCC(colour_under_carrier)
         self.fsc_mhz = self.SysParams["fsc_mhz"]
-        self.fv = self.SysParams["FPS"] * 2
-        self.harmonic_limit = 7
         self.out_sample_rate_mhz = self.fsc_mhz * 4
         self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.out_frequency_half = self.out_sample_rate_mhz / 2
@@ -35,33 +33,50 @@ class ChromaAFC:
         self.chroma_heterodyne = np.array([])
         self.genHetC()
 
-        iir_slow = utils.firdes_lowpass(self.samp_rate, self.harmonic_limit * self.fv, 1e3)
-        self.slow_filter = utils.FiltersClass(iir_slow[0], iir_slow[1], self.samp_rate)
-
         iir_bandpass = utils.firdes_bandpass(
             self.samp_rate,
             colour_under_carrier * 0.99,
-            1e3,
+            4e3,
             colour_under_carrier * 1.01,
-            1e3
+            4e3
         )
 
         self.bandpass = utils.FiltersClass(iir_bandpass[0], iir_bandpass[1], self.samp_rate)
-
-        self.fdc_wave = utils.gen_wave_at_frequency(colour_under_carrier, self.samp_rate, 320e3)
-        #print(colour_under_carrier)
-        offset = np.mean(self.deFM(self.bandpass.filtfilt(self.fdc_wave)))
-        #print(offset)
-        self.mean_offset = colour_under_carrier - offset
-        #print(self.mean_offset)
+        # self.tableset()
+        self.mean_offset = colour_under_carrier - self.calibrate()
+        print(self.mean_offset)
         self.chroma_drift = utils.StackableMA(
             min_watermark=0,
-            window_average=30
+            window_average=8192
         )
         self.chroma_bias_drift = utils.StackableMA(
             min_watermark=0,
             window_average=30
         )
+        self.manual_offset = -1983.62  # something to check here, maybe format dependant
+
+    def tableset(self):
+        means = list()
+        for ix, freq in enumerate(np.linspace(self.color_under * 0.5, self.color_under * 1.5, num=256)):
+            fdc_wave = utils.gen_wave_at_frequency(freq, self.samp_rate, 1e6)
+            defm = self.deFM(self.bandpass.lfilt(fdc_wave))
+            mean = np.mean(defm.real)
+            print(ix, "%.02f %.02f" % (freq / 1e3, mean / 1e3))
+            means.append((freq, mean))
+
+    # some corrections to the measurement method
+    def compensate(self, x):
+        return x * 0.991 + (6.021 + self.manual_offset)
+
+    def calibrate(self):
+        fdc_wave = utils.gen_wave_at_frequency(self.color_under, self.samp_rate, 1e6)
+        defm = self.deFM(self.bandpass.lfilt(fdc_wave))
+        offset = np.mean(defm.real)
+        #level = np.ones(len(defm)) * offset
+        print("%.02f %.02f kHz" % (self.color_under, offset))
+        #utils.dualplot_scope(defm[:1024], level[:1024], title="CC fixed sinewave", a_label="hilbert out", b_label="mean")
+        #print(offset)
+        return offset
 
     def getSampleRate(self):
         return self.out_sample_rate_mhz * 1e6
@@ -124,20 +139,18 @@ class ChromaAFC:
         return np.add(np.multiply(instf, -self.samp_rate), self.samp_rate / 2)
 
     def deFM(self, chroma):
-        #return self.hhtdeFM(chroma)
-        return unwrap_hilbert(chroma, self.samp_rate)
+        return self.hhtdeFM(chroma)
+        #return unwrap_hilbert(chroma, self.samp_rate)
 
     def freqOffset(self, chroma):
-        filtered = self.bandpass.filtfilt(chroma)
+        filtered = self.bandpass.lfilt(chroma)
         defm = self.deFM(filtered)
-        freq_cc = np.mean(defm) + self.mean_offset
-        #level = np.ones(len(defm)) * freq_cc
-        #print("Chroma CC %.02f kHz" % (freq_cc / 1e3))
-        #utils.dualplot_scope(defm[:1024], level[:1024], title="CC offset")
-        #self.chroma_bias_drift.push(self.color_under / freq_cc)
-        #gain = self.chroma_bias_drift.pull()
-        #meas = freq_cc * gain
-        #self.chroma_drift.push(meas)
-        self.setCC(freq_cc)
-        #self.genHetC()
-        return self.color_under, freq_cc, self.color_under - freq_cc
+        freq_cc = self.compensate(np.mean(defm))
+        # level = np.ones(len(defm)) * freq_cc
+        # print("Chroma CC %.02f kHz" % (freq_cc / 1e3))
+        #utils.dualplot_scope(defm[:1024] + self.mean_offset, level[:1024], title="CC offset", a_label="CC", b_label="mean CC")
+
+        self.setCC(np.clip(freq_cc, a_min=self.color_under * 0.5, a_max=self.color_under * 1.5))
+        self.genHetC()
+        self.chroma_drift.push(self.color_under - freq_cc)
+        return self.color_under, freq_cc, self.chroma_drift.pull()
