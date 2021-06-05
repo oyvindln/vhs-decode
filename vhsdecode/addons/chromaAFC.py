@@ -6,17 +6,18 @@ from pyhht.utils import inst_freq
 
 twopi = 2 * np.pi
 
-
 # The following filters are for post-TBC:
 # The output sample rate is at approx 4fsc
 class ChromaAFC:
 
-    def __init__(self, fc, sys_params, colour_under_carrier):
+    def __init__(self, sys_params, colour_under_carrier):
         self.SysParams = sys_params
         self.cc = 0
         self.color_under = colour_under_carrier
         self.setCC(colour_under_carrier)
         self.fsc_mhz = self.SysParams["fsc_mhz"]
+        self.fv = self.SysParams["FPS"] * 2
+        self.harmonic_limit = 7
         self.out_sample_rate_mhz = self.fsc_mhz * 4
         self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.out_frequency_half = self.out_sample_rate_mhz / 2
@@ -34,15 +35,25 @@ class ChromaAFC:
         self.chroma_heterodyne = np.array([])
         self.genHetC()
 
+        iir_slow = utils.firdes_lowpass(self.samp_rate, self.harmonic_limit * self.fv, 1e3)
+        self.slow_filter = utils.FiltersClass(iir_slow[0], iir_slow[1], self.samp_rate)
+
         iir_bandpass = utils.firdes_bandpass(
             self.samp_rate,
-            colour_under_carrier * 0.9,
-            50e3,
-            colour_under_carrier * 1.1,
-            50e3
+            colour_under_carrier * 0.99,
+            1e3,
+            colour_under_carrier * 1.01,
+            1e3
         )
 
         self.bandpass = utils.FiltersClass(iir_bandpass[0], iir_bandpass[1], self.samp_rate)
+
+        self.fdc_wave = utils.gen_wave_at_frequency(colour_under_carrier, self.samp_rate, 320e3)
+        #print(colour_under_carrier)
+        offset = np.mean(self.deFM(self.bandpass.filtfilt(self.fdc_wave)))
+        #print(offset)
+        self.mean_offset = colour_under_carrier - offset
+        #print(self.mean_offset)
         self.chroma_drift = utils.StackableMA(
             min_watermark=0,
             window_average=30
@@ -52,6 +63,8 @@ class ChromaAFC:
             window_average=30
         )
 
+    def getSampleRate(self):
+        return self.out_sample_rate_mhz * 1e6
 
     # fcc in Hz
     def setCC(self, fcc_hz):
@@ -111,15 +124,20 @@ class ChromaAFC:
         return np.add(np.multiply(instf, -self.samp_rate), self.samp_rate / 2)
 
     def deFM(self, chroma):
-        return self.hhtdeFM(chroma)
-        # return unwrap_hilbert(chroma, self.samp_rate)
+        #return self.hhtdeFM(chroma)
+        return unwrap_hilbert(chroma, self.samp_rate)
 
     def freqOffset(self, chroma):
-        freq_cc = np.mean(self.deFM(self.bandpass.lfilt(chroma)))
-        self.chroma_bias_drift.push(self.color_under / freq_cc)
-        gain = self.chroma_bias_drift.pull()
-        meas = freq_cc * gain
-        self.chroma_drift.push(meas)
-        self.setCC(self.chroma_drift.pull())
-        self.genHetC()
-        return self.color_under, meas, self.color_under - meas
+        filtered = self.bandpass.filtfilt(chroma)
+        defm = self.deFM(filtered)
+        freq_cc = np.mean(defm) + self.mean_offset
+        #level = np.ones(len(defm)) * freq_cc
+        #print("Chroma CC %.02f kHz" % (freq_cc / 1e3))
+        #utils.dualplot_scope(defm[:1024], level[:1024], title="CC offset")
+        #self.chroma_bias_drift.push(self.color_under / freq_cc)
+        #gain = self.chroma_bias_drift.pull()
+        #meas = freq_cc * gain
+        #self.chroma_drift.push(meas)
+        self.setCC(freq_cc)
+        #self.genHetC()
+        return self.color_under, freq_cc, self.color_under - freq_cc

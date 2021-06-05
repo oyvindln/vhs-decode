@@ -1884,7 +1884,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         # Heterodyne wave related
-        self.chromaAFC = ChromaAFC(self.freq_hz, self.SysParams, self.DecoderParams['color_under_carrier'])
+        self.chromaAFC = ChromaAFC(self.SysParams, self.DecoderParams['color_under_carrier'])
         self.chroma_heterodyne = self.chromaAFC.getChromaHet()
         self.fsc_wave, self.fsc_cos_wave = self.chromaAFC.getFSCWaves()
 
