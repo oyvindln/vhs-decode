@@ -45,15 +45,15 @@ class ChromaAFC:
         # self.tableset()
         self.mean_offset = colour_under_carrier - self.calibrate()
         print(self.mean_offset)
-        self.chroma_drift = utils.StackableMA(
+        self.chroma_log_drift = utils.StackableMA(
             min_watermark=0,
             window_average=8192
         )
         self.chroma_bias_drift = utils.StackableMA(
             min_watermark=0,
-            window_average=30
+            window_average=6
         )
-        self.manual_offset = -1983.62  # something to check here, maybe format dependant
+        self.manual_offset = -2605.72  # something to check here, maybe format dependant
 
     def tableset(self):
         means = list()
@@ -152,5 +152,6 @@ class ChromaAFC:
 
         self.setCC(np.clip(freq_cc, a_min=self.color_under * 0.5, a_max=self.color_under * 1.5))
         self.genHetC()
-        self.chroma_drift.push(self.color_under - freq_cc)
-        return self.color_under, freq_cc, self.chroma_drift.pull()
+        self.chroma_bias_drift.push(freq_cc)
+        self.chroma_log_drift.push(self.color_under - freq_cc)
+        return self.color_under, self.chroma_bias_drift.pull(), self.chroma_log_drift.pull()
