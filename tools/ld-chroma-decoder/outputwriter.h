@@ -50,7 +50,6 @@ public:
 
     // Output settings
     struct Configuration {
-        bool whitePoint75 = false;
         bool usePadding = true;
         PixelFormat pixelFormat = RGB48;
         bool outputY4m = false;

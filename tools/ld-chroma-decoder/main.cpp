@@ -193,11 +193,6 @@ int main(int argc, char *argv[])
                                      QCoreApplication::translate("main", "NTSC: Overlay the adaptive filter map (only used for testing)"));
     parser.addOption(showMapOption);
 
-    // Option to set the white point to 75% (rather than 100%)
-    QCommandLineOption whitePointOption(QStringList() << "w" << "white",
-                                        QCoreApplication::translate("main", "Use 75% white-point (default 100%)"));
-    parser.addOption(whitePointOption);
-
     // Option to set the chroma noise reduction level
     QCommandLineOption chromaNROption(QStringList() << "chroma-nr",
                                       QCoreApplication::translate("main", "NTSC: Chroma noise reduction level in dB (default 0.0)"),
@@ -345,10 +340,6 @@ int main(int argc, char *argv[])
     if (bwMode) {
         palConfig.chromaGain = 0.0;
         combConfig.chromaGain = 0.0;
-    }
-
-    if (parser.isSet(whitePointOption)) {
-        outputConfig.whitePoint75 = true;
     }
 
     if (parser.isSet(showMapOption)) {

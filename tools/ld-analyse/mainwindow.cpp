@@ -280,15 +280,18 @@ void MainWindow::updateGuiUnloaded()
 
 // Frame display methods ----------------------------------------------------------------------------------------------
 
-// Method to display a sequential frame
+// Update the UI and displays when currentFrameNumber has changed
 void MainWindow::showFrame()
 {
+    // Load the frame
+    tbcSource.loadFrame(currentFrameNumber);
+
     // Show the field numbers
-    fieldNumberStatus.setText(" -  Fields: " + QString::number(tbcSource.getFirstFieldNumber(currentFrameNumber)) + "/" +
-                              QString::number(tbcSource.getSecondFieldNumber(currentFrameNumber)));
+    fieldNumberStatus.setText(" -  Fields: " + QString::number(tbcSource.getFirstFieldNumber()) + "/" +
+                              QString::number(tbcSource.getSecondFieldNumber()));
 
     // If there are dropouts in the frame, highlight the show dropouts button
-    if (tbcSource.getIsDropoutPresent(currentFrameNumber)) {
+    if (tbcSource.getIsDropoutPresent()) {
         QPalette tempPalette = buttonPalette;
         tempPalette.setColor(QPalette::Button, QColor(Qt::lightGray));
         ui->dropoutsPushButton->setAutoFillBackground(true);
@@ -301,8 +304,8 @@ void MainWindow::showFrame()
     }
 
     // Update the VBI dialogue
-    if (vbiDialog->isVisible()) vbiDialog->updateVbi(tbcSource.getFrameVbi(currentFrameNumber),
-                                                     tbcSource.getIsFrameVbiValid(currentFrameNumber)); 
+    if (vbiDialog->isVisible()) vbiDialog->updateVbi(tbcSource.getFrameVbi(),
+                                                     tbcSource.getIsFrameVbiValid());
 
     // Add the QImage to the QLabel in the dialogue
     ui->frameViewerLabel->clear();
@@ -318,7 +321,7 @@ void MainWindow::showFrame()
 
     // Update the closed caption dialog
     if (!tbcSource.getIsSourcePal()) {
-        closedCaptionDialog->addData(currentFrameNumber, tbcSource.getCcData0(currentFrameNumber), tbcSource.getCcData1(currentFrameNumber));
+        closedCaptionDialog->addData(currentFrameNumber, tbcSource.getCcData0(), tbcSource.getCcData1());
     }
     // QT Bug workaround for some macOS versions
     #if defined(Q_OS_MACOS)
@@ -329,7 +332,7 @@ void MainWindow::showFrame()
 // Redraw the frame viewer (for example, when scaleFactor has been changed)
 void MainWindow::updateFrameViewer()
 {
-    QImage frameImage = tbcSource.getFrameImage(currentFrameNumber);
+    QImage frameImage = tbcSource.getFrameImage();
 
     if (ui->mouseModePushButton->isChecked()) {
         // Create a painter object
@@ -345,7 +348,7 @@ void MainWindow::updateFrameViewer()
         imagePainter.end();
     }
 
-    ui->frameViewerLabel->setPixmap(QPixmap::fromImage(frameImage));
+    QPixmap pixmap = QPixmap::fromImage(frameImage);
 
     // Get the pixmap width and height (and apply scaling and aspect ratio adjustment if required)
     qint32 adjustment = 0;
@@ -360,9 +363,9 @@ void MainWindow::updateFrameViewer()
     }
 
     // Scale and apply the pixmap
-    ui->frameViewerLabel->setPixmap(ui->frameViewerLabel->pixmap()->scaled((scaleFactor * (ui->frameViewerLabel->pixmap()->size().width() + adjustment)),
-                                                                           (scaleFactor * ui->frameViewerLabel->pixmap()->size().height()),
-                                                                           Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+    ui->frameViewerLabel->setPixmap(pixmap.scaled((scaleFactor * (pixmap.size().width() - adjustment)),
+                                                  (scaleFactor * pixmap.size().height()),
+                                                  Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
 
     // Update the current frame markers on the graphs
     blackSnrAnalysisDialog->updateFrameMarker(currentFrameNumber);
@@ -402,7 +405,7 @@ void MainWindow::loadTbcFile(QString inputFileName)
 void MainWindow::updateOscilloscopeDialogue(qint32 scanLine, qint32 pictureDot)
 {
     // Update the oscilloscope dialogue
-    oscilloscopeDialog->showTraceImage(tbcSource.getScanLineData(currentFrameNumber, scanLine),
+    oscilloscopeDialog->showTraceImage(tbcSource.getScanLineData(scanLine),
                                        scanLine, pictureDot, tbcSource.getFrameHeight());
 }
 
@@ -462,7 +465,7 @@ void MainWindow::on_actionAbout_ld_analyse_triggered()
 void MainWindow::on_actionVBI_triggered()
 {
     // Show the VBI dialogue
-    vbiDialog->updateVbi(tbcSource.getFrameVbi(currentFrameNumber), tbcSource.getIsFrameVbiValid(currentFrameNumber));
+    vbiDialog->updateVbi(tbcSource.getFrameVbi(), tbcSource.getIsFrameVbiValid());
     vbiDialog->show();
 }
 
@@ -517,7 +520,7 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
         qDebug() << "MainWindow::on_actionSave_frame_as_PNG_triggered(): Saving current frame as" << pngFilename;
 
         // Generate QImage for the current frame
-        QImage imageToSave = tbcSource.getFrameImage(currentFrameNumber);
+        QImage imageToSave = tbcSource.getFrameImage();
 
         // Change to 4:3 aspect ratio?
         if (aspectRatio == 1) {
@@ -852,22 +855,30 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
 // Perform mouse based scan line selection
 void MainWindow::mouseScanLineSelect(qint32 oX, qint32 oY)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QPixmap frameViewerPixmap = ui->frameViewerLabel->pixmap();
+#elif QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    QPixmap frameViewerPixmap = ui->frameViewerLabel->pixmap(Qt::ReturnByValue);
+#else
+    QPixmap frameViewerPixmap = *(ui->frameViewerLabel->pixmap());
+#endif
+
     // X calc
     qreal offsetX = ((static_cast<qreal>(ui->frameViewerLabel->width()) -
-                     static_cast<qreal>(ui->frameViewerLabel->pixmap()->width())) / 2.0);
+                     static_cast<qreal>(frameViewerPixmap.width())) / 2.0);
 
     qreal unscaledXR = (static_cast<qreal>(tbcSource.getFrameWidth()) /
-                        static_cast<qreal>(ui->frameViewerLabel->pixmap()->width())) * static_cast<qreal>(oX - offsetX);
+                        static_cast<qreal>(frameViewerPixmap.width())) * static_cast<qreal>(oX - offsetX);
     qint32 unscaledX = static_cast<qint32>(unscaledXR);
     if (unscaledX > tbcSource.getFrameWidth() - 1) unscaledX = tbcSource.getFrameWidth() - 1;
     if (unscaledX < 0) unscaledX = 0;
 
     // Y Calc
     qreal offsetY = ((static_cast<qreal>(ui->frameViewerLabel->height()) -
-                     static_cast<qreal>(ui->frameViewerLabel->pixmap()->height())) / 2.0);
+                     static_cast<qreal>(frameViewerPixmap.height())) / 2.0);
 
     qreal unscaledYR = (static_cast<qreal>(tbcSource.getFrameHeight()) /
-                        static_cast<qreal>(ui->frameViewerLabel->pixmap()->height())) * static_cast<qreal>(oY - offsetY);
+                        static_cast<qreal>(frameViewerPixmap.height())) * static_cast<qreal>(oY - offsetY);
     qint32 unscaledY = static_cast<qint32>(unscaledYR);
     if (unscaledY > tbcSource.getFrameHeight()) unscaledY = tbcSource.getFrameHeight();
     if (unscaledY < 1) unscaledY = 1;
@@ -894,8 +905,13 @@ void MainWindow::chromaDecoderConfigChangedSignalHandler()
                                      chromaDecoderConfigDialog->getNtscConfiguration(),
                                      chromaDecoderConfigDialog->getOutputConfiguration());
 
-    // Update the frame viewer;
+    // Update the frame viewer
     updateFrameViewer();
+
+    // If the scope window is open, update it too
+    if (oscilloscopeDialog->isVisible()) {
+        updateOscilloscopeDialogue(lastScopeLine, lastScopeDot);
+    }
 }
 
 // TbcSource class signal handlers ------------------------------------------------------------------------------------

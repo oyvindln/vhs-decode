@@ -114,7 +114,9 @@ bool writeFfmetadata(LdDecodeMetaData &metaData, const QString &fileName)
         return false;
     }
     QTextStream stream(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     stream.setCodec("UTF-8");
+#endif
 
     // Write the header
     stream << ";FFMETADATA1\n";

@@ -34,7 +34,6 @@
 #include "sourcevideo.h"
 #include "lddecodemetadata.h"
 #include "tbcsource.h"
-#include "filters.h"
 
 namespace Ui {
 class OscilloscopeDialog;

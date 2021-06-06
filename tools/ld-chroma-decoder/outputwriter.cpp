@@ -269,12 +269,6 @@ void OutputWriter::convertLine(qint32 lineNumber, const ComponentFrame &componen
     double yRange = videoParameters.white16bIre - videoParameters.black16bIre;
     const double uvRange = yRange;
 
-    if (config.whitePoint75) {
-        // Use 75% white point for luma only
-        // XXX This isn't correct - it should be 75/100, not 100/125
-        yRange *= 100.0 / 125.0;
-    }
-
     switch (config.pixelFormat) {
         case RGB48: {
             // Convert Y'UV to full-range R'G'B' [Poynton eq 28.6 p337]

@@ -25,6 +25,8 @@
 #include "dropoutanalysisdialog.h"
 #include "ui_dropoutanalysisdialog.h"
 
+#include <QPen>
+
 DropoutAnalysisDialog::DropoutAnalysisDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::DropoutAnalysisDialog)
@@ -132,7 +134,7 @@ void DropoutAnalysisDialog::finishUpdate(qint32 _currentFrameNumber)
 
     // Update the plot panner
     panner->setAxisEnabled(QwtPlot::yRight, false);
-    panner->setMouseButton(Qt::MidButton);
+    panner->setMouseButton(Qt::MiddleButton);
 
     // Render the chart
     plot->maximumSize();

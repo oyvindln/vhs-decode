@@ -69,7 +69,9 @@ RFParams_PAL_VHS["boost_bpf_high"] = 5600000
 # Multiplier for the boosted signal to add in.
 RFParams_PAL_VHS["boost_bpf_mult"] = 2
 
-RFParams_PAL_VHS["nonlinear_highpass_freq"] = 800000
+# Parameters for high-pass filter used for non-linear deemphasis, these are
+# probably not correct.
+RFParams_PAL_VHS["nonlinear_highpass_freq"] = 600000
 RFParams_PAL_VHS["nonlinear_highpass_limit_h"] = 5000
 RFParams_PAL_VHS["nonlinear_highpass_limit_l"] = -20000
 
@@ -77,7 +79,7 @@ RFParams_PAL_VHS["nonlinear_highpass_limit_l"] = -20000
 
 RFParams_PAL_SVHS = copy.deepcopy(RFParams_PAL_VHS)
 # 5.4-7.0 ± 0.1 mhz
-RFParams_PAL_SVHS["video_bpf_low"] = 2500000
+RFParams_PAL_SVHS["video_bpf_low"] = 2000000
 RFParams_PAL_SVHS["video_bpf_high"] = 8980000
 
 # Band-pass filter order.
@@ -91,17 +93,20 @@ RFParams_PAL_SVHS["video_hpf_extra"] = 1520000
 RFParams_PAL_SVHS["video_hpf_extra_order"] = 3
 
 # Low-pass filter on Y after demodulation
-RFParams_PAL_SVHS["video_lpf_freq"] = 5500000
+RFParams_PAL_SVHS["video_lpf_freq"] = 6500000
 RFParams_PAL_SVHS["video_lpf_order"] = 1
 
-RFParams_PAL_SVHS["boost_bpf_low"] = 6600000
+RFParams_PAL_SVHS["boost_bpf_low"] = 7000000
 RFParams_PAL_SVHS["boost_bpf_high"] = 8400000
 # Multiplier for the boosted signal to add in.
-RFParams_PAL_SVHS["boost_bpf_mult"] = 0.1
+RFParams_PAL_SVHS["boost_bpf_mult"] = 1.1
 
-#RFParams_PAL_SVHS["nonlinear_highpass_freq"] = RFParams_PAL_VHS["nonlinear_highpass_freq"]
-RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 10000
-RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -40000
+RFParams_PAL_SVHS["deemph_mid"] = 260000
+RFParams_PAL_SVHS["deemph_gain"] = 10
+
+RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
+RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
+RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -250000
 
 # Main deemph and chroma is the same as for normal VHS
 
@@ -287,11 +292,11 @@ SysParams_NTSC_VHS = {**SysParams_NTSC}
 SysParams_PAL_UMATIC = {**SysParams_PAL}
 SysParams_NTSC_UMATIC = {**SysParams_NTSC}
 
-# 0 IRE level after demodulation
-SysParams_PAL_VHS["ire0"] = 4100000
-
 # frequency/ire IRE change pr frequency (Is this labeled correctly?)
-SysParams_PAL_VHS["hz_ire"] = 700000 / 100.0
+SysParams_PAL_VHS["hz_ire"] = 1e6 / 143
+
+# 0 IRE level after demodulation
+SysParams_PAL_VHS["ire0"] = 4.8e6 - (SysParams_PAL_VHS["hz_ire"] * 100)
 
 # Mean absolute value of color burst for Automatic Chroma Control.
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.
@@ -307,11 +312,11 @@ SysParams_PAL_SVHS["hz_ire"] = 1.6e6 / 143
 # 0 IRE level after demodulation
 SysParams_PAL_SVHS["ire0"] = 7e6 - (SysParams_PAL_SVHS["hz_ire"] * 100)
 
-# 0 IRE level after demodulation
-SysParams_NTSC_VHS["ire0"] = 3685000
-
 # frequency/ire IRE change pr frequency (Is this labeled correctly?)
-SysParams_NTSC_VHS["hz_ire"] = 715000 / 100.0
+SysParams_NTSC_VHS["hz_ire"] = 1e6 / 140
+
+# 0 IRE level after demodulation
+SysParams_NTSC_VHS["ire0"] = 4.4e6 - (SysParams_NTSC_VHS["hz_ire"] * 100)
 
 # Mean absolute value of color burst for Automatic Chroma Control.
 # The value is eyeballed to give ok chroma level as of now, needs to be tweaked.

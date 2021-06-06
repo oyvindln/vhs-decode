@@ -25,6 +25,8 @@
 #include "oscilloscopedialog.h"
 #include "ui_oscilloscopedialog.h"
 
+#include <cassert>
+
 OscilloscopeDialog::OscilloscopeDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::OscilloscopeDialog)
@@ -98,19 +100,21 @@ QImage OscilloscopeDialog::getFieldLineTraceImage(TbcSource::ScanLineData scanLi
 
     // These are fixed, but may be changed to options later
     qint32 scopeHeight = 2048;
-    scopeWidth = scanLineData.data.size();
+    scopeWidth = scanLineData.fieldWidth;
 
     qint32 scopeScale = 65536 / scopeHeight;
 
     // Define image with width, height and format
-    QImage scopeImage(scanLineData.data.size(), scopeHeight, QImage::Format_RGB888);
+    QImage scopeImage(scopeWidth, scopeHeight, QImage::Format_RGB888);
     QPainter scopePainter;
 
     // Ensure we have valid data
-    if (scanLineData.data.isEmpty()) {
+    if (scanLineData.composite.empty()) {
         qWarning() << "Did not get valid data for the requested field!";
         return scopeImage;
     }
+    assert(scanLineData.composite.size() == scanLineData.fieldWidth);
+    assert(scanLineData.luma.size() == scanLineData.fieldWidth);
 
     // Set the background to black
     scopeImage.fill(Qt::black);
@@ -128,13 +132,13 @@ QImage OscilloscopeDialog::getFieldLineTraceImage(TbcSource::ScanLineData scanLi
     midPointIre = scopeHeight - (midPointIre / scopeScale);
 
     scopePainter.setPen(Qt::white);
-    scopePainter.drawLine(0, blackIre, scanLineData.data.size(), blackIre);
-    scopePainter.drawLine(0, whiteIre, scanLineData.data.size(), whiteIre);
+    scopePainter.drawLine(0, blackIre, scanLineData.fieldWidth, blackIre);
+    scopePainter.drawLine(0, whiteIre, scanLineData.fieldWidth, whiteIre);
 
     // If showing C - draw the IRE mid-point
     if (showC) {
         scopePainter.setPen(Qt::gray);
-        scopePainter.drawLine(0, midPointIre, scanLineData.data.size(), midPointIre);
+        scopePainter.drawLine(0, midPointIre, scanLineData.fieldWidth, midPointIre);
     }
 
     // Draw the indicator lines
@@ -146,52 +150,20 @@ QImage OscilloscopeDialog::getFieldLineTraceImage(TbcSource::ScanLineData scanLi
     scopePainter.drawLine(scanLineData.activeVideoEnd, 0, scanLineData.activeVideoEnd, scopeHeight);
 
     // Get the signal data
-    QVector<qint32> signalDataYC; // Luminance (Y) and Chrominance (C) combined
-    QVector<bool> dropOutYC; // Drop out locations within YC data
-    QVector<qint32> signalDataY; // Luminance (Y) only
-    QVector<qint32> signalDataC; // Chrominance (C) only
-    signalDataYC.resize(scanLineData.data.size());
-    dropOutYC.resize(scanLineData.data.size());
-    signalDataY.resize(scanLineData.data.size());
-    signalDataC.resize(scanLineData.data.size());
-
-    // To extract Y from PAL, a LPF of 3.8MHz is required
-    // To extract Y from NTSC, a LPF of 3.0MHz is required
-    // To extract C from PAL, a HPF of 3.8MHz is required
-    // To extract C from NTSC, a HPF of 3.0MHz is required
-
-    // Get the YC data
-    for (qint32 xPosition = 0; xPosition < scanLineData.data.size(); xPosition++) {
-        // Get the data for the current pixel
-        signalDataYC[xPosition] = scanLineData.data[xPosition];
-        dropOutYC[xPosition] = scanLineData.isDropout[xPosition];
-    }
-
-    if (showY || showC) {
-        // Filter out the Y data (using the filters library)
-        Filters filters;
-
-        if (scanLineData.isSourcePal) {
-            signalDataY = signalDataYC;
-            filters.palLumaFirFilter(signalDataY);
-        } else {
-            signalDataY = signalDataYC;
-            filters.ntscLumaFirFilter(signalDataY);
-        }
-    }
+    const QVector<qint32> &signalDataYC = scanLineData.composite; // Composite - luma (Y) and chroma (C) combined
+    const QVector<bool> &dropOutYC = scanLineData.isDropout; // Drop out locations within YC data
+    const QVector<qint32> &signalDataY = scanLineData.luma; // Luma (Y) only
+    QVector<qint32> signalDataC(scanLineData.fieldWidth); // Chroma (C) only
 
     if (showC) {
-        for (qint32 i = 0; i < signalDataYC.size(); i++) {
+        for (qint32 i = 0; i < scanLineData.fieldWidth; i++) {
             signalDataC[i] = signalDataYC[i] - signalDataY[i];
         }
     }
 
     // Draw the scope image
-    scopePainter.setPen(Qt::yellow);
     qint32 lastSignalLevelYC = 0;
-    qint32 lastSignalLevelY = 0;
-    qint32 lastSignalLevelC = 0;
-    for (qint32 xPosition = 0; xPosition < scanLineData.data.size(); xPosition++) {
+    for (qint32 xPosition = 0; xPosition < scanLineData.fieldWidth; xPosition++) {
         if (showYC) {
             // Scale (to 0-512) and invert
             qint32 signalLevelYC = scopeHeight - (signalDataYC[xPosition] / scopeScale);
@@ -211,35 +183,36 @@ QImage OscilloscopeDialog::getFieldLineTraceImage(TbcSource::ScanLineData scanLi
             // Remember the current signal's level
             lastSignalLevelYC = signalLevelYC;
         }
+    }
 
-        if (showC) {
+    // Draw the Y/C traces, for the active region only
+    qint32 lastSignalLevelY = 0;
+    qint32 lastSignalLevelC = 0;
+    for (qint32 xPosition = scanLineData.activeVideoStart; xPosition < scanLineData.activeVideoEnd; xPosition++) {
+        if (showC && scanLineData.isActiveLine) {
             // Scale (to 0-512) and invert
             qint32 signalLevelC = (scopeHeight - (signalDataC[xPosition] / scopeScale)) - (scopeHeight - midPointIre);
 
-            if (xPosition != 0) {
+            if (xPosition != scanLineData.activeVideoStart) {
                 // Draw a line from the last Y signal to the current one (signal green, out of range in yellow)
-                if (xPosition > scanLineData.colourBurstEnd && xPosition < scanLineData.activeVideoEnd) {
-                    if (signalLevelC > blackIre || signalLevelC < whiteIre) scopePainter.setPen(Qt::yellow);
-                    else scopePainter.setPen(Qt::green);
-                    scopePainter.drawLine(xPosition - 1, lastSignalLevelC, xPosition, signalLevelC);
-                }
+                if (signalLevelC > blackIre || signalLevelC < whiteIre) scopePainter.setPen(Qt::yellow);
+                else scopePainter.setPen(Qt::green);
+                scopePainter.drawLine(xPosition - 1, lastSignalLevelC, xPosition, signalLevelC);
             }
 
             // Remember the current signal's level
             lastSignalLevelC = signalLevelC;
         }
 
-        if (showY) {
+        if (showY && scanLineData.isActiveLine) {
             // Scale (to 0-512) and invert
             qint32 signalLevelY = scopeHeight - (signalDataY[xPosition] / scopeScale);
 
-            if (xPosition != 0) {
+            if (xPosition != scanLineData.activeVideoStart) {
                 // Draw a line from the last Y signal to the current one (signal white, out of range in red)
-                if (xPosition > scanLineData.colourBurstEnd && xPosition < scanLineData.activeVideoEnd) {
-                    if (signalLevelY > blackIre || signalLevelY < whiteIre) scopePainter.setPen(Qt::red);
-                    else scopePainter.setPen(Qt::white);
-                    scopePainter.drawLine(xPosition - 1, lastSignalLevelY, xPosition, signalLevelY);
-                }
+                if (signalLevelY > blackIre || signalLevelY < whiteIre) scopePainter.setPen(Qt::red);
+                else scopePainter.setPen(Qt::white);
+                scopePainter.drawLine(xPosition - 1, lastSignalLevelY, xPosition, signalLevelY);
             }
 
             // Remember the current signal's level

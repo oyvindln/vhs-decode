@@ -190,7 +190,9 @@ public:
             return false;
 
         QTextStream in (&qfile);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
         in.setCodec("UTF-8");
+#endif
         /*
             TODO: Determine correct codec. UTF-8 setting invalidates some ansi characters like "æ,ø,å".
             So make sure the read file is UTF-8 encoded, then everything will work perfectly.

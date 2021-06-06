@@ -68,7 +68,6 @@ private slots:
     void on_phaseCompCheckBox_clicked();
     void on_adaptiveCheckBox_clicked();
     void on_showMapCheckBox_clicked();
-    void on_whitePoint75CheckBox_clicked();
     void on_colorLpfCheckBox_clicked();
     void on_colorLpfHqCheckBox_clicked();
     void on_cNRHorizontalSlider_valueChanged(int value);

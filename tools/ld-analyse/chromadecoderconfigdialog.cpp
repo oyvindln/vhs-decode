@@ -220,9 +220,6 @@ void ChromaDecoderConfigDialog::updateDialog()
     ui->showMapCheckBox->setEnabled(isSourceNtsc && ntscConfiguration.dimensions == 3);
     ui->showMapCheckBox->setChecked(ntscConfiguration.showMap);
 
-    ui->whitePoint75CheckBox->setEnabled(isSourceNtsc);
-    ui->whitePoint75CheckBox->setChecked(outputConfiguration.whitePoint75);
-
     ui->colorLpfCheckBox->setEnabled(isSourceNtsc);
     ui->colorLpfCheckBox->setChecked(ntscConfiguration.colorlpf);
 
@@ -327,12 +324,6 @@ void ChromaDecoderConfigDialog::on_adaptiveCheckBox_clicked()
 void ChromaDecoderConfigDialog::on_showMapCheckBox_clicked()
 {
     ntscConfiguration.showMap = ui->showMapCheckBox->isChecked();
-    emit chromaDecoderConfigChanged();
-}
-
-void ChromaDecoderConfigDialog::on_whitePoint75CheckBox_clicked()
-{
-    outputConfiguration.whitePoint75 = ui->whitePoint75CheckBox->isChecked();
     emit chromaDecoderConfigChanged();
 }
 

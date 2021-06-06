@@ -134,8 +134,15 @@ LIBS += -lfftw3
 # Include the QWT library (used for charting)
 unix:!macx {
 #INCLUDEPATH += $(QWT)/include
-INCLUDEPATH += /usr/include/qwt
-LIBS += -lqwt-qt5 #Distrubutions other than Ubuntu may be -lqwt
+    equals(QT_MAJOR_VERSION, 5) {
+        INCLUDEPATH += /usr/include/qwt
+        # Distributions other than Ubuntu may be -lqwt
+        LIBS += -lqwt-qt5
+    }
+    equals(QT_MAJOR_VERSION, 6) {
+        INCLUDEPATH += /usr/include/qwt6
+        LIBS += -lqwt-qt6
+    }
 }
 macx {
 INCLUDEPATH += "/usr/local/lib/qwt.framework/Versions/6/Headers"

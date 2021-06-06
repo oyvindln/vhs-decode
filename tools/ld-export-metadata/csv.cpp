@@ -51,7 +51,9 @@ bool writeVitsCsv(LdDecodeMetaData &metaData, const QString &fileName)
 
     // Create a text stream for the CSV output
     QTextStream outStream(&csvFile);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     outStream.setCodec("UTF-8");
+#endif
 
     // Write the field and VITS data
     outStream << "seqNo,isFirstField,syncConf,";
@@ -93,7 +95,9 @@ bool writeVbiCsv(LdDecodeMetaData &metaData, const QString &fileName)
 
     // Create a text stream for the CSV output
     QTextStream outStream(&csvFile);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     outStream.setCodec("UTF-8");
+#endif
 
     // Write the field and VBI data
     outStream << "frameNo,";

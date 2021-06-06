@@ -363,7 +363,7 @@ inline SpecialTextStream& operator << (SpecialTextStream &stream, const QObject 
     SERIALIZE_TO_EDITOR = true;
 
     for (int i = 0; i < obj.metaObject()->propertyCount(); ++i)
-        if (obj.metaObject()->property(i).isStored( &obj))
+        if (obj.metaObject()->property(i).isStored())
         {
             QString name = QString( obj.metaObject()->property(i).name());
             QString value = obj.metaObject()->property(i).read( &obj).toString();
@@ -386,7 +386,7 @@ inline SpecialTextStream& operator >> (SpecialTextStream &stream, QObject &obj)
         if (index == -1)
             return stream;
 
-        if (obj.metaObject()->property( index).isStored( &obj))
+        if (obj.metaObject()->property( index).isStored())
         {
             QVariant value = DESERIALIZE_EDITOR->value( DESERIALIZE_KEYS + QVariantList{key}, QVariant());
             obj.metaObject()->property( index).write( &obj, value);
@@ -670,7 +670,7 @@ inline SpecialTextStream& operator >> (SpecialTextStream &stream, QMap<QString, 
 inline QDataStream& operator << (QDataStream &stream, const QObject &obj)
 {
     for (int i = 1; i < obj.metaObject()->propertyCount(); ++i)
-        if (obj.metaObject()->property(i).isStored( &obj))
+        if (obj.metaObject()->property(i).isStored())
             stream << obj.metaObject()->property(i).read( &obj);
     return stream;
 }
@@ -679,7 +679,7 @@ inline QDataStream& operator >> (QDataStream &stream, QObject &obj)
 {
     QVariant value;
     for (int i = 1; i < obj.metaObject()->propertyCount(); ++i)
-        if (obj.metaObject()->property(i).isStored( &obj))
+        if (obj.metaObject()->property(i).isStored())
         {
             stream >> value;
             obj.metaObject()->property(i).write( &obj, value);

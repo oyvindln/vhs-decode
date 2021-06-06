@@ -318,13 +318,6 @@
         </widget>
        </item>
        <item>
-        <widget class="QCheckBox" name="whitePoint75CheckBox">
-         <property name="text">
-          <string>Use 75 IRE white point</string>
-         </property>
-        </widget>
-       </item>
-       <item>
         <widget class="QCheckBox" name="colorLpfCheckBox">
          <property name="text">
           <string>Use chroma post-filter</string>

@@ -4,6 +4,7 @@
 
     ld-analyse - TBC output analysis
     Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2021 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -49,14 +50,17 @@ public:
     explicit TbcSource(QObject *parent = nullptr);
 
     struct ScanLineData {
-        QVector<qint32> data;
+        QVector<qint32> composite;
+        QVector<qint32> luma;
         QVector<bool> isDropout;
         qint32 blackIre;
         qint32 whiteIre;
+        qint32 fieldWidth;
         qint32 colourBurstStart;
         qint32 colourBurstEnd;
         qint32 activeVideoStart;
         qint32 activeVideoEnd;
+        bool isActiveLine;
         bool isSourcePal;
     };
 
@@ -72,7 +76,9 @@ public:
     bool getChromaDecoder();
     bool getFieldOrder();
 
-    QImage getFrameImage(qint32 frameNumber);
+    void loadFrame(qint32 frameNumber);
+
+    QImage getFrameImage();
     qint32 getNumberOfFrames();
     qint32 getNumberOfFields();
     bool getIsWidescreen();
@@ -80,22 +86,22 @@ public:
     qint32 getFrameHeight();
     qint32 getFrameWidth();
 
-    VbiDecoder::Vbi getFrameVbi(qint32 frameNumber);
-    bool getIsFrameVbiValid(qint32 frameNumber);
+    VbiDecoder::Vbi getFrameVbi();
+    bool getIsFrameVbiValid();
 
     QVector<qreal> getBlackSnrGraphData();
     QVector<qreal> getWhiteSnrGraphData();
     QVector<qreal> getDropOutGraphData();
     qint32 getGraphDataSize();
 
-    bool getIsDropoutPresent(qint32 frameNumber);
-    ScanLineData getScanLineData(qint32 frameNumber, qint32 scanLine);
+    bool getIsDropoutPresent();
+    ScanLineData getScanLineData(qint32 scanLine);
 
-    qint32 getFirstFieldNumber(qint32 frameNumber);
-    qint32 getSecondFieldNumber(qint32 frameNumber);
+    qint32 getFirstFieldNumber();
+    qint32 getSecondFieldNumber();
 
-    qint32 getCcData0(qint32 frameNumber);
-    qint32 getCcData1(qint32 frameNumber);
+    qint32 getCcData0();
+    qint32 getCcData1();
 
     void setChromaConfiguration(const PalColour::Configuration &palConfiguration, const Comb::Configuration &ntscConfiguration,
                                 const OutputWriter::Configuration &outputConfiguration);
@@ -144,20 +150,37 @@ private:
     QFutureWatcher<void> watcher;
     QFuture <void> future;
 
-    // Cache of current frame QImage
+    // Metadata for the loaded frame
+    qint32 firstFieldNumber, secondFieldNumber;
+    LdDecodeMetaData::Field firstField, secondField;
+    qint32 loadedFrameNumber;
+
+    // Source fields needed to decode the loaded frame
+    QVector<SourceField> inputFields;
+    qint32 inputStartIndex, inputEndIndex;
+    bool inputFieldsValid;
+
+    // Chroma decoder output for the loaded frame
+    QVector<ComponentFrame> componentFrames;
+    bool decodedFrameValid;
+
+    // RGB image data for the loaded frame
     QImage frameCache;
-    qint32 frameCacheFrameNumber;
+    bool frameCacheValid;
 
     // Chroma decoder configuration
     PalColour::Configuration palConfiguration;
     Comb::Configuration ntscConfiguration;
     OutputWriter::Configuration outputConfiguration;
-    bool decoderConfigurationChanged;
 
     // Chapter map
     QVector<qint32> chapterMap;
 
-    QImage generateQImage(qint32 frameNumber);
+    void resetState();
+    void invalidateFrameCache();
+    void loadInputFields();
+    void decodeFrame();
+    QImage generateQImage();
     void generateData();
     void startBackgroundLoad(QString sourceFilename);
 };

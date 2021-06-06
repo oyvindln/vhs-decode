@@ -25,6 +25,8 @@
 #include "whitesnranalysisdialog.h"
 #include "ui_whitesnranalysisdialog.h"
 
+#include <QPen>
+
 WhiteSnrAnalysisDialog::WhiteSnrAnalysisDialog(QWidget *parent) :
     QDialog(parent),
     ui(new Ui::WhiteSnrAnalysisDialog)
@@ -150,7 +152,7 @@ void WhiteSnrAnalysisDialog::finishUpdate(qint32 _currentFrameNumber)
 
     // Update the plot panner
     panner->setAxisEnabled(QwtPlot::yRight, false);
-    panner->setMouseButton(Qt::MidButton);
+    panner->setMouseButton(Qt::MiddleButton);
 
     // Render the chart
     plot->maximumSize();
