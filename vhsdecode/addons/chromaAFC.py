@@ -44,14 +44,14 @@ class ChromaAFC:
         self.bandpass = utils.FiltersClass(iir_bandpass[0], iir_bandpass[1], self.samp_rate)
         # self.tableset()
         self.mean_offset = colour_under_carrier - self.calibrate()
-        print(self.mean_offset)
+        # print(self.mean_offset)
         self.chroma_log_drift = utils.StackableMA(
             min_watermark=0,
             window_average=8192
         )
         self.chroma_bias_drift = utils.StackableMA(
             min_watermark=0,
-            window_average=6
+            window_average=12
         )
         self.manual_offset = -2605.72  # something to check here, maybe format dependant
 
@@ -72,10 +72,10 @@ class ChromaAFC:
         fdc_wave = utils.gen_wave_at_frequency(self.color_under, self.samp_rate, 1e6)
         defm = self.deFM(self.bandpass.lfilt(fdc_wave))
         offset = np.mean(defm.real)
-        #level = np.ones(len(defm)) * offset
-        print("%.02f %.02f kHz" % (self.color_under, offset))
-        #utils.dualplot_scope(defm[:1024], level[:1024], title="CC fixed sinewave", a_label="hilbert out", b_label="mean")
-        #print(offset)
+        # level = np.ones(len(defm)) * offset
+        # print("%.02f %.02f kHz" % (self.color_under, offset))
+        # utils.dualplot_scope(defm[:1024], level[:1024], title="CC fixed sinewave", a_label="hilbert out", b_label="mean")
+        # print(offset)
         return offset
 
     def getSampleRate(self):
@@ -144,14 +144,15 @@ class ChromaAFC:
 
     def freqOffset(self, chroma):
         filtered = self.bandpass.lfilt(chroma)
-        defm = self.deFM(filtered)
-        freq_cc = self.compensate(np.mean(defm))
+        defm = self.deFM(filtered.real)
+        freq_cc_x = np.clip(self.compensate(np.mean(defm)), a_min=self.color_under * 0.5, a_max=self.color_under * 1.5)
+        self.chroma_bias_drift.push(freq_cc_x)
+        freq_cc = self.chroma_bias_drift.pull()
         # level = np.ones(len(defm)) * freq_cc
         # print("Chroma CC %.02f kHz" % (freq_cc / 1e3))
         #utils.dualplot_scope(defm[:1024] + self.mean_offset, level[:1024], title="CC offset", a_label="CC", b_label="mean CC")
 
-        self.setCC(np.clip(freq_cc, a_min=self.color_under * 0.5, a_max=self.color_under * 1.5))
+        self.setCC(freq_cc)
         self.genHetC()
-        self.chroma_bias_drift.push(freq_cc)
         self.chroma_log_drift.push(self.color_under - freq_cc)
-        return self.color_under, self.chroma_bias_drift.pull(), self.chroma_log_drift.pull()
+        return self.color_under, freq_cc, self.chroma_log_drift.pull()
