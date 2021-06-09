@@ -25,6 +25,21 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
+namespace {
+namespace Aspect {
+    constexpr quint8 SAR_11 = 0;
+    constexpr char const* SAR_11_S = "SAR 1:1";
+    constexpr quint8 DAR_43 = 1;
+    constexpr char const* DAR_43_S ="DAR 4:3";
+    constexpr int DAR_43_ADJ_525 = -150; // NTSC
+    constexpr int DAR_43_ADJ_625 = -196; // PAL
+    constexpr quint8 DAR_169 = 2;
+    constexpr char const* DAR_169_S ="DAR 16:9";
+    constexpr int DAR_169_ADJ_525 = 122;
+    constexpr int DAR_169_ADJ_625 = 103;
+}
+}
+
 MainWindow::MainWindow(QString inputFilenameParam, QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow)
@@ -52,8 +67,8 @@ MainWindow::MainWindow(QString inputFilenameParam, QWidget *parent) :
     currentFrameNumber = 1;
 
     // Set the initial aspect
-    aspectRatio = 1;
-    if (tbcSource.getIsWidescreen()) aspectRatio = 2;
+    aspectRatio = Aspect::SAR_11;
+    if (tbcSource.getIsWidescreen()) aspectRatio = Aspect::DAR_169;
 
     // Connect to the scan line changed signal from the oscilloscope dialogue
     connect(oscilloscopeDialog, &OscilloscopeDialog::scanLineChanged, this, &MainWindow::scanLineChangedSignalHandler);
@@ -168,7 +183,7 @@ void MainWindow::updateGuiLoaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    ui->aspectPushButton->setText(tr("DAR 4:3"));
+    ui->aspectPushButton->setText(tr(Aspect::SAR_11_S));
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -193,10 +208,10 @@ void MainWindow::updateGuiLoaded()
     sourceVideoStatus.setText(statusText);
 
     // Reset the aspect setting
-    aspectRatio = 1;
+    aspectRatio = Aspect::SAR_11;
     if (tbcSource.getIsWidescreen()) {
-        aspectRatio = 2;
-        ui->aspectPushButton->setText(tr("DAR 16:9"));
+        aspectRatio = Aspect::DAR_169;
+        ui->aspectPushButton->setText(tr(Aspect::DAR_169_S));
     }
 
     // Update the chroma decoder configuration dialogue
@@ -257,8 +272,8 @@ void MainWindow::updateGuiUnloaded()
     // Set option button states
     ui->videoPushButton->setText(tr("Source"));
     ui->dropoutsPushButton->setText(tr("Dropouts Off"));
-    aspectRatio = 1;
-    ui->aspectPushButton->setText(tr("DAR 4:3"));;
+    aspectRatio = Aspect::SAR_11;
+    ui->aspectPushButton->setText(tr(Aspect::SAR_11_S));;
     ui->fieldOrderPushButton->setText(tr("Normal Field-order"));
 
     // Set zoom button states
@@ -352,18 +367,18 @@ void MainWindow::updateFrameViewer()
 
     // Get the pixmap width and height (and apply scaling and aspect ratio adjustment if required)
     qint32 adjustment = 0;
-    if (aspectRatio == 1) {
-        if (tbcSource.getIsSourcePal()) adjustment = -196; // PAL 4:3
-        else adjustment = -150; // NTSC 4:3
+    if (aspectRatio == Aspect::DAR_43) {
+        if (tbcSource.getIsSourcePal()) adjustment = Aspect::DAR_43_ADJ_625; // PAL 4:3
+        else adjustment = Aspect::DAR_43_ADJ_525; // NTSC 4:3
     }
     
-    if (aspectRatio == 2) {
-        if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
-        else adjustment = 122; // NTSC 16:9
+    if (aspectRatio == Aspect::DAR_169) {
+        if (tbcSource.getIsSourcePal()) adjustment = Aspect::DAR_169_ADJ_625; // PAL 16:9
+        else adjustment = Aspect::DAR_169_ADJ_525; // NTSC 16:9
     }
 
     // Scale and apply the pixmap
-    ui->frameViewerLabel->setPixmap(pixmap.scaled((scaleFactor * (pixmap.size().width() - adjustment)),
+    ui->frameViewerLabel->setPixmap(pixmap.scaled((scaleFactor * (pixmap.size().width() + adjustment)),
                                                   (scaleFactor * pixmap.size().height()),
                                                   Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
 
@@ -504,8 +519,8 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
     if (!tbcSource.getChromaDecoder()) filenameSuggestion += tr("source_");
     else filenameSuggestion += tr("chroma_");
 
-    if (aspectRatio == 1) filenameSuggestion += tr("ar43_");
-    if (aspectRatio == 2) filenameSuggestion += tr("ar169_");
+    if (aspectRatio == Aspect::DAR_43) filenameSuggestion += tr("ar43_");
+    if (aspectRatio == Aspect::DAR_169) filenameSuggestion += tr("ar169_");
 
     filenameSuggestion += QString::number(currentFrameNumber) + tr(".png");
 
@@ -523,11 +538,11 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
         QImage imageToSave = tbcSource.getFrameImage();
 
         // Change to 4:3 aspect ratio?
-        if (aspectRatio == 1) {
+        if (aspectRatio == Aspect::DAR_43) {
             // Scale to 4:3 aspect
             qint32 adjustment = 0;
-            if (tbcSource.getIsSourcePal()) adjustment = -196; // PAL 4:3
-            else adjustment = -150; // NTSC 4:3
+            if (tbcSource.getIsSourcePal()) adjustment = Aspect::DAR_43_ADJ_625; // PAL 4:3
+            else adjustment = Aspect::DAR_43_ADJ_525; // NTSC 4:3
 
             imageToSave = imageToSave.scaled((imageToSave.size().width() + adjustment),
                                              (imageToSave.size().height()),
@@ -535,11 +550,11 @@ void MainWindow::on_actionSave_frame_as_PNG_triggered()
         }
         
         // Change to 16:9 aspect ratio?
-        if (aspectRatio == 2) {
+        if (aspectRatio == Aspect::DAR_169) {
             // Scale to 16:9 aspect
             qint32 adjustment = 0;
-            if (tbcSource.getIsSourcePal()) adjustment = 103; // PAL 16:9
-            else adjustment = 122; // NTSC 16:9
+            if (tbcSource.getIsSourcePal()) adjustment = Aspect::DAR_169_ADJ_625; // PAL 16:9
+            else adjustment = Aspect::DAR_169_ADJ_525; // NTSC 16:9
 
             imageToSave = imageToSave.scaled((imageToSave.size().width() + adjustment),
                                              (imageToSave.size().height()),
@@ -781,9 +796,11 @@ void MainWindow::on_aspectPushButton_clicked()
     
     if (aspectRatio > 2) aspectRatio = 0;
     
-    if (aspectRatio == 0) ui->aspectPushButton->setText(tr("SAR 1:1"));
-    if (aspectRatio == 1) ui->aspectPushButton->setText(tr("DAR 4:3"));
-    if (aspectRatio == 2) ui->aspectPushButton->setText(tr("DAR 16:9"));
+    if (aspectRatio == Aspect::SAR_11) ui->aspectPushButton->setText(tr(Aspect::SAR_11_S));
+    else if (aspectRatio == Aspect::DAR_43) ui->aspectPushButton->setText(tr(Aspect::DAR_43_S));
+    else if (aspectRatio == Aspect::DAR_169) ui->aspectPushButton->setText(tr(Aspect::DAR_169_S));
+
+    qDebug() << "Aspect ratio: " << aspectRatio << " text " << ui->aspectPushButton->text();
 
     // Show the current frame (why isn't this option passed?)
     showFrame();

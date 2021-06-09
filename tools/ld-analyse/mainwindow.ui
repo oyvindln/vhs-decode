@@ -53,7 +53,7 @@
            <x>0</x>
            <y>0</y>
            <width>969</width>
-           <height>576</height>
+           <height>559</height>
           </rect>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_2">
@@ -383,7 +383,7 @@
            <item>
             <widget class="QPushButton" name="aspectPushButton">
              <property name="text">
-              <string>DAR 4:3</string>
+              <string>DAR 1:1</string>
              </property>
             </widget>
            </item>
@@ -434,7 +434,7 @@
      <x>0</x>
      <y>0</y>
      <width>991</width>
-     <height>22</height>
+     <height>29</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">

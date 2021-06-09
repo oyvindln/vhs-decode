@@ -124,7 +124,7 @@ private:
     QLabel sourceVideoStatus;
     QLabel fieldNumberStatus;
     TbcSource tbcSource;
-    qint32 aspectRatio;
+    quint8 aspectRatio;
     qint32 lastScopeLine;
     qint32 lastScopeDot;
     qint32 currentFrameNumber;
