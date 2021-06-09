@@ -7,7 +7,7 @@ from pyhht.utils import inst_freq
 twopi = 2 * np.pi
 
 # The following filters are for post-TBC:
-# The output sample rate is at approx 4fsc
+# The output sample rate is 4fsc
 class ChromaAFC:
 
     def __init__(self, sys_params, colour_under_carrier):
@@ -128,6 +128,7 @@ class ChromaAFC:
             ]
         )
 
+    # Returns the chroma heterodyning wave table/array computed after genHetC()
     def getChromaHet(self):
         return self.chroma_heterodyne
 

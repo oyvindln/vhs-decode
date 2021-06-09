@@ -144,7 +144,7 @@ class VsyncSerration:
 
     def vsync_arbitrage(self, where_allmin, serrations, datalen):
         result = np.array([], np.int)
-        if len(where_allmin) > 0:
+        if len(where_allmin) > 1:
             valid_serrations = self.select_serration(where_allmin, serrations)
             for serration in valid_serrations:
                 if (

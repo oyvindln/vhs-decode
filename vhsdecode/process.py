@@ -207,6 +207,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
     # Run TBC/downscale on chroma.
     chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
 
+    # If chroma AFC is enabled
     if field.rf.cafc:
         spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
         ldd.logger.debug(
