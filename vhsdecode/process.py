@@ -1576,6 +1576,9 @@ class VHSRFDecode(ldd.RFDecode):
         self.useAGC = extra_options.get("useAGC", True)
         self.debug = extra_options.get("debug", True)
         self.cafc = rf_options.get("cafc", False)
+        # cafc requires --recheck_phase
+        self.recheck_phase = True if self.cafc else self.recheck_phase
+        self.sync_clip = rf_options.get("sync_clip", False)
 
         if track_phase is None:
             self.track_phase = 0

@@ -208,13 +208,13 @@ class Resync:
 
         # measures the serration levels if possible
         self.VsyncSerration.work(sync_reference)
-        demod_data = field.data["video"]["demod"]
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
         # NOTE: Disabled for now as it doesn't seem to have much purpose at the moment and can
         # cause weird artifacts on the output.
-        # demod_data = self.VsyncSerration.safe_sync_clip(
-        #     sync_reference, field.data["video"]["demod"]
-        # )
+        demod_data = field.data["video"]["demod"] if not field.rf.sync_clip else \
+            self.VsyncSerration.safe_sync_clip(
+                sync_reference, field.data["video"]["demod"]
+            )
 
         # if has levels, then compensate blanking bias
         if self.VsyncSerration.has_levels() or self.field_state.hasLevels():
