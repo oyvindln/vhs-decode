@@ -7,6 +7,31 @@ from lddecode.utils import inrange
 import lddecode.core as ldd
 import math
 import hashlib
+from numba import njit
+
+
+@njit(cache=True)
+def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire):
+    """Check if adjusted levels give are somewhat sane."""
+    # ldd.logger.info("am below new blank %s , amount below half_sync %s", amount_below, amount_below_half_sync)
+    # ldd.logger.info("change %s _ %s", old_sync - new_sync, (hz_ire * 15))
+
+    if (vsync_hz_ref - new_sync) > (hz_ire * 15):
+        # Too far below format's standard sync to make sense
+        return False
+    if new_sync - old_sync < (hz_ire * 5):
+        # Small change - probably ok
+        return True
+
+    amount_below = len(np.argwhere(data < new_sync)) / len(data)
+    amount_below_half_sync = len(np.argwhere(data < new_blank)) / len(data)
+
+    # If there is a lot of data below the detected vsync level, or almost no data below the detected
+    # 50% of hsync level it's likely the levels are not correct, so avoid adjusting.
+    if amount_below > 0.07 or amount_below_half_sync < 0.005:
+        return False
+
+    return True
 
 
 # stores the last valid blacklevel, synclevel and vsynclocs state
@@ -41,10 +66,7 @@ class FieldState:
         return self.locs
 
     def hasLevels(self):
-        return (
-            self.blanklevels.has_values()
-            and self.synclevels.has_values()
-        )
+        return self.blanklevels.has_values() and self.synclevels.has_values()
 
 
 class Resync:
@@ -56,7 +78,10 @@ class Resync:
         self.field_state = FieldState()
 
     def debug_field(self, sync_reference):
-        ldd.logger.debug("Hashed field sync reference %s" % hashlib.md5(sync_reference.tobytes('C')).hexdigest())
+        ldd.logger.debug(
+            "Hashed field sync reference %s"
+            % hashlib.md5(sync_reference.tobytes("C")).hexdigest()
+        )
 
     # checks for SysParams consistency
     def sysparams_consistency_checks(self, field):
@@ -64,18 +89,23 @@ class Resync:
         # AGC is allowed to change two sysparams
         if field.rf.useAGC:
             if field.rf.SysParams["ire0"] != self.SysParams["ire0"]:
-                ldd.logger.debug("AGC changed SysParams[ire0]: %.02f Hz", field.rf.SysParams["ire0"])
+                ldd.logger.debug(
+                    "AGC changed SysParams[ire0]: %.02f Hz", field.rf.SysParams["ire0"]
+                )
                 self.SysParams["ire0"] = field.rf.SysParams["ire0"].copy()
                 reclamp_ire0 = True
 
             if field.rf.SysParams["hz_ire"] != self.SysParams["hz_ire"]:
-                ldd.logger.debug("AGC changed SysParams[hz_ire]: %.02f Hz", field.rf.SysParams["hz_ire"])
+                ldd.logger.debug(
+                    "AGC changed SysParams[hz_ire]: %.02f Hz",
+                    field.rf.SysParams["hz_ire"],
+                )
                 self.SysParams["hz_ire"] = field.rf.SysParams["hz_ire"].copy()
 
         if self.SysParams != field.rf.SysParams:
-            ldd.logger.error('SysParams changed during runtime!')
-            ldd.logger.debug('Original: %s' % self.SysParams)
-            ldd.logger.debug('Altered : %s' % field.rf.SysParams)
+            ldd.logger.error("SysParams changed during runtime!")
+            ldd.logger.debug("Original: %s" % self.SysParams)
+            ldd.logger.debug("Altered : %s" % field.rf.SysParams)
             assert False, "SysParams changed during runtime!"
 
         return reclamp_ire0
@@ -178,10 +208,13 @@ class Resync:
 
         # measures the serration levels if possible
         self.VsyncSerration.work(sync_reference)
+        demod_data = field.data["video"]["demod"]
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
-        demod_data = self.VsyncSerration.safe_sync_clip(
-            sync_reference, field.data["video"]["demod"]
-        )
+        # NOTE: Disabled for now as it doesn't seem to have much purpose at the moment and can
+        # cause weird artifacts on the output.
+        # demod_data = self.VsyncSerration.safe_sync_clip(
+        #     sync_reference, field.data["video"]["demod"]
+        # )
 
         # if has levels, then compensate blanking bias
         if self.VsyncSerration.has_levels() or self.field_state.hasLevels():
@@ -190,25 +223,46 @@ class Resync:
             else:
                 blank, sync = self.field_state.getLevels()
 
-            if not field.rf.disable_dc_offset:
-                # if AGC is used, ire0 parameter floats
-                if self.sysparams_consistency_checks(field):
-                    field.rf.SysParams["ire0"] = blank
-                dc_offset = field.rf.SysParams["ire0"] - blank
-                sync_reference += dc_offset
-                demod_data += dc_offset
-                sync, blank = sync + dc_offset, blank + dc_offset
-
-                # forced blank
-                # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
-
-            field.data["video"]["demod_05"] = np.clip(
-                sync_reference, a_min=sync, a_max=blank
+            vsync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+            # Do a level check
+            check = check_levels(
+                sync_reference,
+                vsync_hz,
+                sync,
+                blank,
+                field.rf.sysparams_const.vsync_hz,
+                field.rf.sysparams_const.hz_ire,
             )
-            field.data["video"]["demod"] = demod_data
-            sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
-            pulse_hz_min = field.rf.iretohz(sync_ire)
-            pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
+
+            if check:
+                if not field.rf.disable_dc_offset:
+                    # if AGC is used, ire0 parameter floats
+                    if self.sysparams_consistency_checks(field):
+                        field.rf.SysParams["ire0"] = blank
+                    dc_offset = field.rf.SysParams["ire0"] - blank
+                    sync_reference += dc_offset
+                    demod_data += dc_offset
+                    sync, blank = sync + dc_offset, blank + dc_offset
+
+                    # forced blank
+                    # field.data["video"]["demod"] = np.clip(field.data["video"]["demod"], a_min=sync, a_max=blank)
+
+                # Clipping helps avoiding misdetection as pulse detection seems to
+                # put ends if we go below some level, may want to tweak how that works
+                # instead of having to clip.
+                # The default ld code the check level 10 IRE lower to try to get it below vsync.
+                field.data["video"]["demod_05"] = np.clip(
+                    sync_reference, a_min=sync, a_max=None
+                )
+                field.data["video"]["demod"] = demod_data
+                sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+                pulse_hz_min = field.rf.iretohz(sync_ire)
+                pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
+            else:
+                ldd.logger.debug("Sync, level sanity check failed, using defaults.")
+                pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+                pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
+
         else:
             # pass one using standard levels (fallback sync logic)
             # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
@@ -217,22 +271,23 @@ class Resync:
 
             # checks if the DC offset is abnormal before correcting it
             mean_bias = self.VsyncSerration.mean_bias()
+            vsync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+            new_blank = field.rf.iretohz(field.rf.hztoire(mean_bias) / 2)
+            check = check_levels(
+                sync_reference,
+                vsync_hz,
+                mean_bias,
+                new_blank,
+                field.rf.sysparams_const.vsync_hz,
+                field.rf.sysparams_const.hz_ire,
+            )
             if (
                 not field.rf.disable_dc_offset
-                and not pulse_hz_min
-                < mean_bias
-                < field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+                and not pulse_hz_min < mean_bias < vsync_hz
+                and check
             ):
-                field.data["video"]["demod_05"] = (
-                    sync_reference
-                    - mean_bias
-                    + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-                )
-                field.data["video"]["demod"] = (
-                    demod_data
-                    - mean_bias
-                    + field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-                )
+                field.data["video"]["demod_05"] = sync_reference - mean_bias + vsync_hz
+                field.data["video"]["demod"] = demod_data - mean_bias + vsync_hz
 
         # utils.plot_scope(field.data["video"]["demod_05"])
         pulses = lddu.findpulses(

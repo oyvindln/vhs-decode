@@ -1160,6 +1160,7 @@ class FieldPALVHS(FieldPALShared):
 
 class FieldPALSVHS(FieldPALVHS):
     """Add PAL SVHS-specific stuff (deemp, pilot burst etc here)"""
+
     def __init__(self, *args, **kwargs):
         super(FieldPALSVHS, self).__init__(*args, **kwargs)
 
@@ -1617,11 +1618,19 @@ class VHSRFDecode(ldd.RFDecode):
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_VHS)
         elif system == "MPAL":
             if tape_format != "VHS":
-                ldd.logger.warning("Tape format \"%s\" not supported for MPAL yet", tape_format)
+                ldd.logger.warning(
+                    'Tape format "%s" not supported for MPAL yet', tape_format
+                )
             self.SysParams = copy.deepcopy(vhs_formats.SysParams_MPAL_VHS)
             self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_MPAL_VHS)
         else:
             raise Exception("Unknown video system! ", system)
+
+        # As agc can alter these sysParams values, store a copy to then
+        # initial value for reference.
+        self.sysparams_const = namedtuple("Starting_values", "hz_ire vsync_hz")(
+            self.SysParams["hz_ire"], self.iretohz(self.SysParams["vsync_ire"])
+        )
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
@@ -2021,7 +2030,11 @@ class VHSRFDecode(ldd.RFDecode):
                 * self.Filters["NLHighPassF"][0 : (self.blocklen // 2) + 1]
             )
             # Limit it to preserve sharp transitions
-            limited_hf_part = np.clip(hf_part, self.DecoderParams["nonlinear_highpass_limit_l"], self.DecoderParams["nonlinear_highpass_limit_h"])
+            limited_hf_part = np.clip(
+                hf_part,
+                self.DecoderParams["nonlinear_highpass_limit_l"],
+                self.DecoderParams["nonlinear_highpass_limit_h"],
+            )
             # And subtract it from the output signal.
             out_video -= limited_hf_part
             # out_video = hf_part + self.iretohz(50)
