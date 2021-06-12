@@ -194,6 +194,9 @@ if tape_format not in supported_tape_formats:
     logger.warning("Tape format %s not supported! Defaulting to VHS", tape_format)
     tape_format = "VHS"
 
+if args.noAGC:
+    logger.warning("--noAGC is deprecated and does nothing.")
+
 # Initialize VHS decoder
 # Note, we pass 40 as sample frequency, as any other will be resampled by the
 # loader function.

@@ -104,8 +104,13 @@ def common_parser(meta_title):
         default=False,
         help="Use cxadc ten fsc input frequency in ten bit mode (~17,89 Mhz)",
     )
+    # help="Disable AGC (deprecated, already disabled by default)
     parser.add_argument(
-        "--noAGC", dest="noAGC", action="store_true", default=False, help="Disable AGC"
+        "--noAGC", dest="noAGC", action="store_true", default=None, help=argparse.SUPPRESS
+    )
+    # help="Enable AGC"
+    parser.add_argument(
+        "--AGC", dest="AGC", action="store_true", default=False, help=argparse.SUPPRESS
     )
     parser.add_argument(
         "-ct",
@@ -203,6 +208,6 @@ def get_rf_options(args):
 
 def get_extra_options(args):
     extra_options = {
-        "useAGC": not args.noAGC,
+        "useAGC": args.AGC and not args.noAGC,
     }
     return extra_options
