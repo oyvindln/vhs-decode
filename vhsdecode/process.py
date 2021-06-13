@@ -211,7 +211,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
     if field.rf.cafc:
         spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
         ldd.logger.debug(
-            "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset: %.02f Hz" %
+            "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset (long term): %.02f Hz" %
             (spec / 1e3, meas / 1e3, offset)
         )
         #field.rf.chromaAFC.freqOffset(chroma)
@@ -1844,17 +1844,17 @@ class VHSRFDecode(ldd.RFDecode):
             output="sos",
         )
 
-        # Filter to pick out color-under chroma component.
-        # filter at about twice the carrier. (This seems to be similar to what VCRs do)
-        # TODO: Needs tweaking
-        # Note: order will be doubled since we use filtfilt.
-        chroma_lowpass = sps.butter(
-            2,
-            [50000 / self.freq_hz_half, DP["chroma_bpf_upper"] / self.freq_hz_half],
-            btype="bandpass",
-            output="sos",
+        # Heterodyning / chroma wave related filter part
+
+        self.chromaAFC = ChromaAFC(
+            self.freq_hz,
+            DP["chroma_bpf_upper"] / DP['color_under_carrier'],
+            self.SysParams,
+            self.DecoderParams['color_under_carrier'],
+            self.cafc
         )
-        self.Filters["FVideoBurst"] = chroma_lowpass
+
+        self.Filters["FVideoBurst"] = self.chromaAFC.get_chroma_bandpass()
 
         if self.notch is not None:
             self.Filters["FVideoNotch"] = sps.iirnotch(
@@ -1865,39 +1865,9 @@ class VHSRFDecode(ldd.RFDecode):
             )
 
         # The following filters are for post-TBC:
-        # The output sample rate is at approx 4fsc
-        fsc_mhz = self.SysParams["fsc_mhz"]
-        out_sample_rate_mhz = fsc_mhz * 4
-        out_frequency_half = out_sample_rate_mhz / 2
-
-        # Final band-pass filter for chroma output.
-        # Mostly to filter out the higher-frequency wave that results from signal mixing.
-        # Needs tweaking.
-        # Note: order will be doubled since we use filtfilt.
-        chroma_bandpass_final = sps.butter(
-            1,
-            [
-                (fsc_mhz - 0.64) / out_frequency_half,
-                (fsc_mhz + 0.54) / out_frequency_half,
-            ],
-            btype="bandpass",
-            output="sos",
-        )
-        self.Filters["FChromaFinal"] = chroma_bandpass_final
-
-        # this might need to be part of chromaAFC
-        self.Filters["FBurstNarrow"] = sps.butter(
-            2,
-            [
-                cc - 0.2 / out_frequency_half,
-                cc + 0.2 / out_frequency_half,
-            ],
-            btype="bandpass",
-            output="sos",
-        )
-
-        # Heterodyne wave related
-        self.chromaAFC = ChromaAFC(self.SysParams, self.DecoderParams['color_under_carrier'])
+        # The output sample rate is 4fsc
+        self.Filters["FChromaFinal"] = self.chromaAFC.get_chroma_bandpass_final()
+        self.Filters["FBurstNarrow"] = self.chromaAFC.get_burst_narrow()
         self.chroma_heterodyne = self.chromaAFC.getChromaHet()
         self.fsc_wave, self.fsc_cos_wave = self.chromaAFC.getFSCWaves()
 
@@ -2049,7 +2019,8 @@ class VHSRFDecode(ldd.RFDecode):
 
         # Filter out the color-under signal from the raw data.
         out_chroma = utils.filter_simple(
-            data[: self.blocklen], self.Filters["FVideoBurst"]
+            data[: self.blocklen],
+            self.chromaAFC.get_chroma_bandpass() if self.cafc else self.Filters["FVideoBurst"],
         )
 
         if self.notch is not None:
