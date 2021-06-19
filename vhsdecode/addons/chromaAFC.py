@@ -12,7 +12,9 @@ twopi = 2 * np.pi
 # The output sample rate is 4fsc
 class ChromaAFC:
 
-    def __init__(self, demod_rate, under_ratio, sys_params, colour_under_carrier, linearize=True):
+    def __init__(self, demod_rate, under_ratio, sys_params, colour_under_carrier, linearize=False, plot=False):
+        self.cc_phase = 0
+        self.fft_plot = False
         self.demod_rate = demod_rate
         self.SysParams = sys_params
         self.fsc_mhz = self.SysParams["fsc_mhz"]
@@ -38,6 +40,7 @@ class ChromaAFC:
         self.corrector = [1, 0]
         if linearize:
             self.fit()
+            print("freq(x) = %.02f x + %.02f" % (self.corrector[0], self.corrector[1]))
         self.setCC(colour_under_carrier)
 
         self.chroma_log_drift = utils.StackableMA(
@@ -48,6 +51,9 @@ class ChromaAFC:
             min_watermark=0,
             window_average=6
         )
+
+        self.fft_plot = plot
+        self.cc_wave = np.array([])
 
     def fit(self):
         # TODO: this sample_size numbers must be calculated (they correspond to the field data size)
@@ -102,23 +108,29 @@ class ChromaAFC:
     def genHetC(self):
         cc_wave_scale = self.cc / self.out_sample_rate_mhz
         het_freq = self.fsc_mhz + self.cc
+
+        phase_drift = self.cc_phase
+        amplitude = 100
         # 0 phase downconverted color under carrier wave
-        cc_wave = np.sin(twopi * cc_wave_scale * self.samples)
+        cc_wave = np.sin(
+            (twopi * cc_wave_scale * self.samples) + phase_drift
+        )
+        self.cc_wave = cc_wave
 
         # +90 deg and so on phase wave for track2 phase rotation
         cc_wave_90 = np.sin(
-            (twopi * cc_wave_scale * self.samples) + (np.pi / 2)
+            (twopi * cc_wave_scale * self.samples) + (np.pi / 2) + phase_drift
         )
         cc_wave_180 = np.sin(
-            (twopi * cc_wave_scale * self.samples) + np.pi
+            (twopi * cc_wave_scale * self.samples) + np.pi + phase_drift
         )
         cc_wave_270 = np.sin(
-            (twopi * cc_wave_scale * self.samples) + np.pi + (np.pi / 2)
+            (twopi * cc_wave_scale * self.samples) + np.pi + (np.pi / 2) + phase_drift
         )
 
         # Bandpass filter to select heterodyne frequency from the mixed fsc and color carrier signal
         het_filter = sps.butter(
-            1,
+            6,
             [
                 (het_freq - 0.001) / self.out_frequency_half,
                 (het_freq + 0.001) / self.out_frequency_half,
@@ -131,14 +143,26 @@ class ChromaAFC:
         # We combine the color carrier with a wave with a frequency of the
         # subcarrier + the downconverted chroma carrier to get the original
         # color wave back.
+
         self.chroma_heterodyne = np.array(
             [
-                sps.sosfiltfilt(het_filter, cc_wave * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_90 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_180 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, cc_wave_270 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, amplitude * cc_wave * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, amplitude * cc_wave_90 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, amplitude * cc_wave_180 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, amplitude * cc_wave_270 * self.fsc_wave),
             ]
         )
+        '''
+        self.chroma_heterodyne = np.array(
+            [
+                cc_wave * self.fsc_wave,
+                cc_wave_90 * self.fsc_wave,
+                cc_wave_180 * self.fsc_wave,
+                cc_wave_270 * self.fsc_wave,
+            ]
+        )
+        '''
+
 
     # Returns the chroma heterodyning wave table/array computed after genHetC()
     def getChromaHet(self):
@@ -147,38 +171,64 @@ class ChromaAFC:
     def getFSCWaves(self):
         return self.fsc_wave, self.fsc_cos_wave
 
+    def getCCPhase(self):
+        return self.cc_phase
+
+    def resetCCPhase(self):
+        self.cc_phase = 0
+
+    def resetCC(self):
+        self.setCC(self.color_under)
+
     def fftCenterFreq(self, data):
         time_step = 1 / self.samp_rate
-        period = 5
+
         # The FFT of the signal
         sig_fft = fft(data)
 
         # And the power (sig_fft is of complex dtype)
         power = np.abs(sig_fft) ** 2
+        phase = np.angle(sig_fft)
 
         # The corresponding frequencies
         sample_freq = fftfreq(data.size, d=time_step)
 
         # Plot the FFT power
-        # plt.figure(figsize=(6, 5))
-        # plt.plot(sample_freq, power)
-        # plt.xlabel('Frequency [Hz]')
-        # plt.ylabel('power')
+        if self.fft_plot:
+            plt.figure(figsize=(6, 5))
+            plt.plot(sample_freq, power)
+            plt.xlim(self.color_under / self.bpf_under_ratio, self.color_under * self.bpf_under_ratio)
+            plt.title('FFT chroma power')
+            plt.xlabel('Frequency [Hz]')
+            plt.ylabel('power')
 
         # Find the peak frequency: we can focus on only the positive frequencies
         pos_mask = np.where(sample_freq > 0)
         freqs = sample_freq[pos_mask]
         peak_freq = freqs[power[pos_mask].argmax()]
-        # Check that it does indeed correspond to the frequency that we generate
-        # the signal with
-        np.allclose(peak_freq, 1. / period)
+        self.cc_phase = phase[power[pos_mask].argmax()]
 
         # An inner plot to show the peak frequency
-        # axes = plt.axes([0.55, 0.3, 0.3, 0.5])
-        # plt.title('Peak frequency')
-        # plt.plot(freqs[:8], power[:8])
-        # plt.setp(axes, yticks=[])
-        # plt.show()
+        if self.fft_plot:
+            print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
+            yvert_range = 2*power[power[pos_mask].argmax()]
+            plt.vlines(peak_freq, ymin=-yvert_range/4, ymax=yvert_range, colors='r')
+            min_f = peak_freq * 0.9
+            max_f = peak_freq * 1.1
+            plt.text(max_f, -yvert_range/8, "%.02f kHz" % (peak_freq / 1e3))
+            f_index = np.where(np.logical_and(min_f < freqs, freqs < max_f))
+            s_freqs = freqs[f_index]
+            s_power = power[f_index]
+            axes = plt.axes([0.55, 0.45, 0.3, 0.3])
+            plt.title('Peak frequency')
+            plt.plot(s_freqs, s_power)
+            plt.setp(axes, yticks=[])
+            plt.xlim(min_f, max_f)
+            plt.ion()
+            plt.pause(0.5)
+            plt.show()
+            plt.close()
+
         # scipy.signal.find_peaks_cwt can also be used for more advanced
         # peak detection
         return peak_freq
@@ -187,16 +237,16 @@ class ChromaAFC:
         return self.fftCenterFreq(data)
 
     # returns the downconverted chroma carrier offset
-    def freqOffset(self, chroma):
+    def freqOffset(self, chroma, adjustf=False):
         freq_cc_x = np.clip(
             self.compensate(self.measureCenterFreq(chroma)),
             a_max=self.color_under * self.bpf_under_ratio,
             a_min=self.color_under / self.bpf_under_ratio
         )
-        freq_cc = self.chroma_bias_drift.work(freq_cc_x)
+        freq_cc = self.chroma_bias_drift.work(freq_cc_x) if adjustf else self.cc * 1e6
         self.setCC(freq_cc)
+        # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
         return self.color_under, freq_cc, self.chroma_log_drift.work(freq_cc - self.color_under)
-
 
     # Filter to pick out color-under chroma component.
     # filter at about twice the carrier. (This seems to be similar to what VCRs do)

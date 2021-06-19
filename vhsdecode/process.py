@@ -203,18 +203,9 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
     return chroma
 
 
-def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False):
+def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, no_cafc=True):
     # Run TBC/downscale on chroma.
     chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
-
-    # If chroma AFC is enabled
-    if field.rf.cafc:
-        spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
-        ldd.logger.debug(
-            "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset (long term): %.02f Hz" %
-            (spec / 1e3, meas / 1e3, offset)
-        )
-        #field.rf.chromaAFC.freqOffset(chroma)
 
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
@@ -255,6 +246,19 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
             starting_phase = 1
         else:
             raise Exception("Unknown video system!", field.rf.color_system)
+
+    # If chroma AFC is enabled
+    if field.rf.cafc:
+        if not no_cafc:
+            spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
+            ldd.logger.debug(
+                "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset (long term): %.02f Hz" %
+                (spec / 1e3, meas / 1e3, offset)
+            )
+        else:
+            field.rf.chromaAFC.resetCC()
+            field.rf.chromaAFC.resetCCPhase()
+            field.rf.chromaAFC.genHetC()
 
     uphet = upconvert_chroma(
         chroma,
@@ -315,7 +319,7 @@ def decode_chroma_vhs(field):
         rf.track_phase = field.try_detect_track()
         rf.needs_detect = False
 
-    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb)
+    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb, no_cafc=False)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     rf.last_raw_loc = raw_loc
@@ -1850,8 +1854,7 @@ class VHSRFDecode(ldd.RFDecode):
             self.freq_hz,
             DP["chroma_bpf_upper"] / DP['color_under_carrier'],
             self.SysParams,
-            self.DecoderParams['color_under_carrier'],
-            self.cafc
+            self.DecoderParams['color_under_carrier']
         )
 
         self.Filters["FVideoBurst"] = self.chromaAFC.get_chroma_bandpass()
