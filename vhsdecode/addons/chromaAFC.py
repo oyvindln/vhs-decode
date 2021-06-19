@@ -246,7 +246,9 @@ class ChromaAFC:
         freq_cc = self.chroma_bias_drift.work(freq_cc_x) if adjustf else self.cc * 1e6
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
-        return self.color_under, freq_cc, self.chroma_log_drift.work(freq_cc - self.color_under)
+        return self.color_under, \
+               freq_cc, \
+               self.chroma_log_drift.work(freq_cc - self.color_under), self.cc_phase
 
     # Filter to pick out color-under chroma component.
     # filter at about twice the carrier. (This seems to be similar to what VCRs do)

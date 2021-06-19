@@ -203,7 +203,7 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
     return chroma
 
 
-def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, no_cafc=True):
+def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, no_cafc=False):
     # Run TBC/downscale on chroma.
     chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
 
@@ -250,11 +250,12 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
     # If chroma AFC is enabled
     if field.rf.cafc:
         if not no_cafc:
-            spec, meas, offset = field.rf.chromaAFC.freqOffset(chroma)
+            spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
             ldd.logger.debug(
-                "Chroma under AFC: Spec: %.02f kHz, Meas: %.02f kHz, Offset (long term): %.02f Hz" %
-                (spec / 1e3, meas / 1e3, offset)
+                "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
+                (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
             )
+
         else:
             field.rf.chromaAFC.resetCC()
             field.rf.chromaAFC.resetCCPhase()
