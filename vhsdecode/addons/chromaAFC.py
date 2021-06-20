@@ -243,7 +243,7 @@ class ChromaAFC:
             a_max=self.color_under * self.bpf_under_ratio,
             a_min=self.color_under / self.bpf_under_ratio
         )
-        freq_cc = self.chroma_bias_drift.work(freq_cc_x) if adjustf else self.cc * 1e6
+        freq_cc = freq_cc_x if adjustf else self.cc * 1e6
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
         return self.color_under, \
