@@ -407,7 +407,7 @@ class LineInfo:
 
 def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
     """Sum the burst areas of two and two lines together, and return the mean of these sums."""
-    IGNORED_LINES = 45
+    IGNORED_LINES = 24
 
     burst_sums = []
 
@@ -436,12 +436,13 @@ def detect_burst_pal(
 ):
     """Decode the burst of most lines to see if we have a valid PAL color burst."""
 
-    # Ignore the first and last 45 lines of the field.
+    # Ignore the first and last 16 lines of the field.
     # first ones contain sync and often doesn't have color burst,
     # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 45
+    IGNORED_LINES = 24
     line_data = []
     burst_norm = np.full(lines, np.nan)
+
     # Decode the burst vectors on each line and try to get an average of the burst amplitude.
     for linenumber in range(IGNORED_LINES, lines - IGNORED_LINES):
         info = detect_burst_pal_line(
@@ -548,7 +549,7 @@ def detect_burst_ntsc(
     # Ignore the first and last 16 lines of the field.
     # first ones contain sync and often doesn't have color burst,
     # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 45
+    IGNORED_LINES = 24
     odd_i_acc = 0
     even_i_acc = 0
 
