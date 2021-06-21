@@ -14,8 +14,8 @@ class ChromaAFC:
 
     def __init__(self, demod_rate, under_ratio, sys_params, color_under_carrier_f, linearize=False, plot=False):
         self.cc_phase = 0
-        self.power_threshold = 1 / 4
-        self.transition_expand = 10
+        self.power_threshold = 1 / 6
+        self.transition_expand = 12
         self.max_f_dev_percents = 6, 3  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
