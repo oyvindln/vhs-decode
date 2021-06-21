@@ -14,6 +14,7 @@ class ChromaAFC:
 
     def __init__(self, demod_rate, under_ratio, sys_params, color_under_carrier_f, linearize=False, plot=False):
         self.cc_phase = 0
+        self.power_threshold = 1 / 4
         self.transition_expand = 10
         self.max_f_dev_percents = 6, 3  # max percent down, max percent up
         self.fft_plot = False
@@ -60,6 +61,7 @@ class ChromaAFC:
 
         self.fft_plot = plot
         self.cc_wave = np.array([])
+        self.meas_stack = list()
 
     # applies a filtfilt to the data over the array of filters
     def chainfiltfilt(self, data, filters):
@@ -223,10 +225,11 @@ class ChromaAFC:
             peak_freq = freqs[power[pos_mask].argmax()]
             self.cc_phase = phase[power[pos_mask].argmax()]
         else:
-            where_peaks = argrelextrema(power[pos_mask], np.greater)
+            power_clip = np.clip(power[pos_mask], a_min=max(power) * self.power_threshold, a_max=max(power))
+            where_peaks = argrelextrema(power_clip, np.greater)
             freqs_peaks = freqs[where_peaks]
             freqs_delta = np.abs(freqs_peaks - self.color_under)
-            where_min = argrelextrema(freqs_delta, np.less)[0]
+            where_min = np.where(freqs_delta == min(freqs_delta))[0]
             peak_freq = freqs_peaks[where_min][0]
             where_selected = np.where(freqs == peak_freq)[0]
             self.cc_phase = phase[where_selected]
@@ -235,7 +238,7 @@ class ChromaAFC:
         if self.fft_plot:
             print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
             yvert_range = 2*power[power[pos_mask].argmax()]
-            plt.vlines(peak_freq, ymin=-yvert_range/4, ymax=yvert_range, colors='r')
+            plt.vlines(peak_freq, ymin=-yvert_range * self.power_threshold, ymax=yvert_range, colors='r')
             min_f = peak_freq * 0.9
             max_f = peak_freq * 1.1
             plt.text(max_f, -yvert_range/8, "%.02f kHz" % (peak_freq / 1e3))
@@ -269,7 +272,13 @@ class ChromaAFC:
             a_min=self.color_under * min_f,
             a_max=self.color_under * max_f,
         )
-        freq_cc = freq_cc_x if adjustf else self.cc * 1e6
+        if adjustf:
+            self.meas_stack.append(freq_cc_x)
+            freq_cc = freq_cc_x # if len(self.meas_stack) < 2 else self.meas_stack[-2:][0]
+            # print(self.meas_stack[-2:])
+        else:
+            freq_cc = self.cc * 1e6
+
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
         return self.color_under, \
