@@ -4,16 +4,18 @@ import scipy.signal as sps
 from matplotlib import pyplot as plt
 from scipy.fftpack import fft, fftfreq
 import lddecode.core as ldd
+from scipy.signal import argrelextrema
 
 twopi = 2 * np.pi
-
 
 # The following filters are for post-TBC:
 # The output sample rate is 4fsc
 class ChromaAFC:
 
-    def __init__(self, demod_rate, under_ratio, sys_params, colour_under_carrier, linearize=False, plot=False):
+    def __init__(self, demod_rate, under_ratio, sys_params, color_under_carrier_f, linearize=False, plot=False):
         self.cc_phase = 0
+        self.transition_expand = 10
+        self.max_f_dev_percents = 6, 3  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
         self.SysParams = sys_params
@@ -22,7 +24,7 @@ class ChromaAFC:
         self.out_sample_rate_mhz = self.fsc_mhz * 4
         self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.bpf_under_ratio = under_ratio
-        self.color_under = colour_under_carrier
+        self.color_under = color_under_carrier_f
         self.out_frequency_half = self.out_sample_rate_mhz / 2
         self.fieldlen = self.SysParams["outlinelen"] * max(self.SysParams["field_lines"])
         self.samples = np.arange(self.fieldlen)
@@ -35,13 +37,17 @@ class ChromaAFC:
             self.fsc_mhz, self.out_sample_rate_mhz, self.fieldlen, np.cos
         )
 
+        self.narrowband = self.get_narrowband_bandpass()
         self.cc = 0
         self.chroma_heterodyne = np.array([])
         self.corrector = [1, 0]
+        self.on_linearization = linearize
         if linearize:
             self.fit()
-            print("freq(x) = %.02f x + %.02f" % (self.corrector[0], self.corrector[1]))
-        self.setCC(colour_under_carrier)
+            ldd.logger.info("freq(x) = %.02f x + %.02f" % (self.corrector[0], self.corrector[1]))
+            self.on_linearization = False
+
+        self.setCC(color_under_carrier_f)
 
         self.chroma_log_drift = utils.StackableMA(
             min_watermark=0,
@@ -55,12 +61,19 @@ class ChromaAFC:
         self.fft_plot = plot
         self.cc_wave = np.array([])
 
+    # applies a filtfilt to the data over the array of filters
+    def chainfiltfilt(self, data, filters):
+        for filt in filters:
+            data = filt.filtfilt(data)
+        return data
+
     def fit(self):
         # TODO: this sample_size numbers must be calculated (they correspond to the field data size)
         table = self.tableset(sample_size=355255) if self.fv < 60 else self.tableset(sample_size=239330)
         x, y = table[:, 0], table[:, 1]
         m, c = np.polyfit(x, y, 1)
         self.corrector = [m, c]
+        assert 0.7 < m < 1.3, "Linearization error"
         # yn = np.polyval(self.corrector, x)
         # print(self.corrector)
         # plt.plot(x, y, 'or')
@@ -71,10 +84,11 @@ class ChromaAFC:
     def tableset(self, sample_size, points=256):
         ldd.logger.info("Linearizing chroma AFC, please wait ...")
         means = np.empty([2, 2], dtype=np.float)
+        min_f, max_f = self.get_band_tolerance()
         for ix, freq in enumerate(
                 np.linspace(
-                    self.color_under / self.bpf_under_ratio,
-                    self.color_under * self.bpf_under_ratio,
+                    self.color_under * min_f,
+                    self.color_under * max_f,
                     num=points
                 )
         ):
@@ -205,8 +219,17 @@ class ChromaAFC:
         # Find the peak frequency: we can focus on only the positive frequencies
         pos_mask = np.where(sample_freq > 0)
         freqs = sample_freq[pos_mask]
-        peak_freq = freqs[power[pos_mask].argmax()]
-        self.cc_phase = phase[power[pos_mask].argmax()]
+        if self.on_linearization:
+            peak_freq = freqs[power[pos_mask].argmax()]
+            self.cc_phase = phase[power[pos_mask].argmax()]
+        else:
+            where_peaks = argrelextrema(power[pos_mask], np.greater)
+            freqs_peaks = freqs[where_peaks]
+            freqs_delta = np.abs(freqs_peaks - self.color_under)
+            where_min = argrelextrema(freqs_delta, np.less)[0]
+            peak_freq = freqs_peaks[where_min][0]
+            where_selected = np.where(freqs == peak_freq)[0]
+            self.cc_phase = phase[where_selected]
 
         # An inner plot to show the peak frequency
         if self.fft_plot:
@@ -225,7 +248,7 @@ class ChromaAFC:
             plt.setp(axes, yticks=[])
             plt.xlim(min_f, max_f)
             plt.ion()
-            plt.pause(0.5)
+            plt.pause(2)
             plt.show()
             plt.close()
 
@@ -234,21 +257,25 @@ class ChromaAFC:
         return peak_freq
 
     def measureCenterFreq(self, data):
-        return self.fftCenterFreq(data)
+        return self.fftCenterFreq(
+                self.chainfiltfilt(data, self.narrowband)
+        )
 
     # returns the downconverted chroma carrier offset
-    def freqOffset(self, chroma, adjustf=False):
+    def freqOffset(self, chroma, adjustf=True):
+        min_f, max_f = self.get_band_tolerance()
         freq_cc_x = np.clip(
             self.compensate(self.measureCenterFreq(chroma)),
-            a_max=self.color_under * self.bpf_under_ratio,
-            a_min=self.color_under / self.bpf_under_ratio
+            a_min=self.color_under * min_f,
+            a_max=self.color_under * max_f,
         )
         freq_cc = freq_cc_x if adjustf else self.cc * 1e6
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
         return self.color_under, \
                freq_cc, \
-               self.chroma_log_drift.work(freq_cc - self.color_under), self.cc_phase
+               self.chroma_log_drift.work(freq_cc - self.color_under), \
+               self.cc_phase
 
     # Filter to pick out color-under chroma component.
     # filter at about twice the carrier. (This seems to be similar to what VCRs do)
@@ -289,3 +316,38 @@ class ChromaAFC:
             output="sos",
         )
 
+    def get_narrowband_bandpass(self):
+        min_f, max_f = self.get_band_tolerance()
+        trans_lo, trans_hi =\
+            self.color_under * self.transition_expand * (max_f - 1), \
+            self.color_under * self.transition_expand * (1 - min_f)
+
+        iir_narrow_lo = utils.firdes_highpass(
+            self.samp_rate,
+            self.color_under,
+            trans_lo,
+            order_limit=200
+        )
+
+        iir_narrow_hi = utils.firdes_lowpass(
+            self.samp_rate,
+            self.color_under,
+            trans_hi,
+            order_limit=200
+        )
+
+        return {
+            utils.FiltersClass(
+                iir_narrow_lo[0],
+                iir_narrow_lo[1],
+                self.samp_rate
+            ),
+            utils.FiltersClass(
+                iir_narrow_hi[0],
+                iir_narrow_hi[1],
+                self.samp_rate
+            ),
+        }
+
+    def get_band_tolerance(self):
+        return (100 - self.max_f_dev_percents[0]) / 100, (100 + self.max_f_dev_percents[1]) / 100
