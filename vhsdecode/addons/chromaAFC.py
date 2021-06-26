@@ -16,7 +16,7 @@ class ChromaAFC:
         self.cc_phase = 0
         self.power_threshold = 1 / 6
         self.transition_expand = 12
-        self.max_f_dev_percents = 6, 6  # max percent down, max percent up
+        self.max_f_dev_percents = 8, 8  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
         self.SysParams = sys_params
