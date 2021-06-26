@@ -270,10 +270,9 @@ class ChromaAFC:
         # Find the peak frequency: we can focus on only the positive frequencies
         pos_mask = np.where(sample_freq > 0)
         freqs = sample_freq[pos_mask]
+        phases = phase[pos_mask]
+        assert len(freqs) == len(phases)
 
-        peak_freq = freqs[power[pos_mask].argmax()]
-        self.cc_phase = phase[power[pos_mask].argmax()]
-        '''
         if self.on_linearization:
             peak_freq = freqs[power[pos_mask].argmax()]
             self.cc_phase = phase[power[pos_mask].argmax()]
@@ -285,8 +284,8 @@ class ChromaAFC:
             where_min = np.where(freqs_delta == min(freqs_delta))[0]
             peak_freq = freqs_peaks[where_min][0]
             where_selected = np.where(freqs == peak_freq)[0]
-            self.cc_phase = phase[where_selected]
-        '''
+            self.cc_phase = phases[where_selected]
+
         # An inner plot to show the peak frequency
         if self.fft_plot:
             print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
