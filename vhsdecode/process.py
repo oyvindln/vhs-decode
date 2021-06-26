@@ -249,6 +249,8 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
                 "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
                 (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
             )
+            if field.rf.chroma_trap:
+                field.data["video"]["demod"] = field.rf.chromaTrap.work(field.data["video"]["demod"])
 
         field.rf.chroma_tbc_cache = chroma
     else:
@@ -258,16 +260,8 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
     linesout = field.outlinecount
     outwidth = field.outlinelen
 
-    burstarea = get_burst_area(field)
-
-    '''
-    burstarea = (
-        math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0]) - 5),
-        math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])) + 10,
-    )
-    '''
-
-    # utils.plot_scope(npfft.fft(chroma))
+    burst_area_init = get_burst_area(field)
+    burstarea = burst_area_init[0] - 5, burst_area_init[1] + 10
 
     # narrow_filtered = utils.filter_simple(chroma, field.rf.Filters["FBurstNarrow"])
 
@@ -2034,7 +2028,7 @@ class VHSRFDecode(ldd.RFDecode):
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
 
-        if self.chroma_trap:
+        if self.chroma_trap and not self.cafc:
             # applies the Subcarrier trap
             demod = self.chromaTrap.work(demod)
 

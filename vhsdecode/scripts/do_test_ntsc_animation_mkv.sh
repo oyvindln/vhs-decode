@@ -4,7 +4,7 @@ ffmpeg -hide_banner -thread_queue_size 1024 -f rawvideo \
   -r 30000/1001 -pixel_format gray16le -s 760x488 \
   -i <(ld-dropout-correct -i $1.tbc --output-json /dev/null - | ld-chroma-decoder -f mono -p yuv --input-json $1.tbc.json - -) \
   -f rawvideo -r 30000/1001 -pixel_format yuv444p16le -s 760x488 \
-  -i <(ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | ld-chroma-decoder -f ntsc2d --ntsc-phase-comp --chroma-gain 4 -p yuv --input-json $1.tbc.json - -) \
+  -i <(ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | ld-chroma-decoder -f ntsc1d --ntsc-phase-comp --chroma-gain 2 -p yuv --input-json $1.tbc.json - -) \
   -filter_complex "
     [0]
       format=yuv422p10le
@@ -14,14 +14,14 @@ ffmpeg -hide_banner -thread_queue_size 1024 -f rawvideo \
     [eq];
     [eq]
       eq=
-      contrast=1.7:
-      brightness=0.15:
+      contrast=1:
+      brightness=0:
       saturation=1:
       gamma=1:
       gamma_r=1:
       gamma_g=1:
       gamma_b=1:
-      gamma_weight=1.1
+      gamma_weight=1
     [denoise];
     [denoise]
       nlmeans=

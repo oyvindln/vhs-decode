@@ -16,7 +16,7 @@ class ChromaAFC:
         self.cc_phase = 0
         self.power_threshold = 1 / 6
         self.transition_expand = 12
-        self.max_f_dev_percents = 6, 3  # max percent down, max percent up
+        self.max_f_dev_percents = 6, 6  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
         self.SysParams = sys_params
@@ -39,7 +39,7 @@ class ChromaAFC:
         )
 
         self.narrowband = self.get_narrowband_bandpass()
-        self.cc = 0
+        self.cc_freq_mhz = 0
         self.chroma_heterodyne = np.array([])
         self.corrector = [1, 0]
         self.on_linearization = linearize
@@ -70,8 +70,7 @@ class ChromaAFC:
         return data
 
     def fit(self):
-        # TODO: this sample_size numbers must be calculated (they correspond to the field data size)
-        table = self.tableset(sample_size=355255) if self.fv < 60 else self.tableset(sample_size=239330)
+        table = self.tableset(sample_size=self.fieldlen)
         x, y = table[:, 0], table[:, 1]
         m, c = np.polyfit(x, y, 1)
         self.corrector = [m, c]
@@ -111,22 +110,83 @@ class ChromaAFC:
     def getSampleRate(self):
         return self.out_sample_rate_mhz * 1e6
 
-    # fcc in Hz
+    # fcc in Hz (the current dwc subcarrier freq)
     def setCC(self, fcc_hz):
-        self.cc = fcc_hz / 1e6
+        self.cc_freq_mhz = fcc_hz / 1e6
         self.genHetC()
 
     def getCC(self):
-        return self.cc * 1e6
+        return self.cc_freq_mhz * 1e6
+
+    def genHetC(self):
+        h1 = self.genHetC_direct()
+        # h0 = self.genHetC_filtered()
+        # utils.dualplot_scope(h0[3][:128], h1[3][:128])
+        self.chroma_heterodyne = h1
+
+    # This function generates the heterodyning carrier directly
+    # without further filtering, see genHetC_filtered() below for the other method
+    def genHetC_direct(self):
+        """
+            According to this trigonometric identity:
+
+                sin(a) * sin(b) = ( cos(a - b) - cos(a + b) ) / 2
+
+            The product of two sine waves produces the difference/2 of two signals:
+                cos(a - b) and cos(a + b)
+
+            Let: a = 2 * pi * fcc + phase_cc
+            and  b = 2 * pi * fsc + phase_sc
+            where fcc is the downconverted carrier frequency
+            and fsc is the cvbs color carrier frequency
+
+            The resulting signals are:
+                s0(t) = cos( 2 * pi * ( fcc - fsc ) * t + phase_cc - phase_sc )
+                s1(t) = cos( 2 * pi * ( fcc + fsc ) * t + phase_cc + phase_sc )
+
+            And the resulting identity can be written as:
+            sin((2*pi*fcc)t + phase_cc) * sin((2*pi*fsc)t + phase_sc) =
+                (s0 - s1) / 2
+
+            We're interested on s1 part for heterodyning (omitted t for simplification):
+                -cos( 2 * pi * ( fcc + fsc ) + phase_cc + phase_sc )
+
+            Which is a -cosine of fcc + fsc frequency, and
+            phase_cc phase, assuming phase_sc = 0
+        """
+        het_freq = self.fsc_mhz + self.cc_freq_mhz
+        het_wave_scale = het_freq / self.out_sample_rate_mhz
+
+        # This is the last cc phase measured as it comes from the tape
+        phase_drift = self.cc_phase
+        return np.array(
+            [
+                # phase 0
+                -np.cos(
+                    (twopi * het_wave_scale * self.samples) + phase_drift
+                ),
+                # phase 90 deg
+                -np.cos(
+                    (twopi * het_wave_scale * self.samples) + (np.pi / 2) + phase_drift
+                ),
+                # phase 180 deg
+                -np.cos(
+                    (twopi * het_wave_scale * self.samples) + np.pi + phase_drift
+                ),
+                # phase 270 deg
+                -np.cos(
+                    (twopi * het_wave_scale * self.samples) + (np.pi * 3 / 2) + phase_drift
+                )
+            ]
+        )
 
     # As this is done on the tbced signal, we need the sampling frequency of that,
     # which is 4fsc for NTSC and approx. 4 fsc for PAL.
-    def genHetC(self):
-        cc_wave_scale = self.cc / self.out_sample_rate_mhz
-        het_freq = self.fsc_mhz + self.cc
+    def genHetC_filtered(self):
+        cc_wave_scale = self.cc_freq_mhz / self.out_sample_rate_mhz
+        het_freq = self.fsc_mhz + self.cc_freq_mhz
 
         phase_drift = self.cc_phase
-        amplitude = 100
         # 0 phase downconverted color under carrier wave
         cc_wave = np.sin(
             (twopi * cc_wave_scale * self.samples) + phase_drift
@@ -160,25 +220,14 @@ class ChromaAFC:
         # subcarrier + the downconverted chroma carrier to get the original
         # color wave back.
 
-        self.chroma_heterodyne = np.array(
+        return np.array(
             [
-                sps.sosfiltfilt(het_filter, amplitude * cc_wave * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, amplitude * cc_wave_90 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, amplitude * cc_wave_180 * self.fsc_wave),
-                sps.sosfiltfilt(het_filter, amplitude * cc_wave_270 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, cc_wave * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, cc_wave_90 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, cc_wave_180 * self.fsc_wave),
+                sps.sosfiltfilt(het_filter, cc_wave_270 * self.fsc_wave),
             ]
         )
-        '''
-        self.chroma_heterodyne = np.array(
-            [
-                cc_wave * self.fsc_wave,
-                cc_wave_90 * self.fsc_wave,
-                cc_wave_180 * self.fsc_wave,
-                cc_wave_270 * self.fsc_wave,
-            ]
-        )
-        '''
-
 
     # Returns the chroma heterodyning wave table/array computed after genHetC()
     def getChromaHet(self):
@@ -221,6 +270,10 @@ class ChromaAFC:
         # Find the peak frequency: we can focus on only the positive frequencies
         pos_mask = np.where(sample_freq > 0)
         freqs = sample_freq[pos_mask]
+
+        peak_freq = freqs[power[pos_mask].argmax()]
+        self.cc_phase = phase[power[pos_mask].argmax()]
+        '''
         if self.on_linearization:
             peak_freq = freqs[power[pos_mask].argmax()]
             self.cc_phase = phase[power[pos_mask].argmax()]
@@ -233,7 +286,7 @@ class ChromaAFC:
             peak_freq = freqs_peaks[where_min][0]
             where_selected = np.where(freqs == peak_freq)[0]
             self.cc_phase = phase[where_selected]
-
+        '''
         # An inner plot to show the peak frequency
         if self.fft_plot:
             print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
@@ -267,17 +320,21 @@ class ChromaAFC:
     # returns the downconverted chroma carrier offset
     def freqOffset(self, chroma, adjustf=True):
         min_f, max_f = self.get_band_tolerance()
+        comp_f = self.compensate(self.measureCenterFreq(chroma))
         freq_cc_x = np.clip(
-            self.compensate(self.measureCenterFreq(chroma)),
+            comp_f,
             a_min=self.color_under * min_f,
             a_max=self.color_under * max_f,
         )
+        if comp_f != freq_cc_x:
+            ldd.logger.warn("Chroma PLL range clipped at %.02f, measured %.02f" % (freq_cc_x, comp_f))
+
         if adjustf:
             self.meas_stack.append(freq_cc_x)
             freq_cc = freq_cc_x # if len(self.meas_stack) < 2 else self.meas_stack[-2:][0]
             # print(self.meas_stack[-2:])
         else:
-            freq_cc = self.cc * 1e6
+            freq_cc = self.cc_freq_mhz * 1e6
 
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
@@ -294,7 +351,7 @@ class ChromaAFC:
         freq_hz_half = self.demod_rate / 2
         return sps.butter(
             2,
-            [50000 / freq_hz_half, self.cc * 1e6 * self.bpf_under_ratio / freq_hz_half],
+            [50000 / freq_hz_half, self.cc_freq_mhz * 1e6 * self.bpf_under_ratio / freq_hz_half],
             btype="bandpass",
             output="sos",
         )
@@ -303,8 +360,8 @@ class ChromaAFC:
         return sps.butter(
             2,
             [
-                self.cc - 0.2 / self.out_frequency_half,
-                self.cc + 0.2 / self.out_frequency_half,
+                self.cc_freq_mhz - 0.2 / self.out_frequency_half,
+                self.cc_freq_mhz + 0.2 / self.out_frequency_half,
             ],
             btype="bandpass",
             output="sos",
