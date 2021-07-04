@@ -227,9 +227,9 @@ def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
     return out_chroma
 
 
-def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False):
+def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, disable_tracking_cafc=False):
     # Run TBC/downscale on chroma (if new field, else uses cache)
-    if field.rf.field_number != field.rf.chroma_last_field:
+    if field.rf.field_number != field.rf.chroma_last_field or field.rf.chroma_last_field == -1:
         chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
         field.rf.chroma_last_field = field.rf.field_number
 
@@ -244,17 +244,23 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
                 field.rf.notch,
                 move=0
             )
-            spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
-            ldd.logger.debug(
-                "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
-                (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
-            )
+
+            if not disable_tracking_cafc:
+                spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
+                ldd.logger.info(
+                    "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
+                    (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
+                )
+
             if field.rf.chroma_trap:
                 field.data["video"]["demod"] = field.rf.chromaTrap.work(field.data["video"]["demod"])
 
-        field.rf.chroma_tbc_cache = chroma
+
+        field.rf.chroma_tbc_buffer = chroma
     else:
-        chroma = field.rf.chroma_tbc_cache
+        chroma = field.rf.chroma_tbc_buffer
+
+
 
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
@@ -297,7 +303,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False)
         lineoffset,
         linesout,
         outwidth,
-        field.rf.chromaAFC.getChromaHet() if field.rf.cafc else field.rf.chroma_heterodyne,
+        field.rf.chromaAFC.getChromaHet() if (field.rf.cafc and not disable_tracking_cafc) else field.rf.chroma_heterodyne,
         phase_rotation,
         starting_phase,
     )
@@ -349,7 +355,7 @@ def decode_chroma_vhs(field):
         rf.track_phase = field.try_detect_track()
         rf.needs_detect = False
 
-    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb)
+    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb, disable_tracking_cafc=False)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     rf.last_raw_loc = raw_loc
@@ -365,7 +371,7 @@ def decode_chroma_umatic(field):
 
     check_increment_field_no(field.rf)
 
-    uphet = process_chroma(field, None, True, field.rf.options.disable_comb)
+    uphet = process_chroma(field, None, True, field.rf.options.disable_comb, disable_tracking_cafc=False)
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     field.rf.last_raw_loc = raw_loc
@@ -1379,7 +1385,7 @@ class VHSDecode(ldd.LDdecode):
             extra_options=extra_options,
         )
         self.rf.chroma_last_field = -1
-        self.rf.chroma_tbc_cache = np.array([])
+        self.rf.chroma_tbc_buffer = np.array([])
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
@@ -1906,15 +1912,22 @@ class VHSRFDecode(ldd.RFDecode):
             self.freq_hz,
             DP["chroma_bpf_upper"] / DP['color_under_carrier'],
             self.SysParams,
-            self.DecoderParams['color_under_carrier']
+            self.DecoderParams['color_under_carrier'],
+            tape_format=tape_format
         )
 
         self.Filters["FVideoBurst"] = self.chromaAFC.get_chroma_bandpass()
 
         if self.notch is not None:
-            self.Filters["FVideoNotch"] = sps.iirnotch(
-                self.notch / self.freq_half, self.notch_q
-            )
+            if not self.cafc:
+                self.Filters["FVideoNotch"] = sps.iirnotch(
+                    self.notch / self.freq_half, self.notch_q
+                )
+            else:
+                self.Filters["FVideoNotch"] = sps.iirnotch(
+                    self.notch / self.chromaAFC.getOutFreqHalf(), self.notch_q
+                )
+
             self.Filters["FVideoNotchF"] = lddu.filtfft(
                 self.Filters["FVideoNotch"], self.blocklen
             )
@@ -1948,7 +1961,7 @@ class VHSRFDecode(ldd.RFDecode):
             }
 
         self.chromaTrap = (
-            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"]) if not self.cafc else ChromaSepClass(self.chromaAFC.getSampleRate(), self.SysParams["fsc_mhz"])
             if self.chroma_trap
             else None
         )

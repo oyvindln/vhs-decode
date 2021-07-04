@@ -12,20 +12,23 @@ twopi = 2 * np.pi
 # The output sample rate is 4fsc
 class ChromaAFC:
 
-    def __init__(self, demod_rate, under_ratio, sys_params, color_under_carrier_f, linearize=False, plot=False):
+    def __init__(self, demod_rate, under_ratio, sys_params, color_under_carrier_f, linearize=False, plot=False, tape_format='VHS'):
+        self.SysParams = sys_params
+        self.tape_format = tape_format
+        self.fv = self.SysParams["FPS"] * 2
+        self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
+        self.color_under = color_under_carrier_f
         self.cc_phase = 0
         self.power_threshold = 1 / 6
         self.transition_expand = 12
-        self.max_f_dev_percents = 8, 8  # max percent down, max percent up
+        percent = 100 * (-1 + (self.color_under + (2 * self.fh)) / self.color_under)
+        self.max_f_dev_percents = percent, percent  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
-        self.SysParams = sys_params
         self.fsc_mhz = self.SysParams["fsc_mhz"]
-        self.fv = self.SysParams["FPS"] * 2
         self.out_sample_rate_mhz = self.fsc_mhz * 4
         self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.bpf_under_ratio = under_ratio
-        self.color_under = color_under_carrier_f
         self.out_frequency_half = self.out_sample_rate_mhz / 2
         self.fieldlen = self.SysParams["outlinelen"] * max(self.SysParams["field_lines"])
         self.samples = np.arange(self.fieldlen)
@@ -109,6 +112,9 @@ class ChromaAFC:
 
     def getSampleRate(self):
         return self.out_sample_rate_mhz * 1e6
+
+    def getOutFreqHalf(self):
+        return self.out_frequency_half
 
     # fcc in Hz (the current dwc subcarrier freq)
     def setCC(self, fcc_hz):
@@ -245,6 +251,23 @@ class ChromaAFC:
     def resetCC(self):
         self.setCC(self.color_under)
 
+    def selectWithSpread(self, value, spread):
+        min_f_band, max_f_band = self.get_band_tolerance()
+        max_f_band *= value
+        min_f_band *= value
+        half_steps = round((max_f_band - value) / spread)
+        carrier_space = np.linspace(
+            value - (half_steps * spread),
+            value + (half_steps * spread),
+            2 * half_steps
+        )
+        freqs_delta = np.abs(carrier_space - self.color_under)
+        where_min = np.where(freqs_delta == min(freqs_delta))[0]
+        return carrier_space[where_min][0]
+
+        #hi, lo = value + spread, value - spread
+        #return -spread if abs(self.color_under - hi) < abs(self.color_under - lo) else spread
+
     def fftCenterFreq(self, data):
         time_step = 1 / self.samp_rate
 
@@ -274,7 +297,7 @@ class ChromaAFC:
         assert len(freqs) == len(phases)
 
         if self.on_linearization:
-            peak_freq = freqs[power[pos_mask].argmax()]
+            carrier_freq = freqs[power[pos_mask].argmax()]
             self.cc_phase = phase[power[pos_mask].argmax()]
         else:
             power_clip = np.clip(power[pos_mask], a_min=max(power) * self.power_threshold, a_max=max(power))
@@ -283,17 +306,26 @@ class ChromaAFC:
             freqs_delta = np.abs(freqs_peaks - self.color_under)
             where_min = np.where(freqs_delta == min(freqs_delta))[0]
             peak_freq = freqs_peaks[where_min][0]
-            where_selected = np.where(freqs == peak_freq)[0]
-            self.cc_phase = phases[where_selected]
+            # print(self.color_under, (self.color_under - peak_freq))
+            carrier_freq = \
+                self.selectWithSpread(peak_freq, spread=self.fh / 2) \
+                if self.tape_format == 'UMATIC' \
+                else self.selectWithSpread(peak_freq, spread=self.fh / 8)
+            # print(self.color_under, (self.color_under - carrier_freq))
+
+            where_selected = np.where(freqs == carrier_freq)[0]
+            self.cc_phase = phases[where_selected] if len(phases[where_selected]) > 0 else 0
 
         # An inner plot to show the peak frequency
         if self.fft_plot:
-            print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
+            print(self.cc_phase)
+            #print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
             yvert_range = 2*power[power[pos_mask].argmax()]
-            plt.vlines(peak_freq, ymin=-yvert_range * self.power_threshold, ymax=yvert_range, colors='r')
-            min_f = peak_freq * 0.9
-            max_f = peak_freq * 1.1
-            plt.text(max_f, -yvert_range/8, "%.02f kHz" % (peak_freq / 1e3))
+            plt.vlines(carrier_freq, ymin=-yvert_range * self.power_threshold, ymax=yvert_range, colors='r')
+            plt.vlines(self.color_under, ymin=-yvert_range * self.power_threshold, ymax=yvert_range, colors='g')
+            min_f = carrier_freq * 0.9
+            max_f = carrier_freq * 1.1
+            plt.text(max_f, -yvert_range/8, "%.02f kHz" % (carrier_freq / 1e3))
             f_index = np.where(np.logical_and(min_f < freqs, freqs < max_f))
             s_freqs = freqs[f_index]
             s_power = power[f_index]
@@ -309,7 +341,7 @@ class ChromaAFC:
 
         # scipy.signal.find_peaks_cwt can also be used for more advanced
         # peak detection
-        return peak_freq
+        return carrier_freq
 
     def measureCenterFreq(self, data):
         return self.fftCenterFreq(
