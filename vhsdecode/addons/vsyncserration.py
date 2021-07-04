@@ -106,8 +106,8 @@ class VsyncSerration:
 
         # result storage instances
         self.levels = \
-            StackableMA(window_average=ma_depth, min_watermark=2), \
-            StackableMA(window_average=ma_depth, min_watermark=2)  # sync, blanking
+            StackableMA(window_average=ma_depth, min_watermark=1), \
+            StackableMA(window_average=ma_depth, min_watermark=1)  # sync, blanking
 
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
