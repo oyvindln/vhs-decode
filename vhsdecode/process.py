@@ -87,7 +87,7 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
 
 
 def getpulses_override(field):
-    return field.rf.Resync.getpulses_override(field)
+    return field.rf.resync.getpulses_override(field)
 
 
 @njit(cache=True)
@@ -1961,12 +1961,16 @@ class VHSRFDecode(ldd.RFDecode):
             }
 
         self.chromaTrap = (
-            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"]) if not self.cafc else ChromaSepClass(self.chromaAFC.getSampleRate(), self.SysParams["fsc_mhz"])
+            ChromaSepClass(
+                self.freq_hz, self.SysParams["fsc_mhz"]) if not self.cafc
+            else ChromaSepClass(self.chromaAFC.getSampleRate(), self.SysParams["fsc_mhz"])
             if self.chroma_trap
             else None
         )
-        self.AGClevels = StackableMA(window_average=15), StackableMA(window_average=15)
-        self.Resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
+        self.AGClevels = \
+            StackableMA(window_average=self.SysParams["FPS"] / 5), \
+            StackableMA(window_average=self.SysParams["FPS"] / 5)
+        self.resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
 
     def computedelays(self, mtf_level=0):
         """Override computedelays

@@ -38,8 +38,8 @@ def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire):
 # preliminary solution to fix spurious decoding halts (numpy error case)
 class FieldState:
     def __init__(self):
-        self.blanklevels = utils.StackableMA()
-        self.synclevels = utils.StackableMA()
+        self.blanklevels = utils.StackableMA(window_average=2)
+        self.synclevels = utils.StackableMA(window_average=2)
         self.locs = None
 
     def setSyncLevel(self, level):

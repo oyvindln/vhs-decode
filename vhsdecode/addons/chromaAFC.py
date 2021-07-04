@@ -313,8 +313,8 @@ class ChromaAFC:
                 else self.selectWithSpread(peak_freq, spread=self.fh / 8)
             # print(self.color_under, (self.color_under - carrier_freq))
 
-            where_selected = np.where(freqs == carrier_freq)[0]
-            self.cc_phase = phases[where_selected] if len(phases[where_selected]) > 0 else 0
+            where_selected = np.where(sample_freq == carrier_freq)[0]
+            self.cc_phase = phase[where_selected] if len(phase[where_selected]) > 0 else 0
 
         # An inner plot to show the peak frequency
         if self.fft_plot:

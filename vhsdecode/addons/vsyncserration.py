@@ -62,7 +62,7 @@ class VsyncSerration:
         # parameter, divisor of fh for limiting the bandwith of power_ratio_search()
         self.serration_limit = 3
         # parameter, depth/window of the moving averaging
-        ma_depth = 15
+        ma_depth = 2  # round(self.fv / 20)
 
         # used on vsync_envelope_simple() (search for video amplitude pinch)
         iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
