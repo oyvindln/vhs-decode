@@ -199,7 +199,7 @@ class StackableMA:
     def pull(self):
         if np.size(self.stack) > 0:
             value, self.stack = moving_average(
-                self.stack, window=self.window_average
+                self.stack, window=int(self.window_average)
             )
             return value
         else:

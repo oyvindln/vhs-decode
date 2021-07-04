@@ -247,7 +247,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
 
             if not disable_tracking_cafc:
                 spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
-                ldd.logger.info(
+                ldd.logger.debug(
                     "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
                     (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
                 )
@@ -1968,8 +1968,8 @@ class VHSRFDecode(ldd.RFDecode):
             else None
         )
         self.AGClevels = \
-            StackableMA(window_average=self.SysParams["FPS"] / 5), \
-            StackableMA(window_average=self.SysParams["FPS"] / 5)
+            StackableMA(window_average=self.SysParams["FPS"] / 2), \
+            StackableMA(window_average=self.SysParams["FPS"] / 2)
         self.resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
 
     def computedelays(self, mtf_level=0):
