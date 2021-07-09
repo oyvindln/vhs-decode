@@ -208,6 +208,9 @@ class StackableMA:
     def has_values(self):
         return np.size(self.stack) > self.min_watermark
 
+    def current(self):
+        return self.stack[-1:][0] if len(self.stack) > 0 else None
+
     def size(self):
         return np.size(self.stack)
 

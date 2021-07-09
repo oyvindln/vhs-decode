@@ -12,6 +12,7 @@ from vhsdecode.utils import get_line
 from vhsdecode.utils import StackableMA
 
 import vhsdecode.formats as vhs_formats
+from vhsdecode.addons.FMdeemph import FMDeEmphasis
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.addons.resync import Resync
@@ -251,10 +252,6 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
                     "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
                     (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
                 )
-
-            if field.rf.chroma_trap:
-                field.data["video"]["demod"] = field.rf.chromaTrap.work(field.data["video"]["demod"])
-
 
         field.rf.chroma_tbc_buffer = chroma
     else:
@@ -1766,8 +1763,10 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         # Video (luma) main de-emphasis
-        #        db3, da3 = FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
         db, da = FMDeEmphasisB(self.freq_hz, DP["deemph_gain"], DP["deemph_mid"]).get()
+        # Sync de-emphasis
+        db05, da05 = FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
+
 
         #        da3, db3 = gen_high_shelf(260000 / 1.0e6, 14, 1 / 2, inputfreq)
 
@@ -1874,9 +1873,10 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         self.Filters["Fdeemp"] = lddu.filtfft((db, da), self.blocklen)
+        self.Filters["Fdeemp_05"] = lddu.filtfft((db05, da05), self.blocklen)
         self.Filters["FVideo"] = self.Filters["Fvideo_lpf"] * self.Filters["Fdeemp"]
         SF = self.Filters
-        SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * SF["F05"]
+        SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp_05"] * SF["F05"]
 
         # SF["YNRHighPass"] = sps.butter(
         #     1,
@@ -1961,12 +1961,9 @@ class VHSRFDecode(ldd.RFDecode):
             }
 
         self.chromaTrap = (
-            ChromaSepClass(
-                self.freq_hz, self.SysParams["fsc_mhz"]) if not self.cafc
-            else ChromaSepClass(self.chromaAFC.getSampleRate(), self.SysParams["fsc_mhz"])
-            if self.chroma_trap
-            else None
+            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
         )
+
         self.AGClevels = \
             StackableMA(window_average=self.SysParams["FPS"] / 2), \
             StackableMA(window_average=self.SysParams["FPS"] / 2)
@@ -2045,7 +2042,7 @@ class VHSRFDecode(ldd.RFDecode):
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
 
-        if self.chroma_trap and not self.cafc:
+        if self.chroma_trap:
             # applies the Subcarrier trap
             demod = self.chromaTrap.work(demod)
 

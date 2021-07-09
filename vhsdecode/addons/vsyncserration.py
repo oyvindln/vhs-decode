@@ -62,7 +62,8 @@ class VsyncSerration:
         # parameter, divisor of fh for limiting the bandwith of power_ratio_search()
         self.serration_limit = 3
         # parameter, depth/window of the moving averaging
-        ma_depth = 2  # round(self.fv / 20)
+        ma_depth = round(self.fv / 5) if self.fv < 60 else round(self.fv / 6)
+        ma_min_watermark = int(ma_depth / 2)
 
         # used on vsync_envelope_simple() (search for video amplitude pinch)
         iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
@@ -106,8 +107,8 @@ class VsyncSerration:
 
         # result storage instances
         self.levels = \
-            StackableMA(window_average=ma_depth, min_watermark=1), \
-            StackableMA(window_average=ma_depth, min_watermark=1)  # sync, blanking
+            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark), \
+            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)  # sync, blanking
 
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
@@ -119,7 +120,7 @@ class VsyncSerration:
         return sync, blank
 
     # returns true if it has levels above the min_watermark
-    def has_levels(self):
+    def hasLevels(self):
         return (
                 self.levels[0].has_values()
                 and self.levels[1].has_values()
@@ -315,7 +316,7 @@ class VsyncSerration:
     # this runs the measures
     def work(self, data):
         self.vsync_envelope(data)
-        if self.has_levels():
+        if self.hasLevels():
             ldd.logger.debug(
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (
@@ -333,7 +334,7 @@ class VsyncSerration:
 
     # safe clips the bottom of the sync pulses, but not the picture area
     def safe_sync_clip(self, sync_ref, data):
-        if self.has_levels():
+        if self.hasLevels():
             data = _safe_sync_clip(sync_ref, data, self.get_levels(), self.eq_pulselen)
         return data
 

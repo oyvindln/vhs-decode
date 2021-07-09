@@ -37,9 +37,13 @@ def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire):
 # stores the last valid blacklevel, synclevel and vsynclocs state
 # preliminary solution to fix spurious decoding halts (numpy error case)
 class FieldState:
-    def __init__(self):
-        self.blanklevels = utils.StackableMA(window_average=2)
-        self.synclevels = utils.StackableMA(window_average=2)
+    def __init__(self, sysparams):
+        self.SysParams = sysparams
+        self.fv = self.SysParams["FPS"] * 2
+        ma_depth = round(self.fv / 5) if self.fv < 60 else round(self.fv / 6)
+        ma_min_watermark = int(ma_depth / 2)
+        self.blanklevels = utils.StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)
+        self.synclevels = utils.StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)
         self.locs = None
 
     def setSyncLevel(self, level):
@@ -75,7 +79,7 @@ class Resync:
         self.samp_rate = fs
         self.SysParams = sysparams.copy()
         self.VsyncSerration = VsyncSerration(fs, sysparams)
-        self.field_state = FieldState()
+        self.fieldState = FieldState(sysparams)
 
     def debug_field(self, sync_reference):
         ldd.logger.debug(
@@ -160,20 +164,20 @@ class Resync:
         vsync_locs, vsync_means = self.fallback_vsync_loc_means(field, pulses)
 
         if len(vsync_means) == 0:
-            synclevel = self.field_state.getSyncLevel()
+            synclevel = self.fieldState.getSyncLevel()
             if synclevel is None:
                 return None, None
         else:
             synclevel = np.median(vsync_means)
-            self.field_state.setSyncLevel(synclevel)
-            self.field_state.setLocs(vsync_locs)
+            self.fieldState.setSyncLevel(synclevel)
+            self.fieldState.setLocs(vsync_locs)
 
         if np.abs(field.rf.hztoire(synclevel) - field.rf.SysParams["vsync_ire"]) < 5:
             # sync level is close enough to use
             return np.nan, np.nan
 
         if vsync_locs is None or not len(vsync_locs):
-            vsync_locs = self.field_state.getLocs()
+            vsync_locs = self.fieldState.getLocs()
 
         # Now compute black level and try again
         black_means = self.fallback_black_level(field, pulses, vsync_locs)
@@ -183,13 +187,13 @@ class Resync:
 
         if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
             # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
-            bl, sl = self.field_state.getLevels()
+            bl, sl = self.fieldState.getLevels()
             if bl is not None and sl is not None:
                 blacklevel, synclevel = bl, sl
             else:
                 return None, None
         else:
-            self.field_state.setLevels(blacklevel, synclevel)
+            self.fieldState.setLevels(blacklevel, synclevel)
 
         pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
         pulse_hz_max = (blacklevel + synclevel) / 2
@@ -217,11 +221,11 @@ class Resync:
             )
 
         # if has levels, then compensate blanking bias
-        if self.VsyncSerration.has_levels() or self.field_state.hasLevels():
-            if self.VsyncSerration.has_levels():
+        if self.VsyncSerration.hasLevels() or self.fieldState.hasLevels():
+            if self.VsyncSerration.hasLevels():
                 sync, blank = self.VsyncSerration.get_levels()
             else:
-                blank, sync = self.field_state.getLevels()
+                blank, sync = self.fieldState.getLevels()
 
             vsync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
             # Do a level check
@@ -299,7 +303,7 @@ class Resync:
             return pulses
 
         # calls the fallback auto-levels
-        if not self.VsyncSerration.has_levels():
+        if not self.VsyncSerration.hasLevels():
             f_pulse_hz_min, f_pulse_hz_max = self.fallback_levels(field, pulses)
             if f_pulse_hz_min is None or f_pulse_hz_max is None:
                 return None
