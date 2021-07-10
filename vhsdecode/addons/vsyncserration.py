@@ -113,6 +113,7 @@ class VsyncSerration:
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
         self.pid = getpid()
+        self.found_serration = False
 
     # returns the measured sync level and blank level
     def get_levels(self):
@@ -126,7 +127,10 @@ class VsyncSerration:
                 and self.levels[1].has_values()
         )
 
-    # not used ATM, it adds external levels to the stack
+    def hasSerration(self):
+        return self.found_serration
+
+    # it adds external levels to the stack
     def push_levels(self, levels):
         for ix, level in enumerate(levels):
             self.levels[ix].push(level)
@@ -244,6 +248,7 @@ class VsyncSerration:
             # validates it by time length, (original version 17e3 and 23e3)
             # now calculated at initialization
             if self.vbi_time_range[0] < len(serration) < self.vbi_time_range[1]:
+                self.found_serration = True
                 self.push_levels(self.get_serration_sync_levels(serration))
                 if self.show_decoded:
                     sync, blank = self.get_levels()
@@ -315,8 +320,9 @@ class VsyncSerration:
 
     # this runs the measures
     def work(self, data):
+        self.found_serration = False
         self.vsync_envelope(data)
-        if self.hasLevels():
+        if self.hasLevels() and self.found_serration:
             ldd.logger.debug(
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (

@@ -59,7 +59,7 @@ class FieldState:
     def getLevels(self):
         blevels = self.blanklevels.pull()
         if blevels is not None:
-            return blevels, self.getSyncLevel()
+            return self.getSyncLevel(), blevels
         else:
             return None, None
 
@@ -187,7 +187,7 @@ class Resync:
 
         if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
             # utils.plot_scope(field.data["video"]["demod_05"], title='Failed field demod05')
-            bl, sl = self.fieldState.getLevels()
+            sl, bl = self.fieldState.getLevels()
             if bl is not None and sl is not None:
                 blacklevel, synclevel = bl, sl
             else:
@@ -198,6 +198,12 @@ class Resync:
         pulse_hz_min = synclevel - (field.rf.SysParams["hz_ire"] * 10)
         pulse_hz_max = (blacklevel + synclevel) / 2
 
+        return pulse_hz_min, pulse_hz_max
+
+    def findpulses_range(self, field, vsync_hz):
+        sync_ire = field.rf.hztoire(vsync_hz)
+        pulse_hz_min = field.rf.iretohz(sync_ire - 10)
+        pulse_hz_max = field.rf.iretohz(sync_ire / 2)
         return pulse_hz_min, pulse_hz_max
 
     def getpulses_override(self, field):
@@ -224,8 +230,26 @@ class Resync:
         if self.VsyncSerration.hasLevels() or self.fieldState.hasLevels():
             if self.VsyncSerration.hasLevels():
                 sync, blank = self.VsyncSerration.get_levels()
+                """
+                if self.VsyncSerration.hasSerration():
+                    sync, blank = self.VsyncSerration.get_levels()
+                else:
+                    s_sync, s_blank = self.VsyncSerration.get_levels()
+                    pulse_step_hz = s_blank - s_sync
+                    pulse_hz_min, pulse_hz_max = self.findpulses_range(field, s_sync)
+                    pulses = lddu.findpulses(
+                        field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
+                    )
+                    _, f_blank = self.fallback_levels(field, pulses)
+                    self.VsyncSerration.push_levels((f_blank - pulse_step_hz, f_blank))
+                    sync, blank = self.VsyncSerration.get_levels()
+                    ldd.logger.debug(
+                        "VBI EQ fail / fallback levels - Sync tip: %.02f kHz, Blanking(ire0): %.02f kHz" %
+                        (sync / 1e3, blank / 1e3)
+                    )
+                """
             else:
-                blank, sync = self.fieldState.getLevels()
+                sync, blank = self.fieldState.getLevels()
 
             vsync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
             # Do a level check
@@ -259,9 +283,10 @@ class Resync:
                     sync_reference, a_min=sync, a_max=None
                 )
                 field.data["video"]["demod"] = demod_data
-                sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
-                pulse_hz_min = field.rf.iretohz(sync_ire)
-                pulse_hz_max = field.rf.iretohz((sync_ire + blank_ire) / 2)
+                # sync_ire, blank_ire = field.rf.hztoire(sync), field.rf.hztoire(blank)
+                # pulse_hz_min = field.rf.iretohz(sync_ire - 10)
+                # pulse_hz_max = field.rf.iretohz(sync_ire / 2)
+                pulse_hz_min, pulse_hz_max = self.findpulses_range(field, sync)
             else:
                 ldd.logger.debug("Sync, level sanity check failed, using defaults.")
                 pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
