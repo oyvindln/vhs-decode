@@ -1876,7 +1876,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.Filters["Fdeemp_05"] = lddu.filtfft((db05, da05), self.blocklen)
         self.Filters["FVideo"] = self.Filters["Fvideo_lpf"] * self.Filters["Fdeemp"]
         SF = self.Filters
-        SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp_05"] * SF["F05"]
+        SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * SF["F05"]
 
         # SF["YNRHighPass"] = sps.butter(
         #     1,

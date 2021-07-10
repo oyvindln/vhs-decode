@@ -59,11 +59,11 @@ class VsyncSerration:
 
         # parameter, harmonic limit of the envelope search (with respect of vertical frequency)
         self.venv_limit = 5
-        # parameter, divisor of fh for limiting the bandwith of power_ratio_search()
+        # parameter, divisor of fh for limiting the bandwidth of power_ratio_search()
         self.serration_limit = 3
         # parameter, depth/window of the moving averaging
-        ma_depth = round(self.fv / 5) if self.fv < 60 else round(self.fv / 6)
-        ma_min_watermark = int(ma_depth / 2)
+        ma_depth = 2
+        ma_min_watermark = 1
 
         # used on vsync_envelope_simple() (search for video amplitude pinch)
         iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
@@ -115,8 +115,14 @@ class VsyncSerration:
         self.pid = getpid()
         self.found_serration = False
 
+    def getEQpulselen(self):
+        return self.eq_pulselen
+
+    def getLinelen(self):
+        return self.linelen
+
     # returns the measured sync level and blank level
-    def get_levels(self):
+    def getLevels(self):
         sync, blank = self.levels[0].pull(), self.levels[1].pull()
         return sync, blank
 
@@ -146,10 +152,8 @@ class VsyncSerration:
     # this may need tweak
     def vsync_envelope_simple(self, data):
         hi_part = np.clip(data, a_max=np.max(data), a_min=0)
-        lo_part = np.full_like(hi_part, np.min(data))
         hi_filtered = self.vsyncEnvFilter.filtfilt(hi_part)
-        lo_filtered = self.vsyncEnvFilter.filtfilt(lo_part)
-        return hi_filtered, np.median(lo_filtered)
+        return hi_filtered, np.min(data)
 
     # does vsync_envelope_simple in forward and reverse direction,
     # then assembles both halves as one result.
@@ -251,7 +255,7 @@ class VsyncSerration:
                 self.found_serration = True
                 self.push_levels(self.get_serration_sync_levels(serration))
                 if self.show_decoded:
-                    sync, blank = self.get_levels()
+                    sync, blank = self.getLevels()
                     marker = np.ones(len(serration)) * blank
                     dualplot_scope(
                         serration,
@@ -327,8 +331,8 @@ class VsyncSerration:
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (
                     self.levels[0].size(),
-                    self.get_levels()[0] / 1e3,
-                    self.get_levels()[1] / 1e3,
+                    self.getLevels()[0] / 1e3,
+                    self.getLevels()[1] / 1e3,
                 )
             )
         elif self.fieldcount % 10 == 0:
@@ -341,6 +345,6 @@ class VsyncSerration:
     # safe clips the bottom of the sync pulses, but not the picture area
     def safe_sync_clip(self, sync_ref, data):
         if self.hasLevels():
-            data = _safe_sync_clip(sync_ref, data, self.get_levels(), self.eq_pulselen)
+            data = _safe_sync_clip(sync_ref, data, self.getLevels(), self.eq_pulselen)
         return data
 
