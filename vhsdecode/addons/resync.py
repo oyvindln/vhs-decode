@@ -223,7 +223,8 @@ class Resync:
             # it starts finding the sync from the minima in 5 ire steps
             ire_step = 5
             min_sync = np.min(field.data["video"]["demod_05"])
-            while True:
+            retries = 30
+            while retries > 0:
                 pulse_hz_min, pulse_hz_max = self.findpulses_range(field, min_sync)
                 pulses = self.findpulses(
                     field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
@@ -232,6 +233,8 @@ class Resync:
                 if len(pulses) > 100:
                     break
                 min_sync = field.rf.iretohz(field.rf.hztoire(min_sync) + ire_step)
+                retries -= 1
+
             sync, blank = self.pulses_levels(field, pulses)
             # chewed tape case
             if sync is None or blank is None:
