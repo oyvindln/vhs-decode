@@ -233,7 +233,11 @@ class Resync:
                     break
                 min_sync = field.rf.iretohz(field.rf.hztoire(min_sync) + ire_step)
             sync, blank = self.pulses_levels(field, pulses)
+            # chewed tape case
+            if sync is None or blank is None:
+                return
 
+        # the tape chewing test passed, then it should find sync
         pulse_hz_min, pulse_hz_max = self.findpulses_range(field, sync)
         pulses = self.findpulses(
             field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
@@ -319,8 +323,7 @@ class Resync:
                 field.data["video"]["demod"] = demod_data - new_sync + vsync_hz
 
         # utils.plot_scope(field.data["video"]["demod_05"])
-        pulses = self.findpulses(
+        return self.findpulses(
             field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
         )
 
-        return pulses
