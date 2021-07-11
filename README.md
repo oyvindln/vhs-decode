@@ -1,4 +1,4 @@
-![vhs-decode logo](docs/vhs-decode logo 256px.png)
+![vhs-decode logo](docs/vhs-decode_logo_256px.png)
 
 # VHS-Decode
 
