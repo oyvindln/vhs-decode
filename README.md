@@ -1,4 +1,4 @@
-![vhs-decode logo](https://github.com/Zcooger/ld-decode/blob/017907c51f274e5186d20ae8ffff9ea6cc6fd62c/docs/vhs-decode%20logo%20256px.png)
+![vhs-decode logo](docs/vhs-decode logo 256px.png)
 
 # VHS-Decode
 
@@ -101,7 +101,7 @@ Useful for recovering decoding after a crash, or by limiting process time by pro
 
 ```-t```: defines the number of processing threads to use during demodulation.
 By default, the main VHS-Decode script allocates only one thread, though the gen_chroma_vid scripts allocate two.
-The ```make``` rule of thumb of "number of logical processors, minus one" generally applies here,
+The ```make``` rule of thumb of "number of logical processors, plus one" generally applies here,
 though it mainly depends on the amount of memory available to the decoder.
 
 # Debug features
