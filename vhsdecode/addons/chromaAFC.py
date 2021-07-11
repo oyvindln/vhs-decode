@@ -347,26 +347,6 @@ class ChromaAFC:
             carrier_freq = self.fineTune(peak_freq, self.fh) if self.tape_format == 'UMATIC' else \
                 self.fineTune(peak_freq, fh_4)
 
-            """
-            print(
-                peak_freq,
-                self.meas_stack.current(),
-                peak_freq - self.meas_stack.current() if self.meas_stack.has_values() else None,
-                self.color_under - peak_freq,
-                self.fh / 4,
-                carrier_freq / self.fh,
-                carrier_freq % self.fh,
-                self.color_under - carrier_freq
-            )
-            """
-            """
-            # print(self.color_under, (self.color_under - peak_freq))
-            carrier_freq = \
-                self.selectWithSpread(peak_freq, spread=self.fh / 2) \
-                if self.tape_format == 'UMATIC' \
-                else self.selectWithSpread(peak_freq, spread=self.fh / 8)
-            # print(self.color_under, (self.color_under - carrier_freq))
-            """
             where_selected = np.where(sample_freq == carrier_freq)[0]
             self.cc_phase = phase[where_selected] if len(phase[where_selected]) > 0 else 0
 

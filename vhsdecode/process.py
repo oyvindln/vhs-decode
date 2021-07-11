@@ -1,4 +1,6 @@
 import math
+import os
+import time
 import numpy as np
 import scipy.signal as sps
 import copy
@@ -1995,9 +1997,9 @@ class VHSRFDecode(ldd.RFDecode):
 
         return result
 
-    def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
+    def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False):
         rv = {}
-
+        demod_start_time = time.time()
         if fftdata is not None:
             indata_fft = fftdata
         elif data is not None:
@@ -2095,7 +2097,9 @@ class VHSRFDecode(ldd.RFDecode):
             self.blocklen,
             self.Filters["FVideoNotch"],
             self.notch,
+            # if cafc is enabled, this filtering will be done after TBC
         ) if not self.cafc else data[: self.blocklen]
+
 
         if False:
             import matplotlib.pyplot as plt
@@ -2137,5 +2141,14 @@ class VHSRFDecode(ldd.RFDecode):
         rv["video"] = (
             video_out[self.blockcut : -self.blockcut_end] if cut else video_out
         )
+
+        demod_end_time = time.time()
+        if thread_benchmark:
+            ldd.logger.debug(
+                "Demod thread %d, work done in %.02f msec" % (
+                    os.getpid(),
+                    (demod_end_time - demod_start_time) * 1e3
+                )
+            )
 
         return rv
