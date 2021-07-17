@@ -366,9 +366,7 @@ def decode_chroma_umatic(field):
     # Use field number based on raw data position
     # This may not be 100% accurate, so we may want to add some more logic to
     # make sure we re-check the phase occasionally.
-    raw_loc = field.rf.decoder.readloc / field.rf.decoder.bytes_per_field
-
-    check_increment_field_no(field.rf)
+    raw_loc = check_increment_field_no(field.rf)
 
     uphet = process_chroma(field, None, True, field.rf.options.disable_comb, disable_tracking_cafc=False)
     field.uphet_temp = uphet
@@ -406,7 +404,7 @@ class LineInfo:
 
 def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
     """Sum the burst areas of two and two lines together, and return the mean of these sums."""
-    IGNORED_LINES = 24
+    IGNORED_LINES = 16
 
     burst_sums = []
 
@@ -438,7 +436,7 @@ def detect_burst_pal(
     # Ignore the first and last 16 lines of the field.
     # first ones contain sync and often doesn't have color burst,
     # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 24
+    IGNORED_LINES = 16
     line_data = []
     burst_norm = np.full(lines, np.nan)
 
@@ -548,7 +546,7 @@ def detect_burst_ntsc(
     # Ignore the first and last 16 lines of the field.
     # first ones contain sync and often doesn't have color burst,
     # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 24
+    IGNORED_LINES = 16
     odd_i_acc = 0
     even_i_acc = 0
 
@@ -830,9 +828,7 @@ def dropout_errlist_to_tbc(field, errlist):
 # def phase_shift(data, angle):
 #     return np.fft.irfft(np.fft.rfft(data) * np.exp(1.0j * angle), len(data)).real
 
-# Use field number based on raw data position
-# This may not be 100% accurate, so we may want to add some more logic to
-# make sure we re-check the phase occasionally.
+
 def check_increment_field_no(rf):
     """Increment field number if the raw data location moved significantly since the last call"""
     raw_loc = rf.decoder.readloc / rf.decoder.bytes_per_field
