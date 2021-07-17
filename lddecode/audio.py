@@ -9,10 +9,12 @@ import sys
 import threading
 import time
 
+from functools import partial
 from multiprocessing import Process, Queue, JoinableQueue, Pipe
 
 # standard numeric/scientific libraries
 import numpy as np
+from numpy.lib.function_base import _parse_gufunc_signature
 import scipy.signal as sps
 import scipy.interpolate as spi
 
@@ -59,6 +61,173 @@ except ImportError:
     # If not running Anaconda, we don't care that mkl doesn't exist.
     pass
 
+# globals
+
+blocklen = 32768
+drop_begin = 4096-512
+drop_end = 512
+blockskip = drop_begin + drop_end
+
+def audio_bandpass_butter(center, closerange = 125000, longrange = 180000):
+    ''' Returns filter coefficients for first stage per-channel filtering '''
+    freqs_inner = [(center - closerange) / freq_hz_half, (center + closerange) / freq_hz_half]
+    freqs_outer = [(center - longrange) / freq_hz_half, (center + longrange) / freq_hz_half]
+    
+    N, Wn = sps.buttord(freqs_inner, freqs_outer, 1, 15)
+
+    return sps.butter(N, Wn, btype='bandpass')
+
+class AudioRF:
+    def __init__(self, freq, center_freq):
+        self.center_freq = center_freq
+
+        # Set up SysParams to hand off to needed sub-tasks
+        SysParams = core.SysParams_PAL if args.vid_standard == 'PAL' else core.SysParams_NTSC
+
+        self.freq = freq
+        self.freq_hz = self.freq * 1.0e6
+        self.freq_hz_half = self.freq_hz / 2
+
+        SysParams['audio_filterwidth'] = 150000
+
+        apass = SysParams['audio_filterwidth']
+        afilt_len = 512
+
+        # Compute stage 1 filters
+
+        audio1_fir = utils.filtfft([sps.firwin(afilt_len, [(self.center_freq-apass)/self.freq_hz_half, (self.center_freq+apass)/self.freq_hz_half], pass_zero=False), 1.0], blocklen)
+        lowbin, nbins, a1_freq = utils.fft_determine_slices(self.center_freq, 200000, self.freq_hz, blocklen)
+        hilbert = utils.build_hilbert(nbins)
+
+        self.a1_freq = a1_freq
+
+        # Add the demodulated output to this to get actual freq
+        self.low_freq = self.freq_hz * (lowbin / blocklen)
+        
+        self.slicer = lambda x: utils.fft_do_slice(x, lowbin, nbins, blocklen)
+        self.filt1 = self.slicer(audio1_fir) * hilbert
+        self.filt1f = audio1_fir * utils.build_hilbert(blocklen)
+        
+        self.audio1_buffer = utils.StridedCollector(blocklen, blockskip)
+        self.audio1_clip = blockskip // (blocklen // nbins)
+
+        # Compute stage 2 audio filters: 20k-ish LPF and deemp (center_freq independent)
+
+        N, Wn = sps.buttord(20000 / (a1_freq / 2), 24000 / (a1_freq / 2), 1, 9)
+        audio2_lpf = utils.filtfft(sps.butter(N, Wn), blocklen)
+        # 75e-6 is 75usec/2133khz (matching American FM emphasis) and 5.3e-6 is approx
+        # a 30khz break frequency
+        audio2_deemp = utils.filtfft(utils.emphasis_iir(5.3e-6, 75e-6, a1_freq), blocklen)
+
+        self.audio2_decimation = 4
+        self.audio2_filter = audio2_lpf * audio2_deemp
+
+    def process_stage1(self, fft_in):
+        ''' Apply first state audio filters '''
+        a1 = npfft.ifft(self.slicer(fft_in) * self.filt1)
+        a1u = utils.unwrap_hilbert(a1, self.a1_freq)
+        a1u = a1u[self.audio1_clip:]
+
+        return self.audio1_buffer.add(a1u)
+
+    def process_stage2(self):
+        ''' Applies second stage audio filters '''
+
+        if not self.audio1_buffer.have_block():
+            return None
+
+        a2_in = self.audio1_buffer.get_block()
+        a2_fft = npfft.fft(a2_in)
+        a2 = npfft.ifft(a2_fft * self.audio2_filter)
+
+        filtered = utils.sqsum(a2[drop_begin:-drop_end])
+
+        return filtered[::self.audio2_decimation]
+
+class AudioDecoder:
+
+    def __init__(self, args):
+        global blocklen, blockskip
+
+        self.out_fd = None
+        self.efm_fd = None
+
+        # Have input_buffer store 8-bit bytes, then convert afterwards
+        self.input_buffer = utils.StridedCollector(blocklen*2, blockskip*2)
+
+        # Set up SysParams to hand off to needed sub-tasks
+        SysParams = core.SysParams_PAL if args.vid_standard == 'PAL' else core.SysParams_NTSC
+
+        self.freq = args.freq
+        self.freq_hz = self.freq * 1.0e6
+        self.efm_filter = efm_pll.computeefmfilter(self.freq_hz, blocklen)
+        #print(self.freq_hz, len(self.efm_filter), self.efm_filter, file=sys.stderr)
+
+        self.aa_channels = []
+
+        if True:
+            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_lfreq']))
+            
+        if True:
+            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_rfreq']))
+
+
+    def process_input_buffer(self):
+        while self.input_buffer.have_block():
+            buf = self.input_buffer.get_block()
+            b = buf.tobytes()
+            s16 = np.frombuffer(b, 'int16', len(b)//2)
+
+            fft_in = npfft.fft(s16)
+
+            if not args.daa:
+
+                outputs = []
+
+                for channel in self.aa_channels:
+                    if channel.process_stage1(fft_in):
+                        # if True, we have enough data to process stage2
+                        outputs.append(channel.process_stage2())
+
+                if len(outputs) == 0:
+                    pass
+                elif (len(outputs) != len(self.aa_channels)):
+                    print("ERROR: mismatch in # of processed channels")
+                    sys.exit(-1)
+                else:
+                    ofloat = []
+
+                    for output, channel in zip(outputs, self.aa_channels):
+                        o = output + channel.low_freq - channel.center_freq
+                        #print(np.mean(o), np.std(o), channel.low_freq, channel.center_freq)
+                        ofloat.append(np.clip((o / 150000), -16, 16).astype(np.float32))
+                    
+                    if len(outputs) == 2:
+                        #print(len(outputs), np.mean(o32[0]), np.std(o32[0]), np.std(o32[1]))
+                        
+                        outdata = np.zeros(len(ofloat[0]) * 2, dtype=np.float32)
+                        outdata[0::2] = ofloat[0]
+                        outdata[1::2] = ofloat[1]
+                    else:
+                        outdata = np.array(ofloat[0], dtype=np.float32)
+                        
+                    if self.out_fd is not None:
+                        self.out_fd.write(outdata)
+
+            if efm_decode:
+                filtered_efm = npfft.ifft(fft_in * self.efm_filter)[drop_begin:-drop_end]
+                filtered_efm2 = np.int16(np.clip(filtered_efm.real, -32768, 32767))
+
+                if args.prefm:
+                    rawefm_fd.write(filtered_efm2.tobytes())
+
+                efm_out = efm_pll_object.process(filtered_efm2)
+                #print(efm_out.shape, max(filtered_efm.imag))
+                
+                if self.efm_fd is not None:
+                    #print(len(buf), len(filtered_efm2), len(efm_out), file=sys.stderr)
+                    efm_fd.write(efm_out.tobytes())
+
 # Command line front end code
 
 def handle_options(argstring = sys.argv):
@@ -74,7 +243,7 @@ def handle_options(argstring = sys.argv):
 
     parser.add_argument("-o", dest="outfile", default='test', type=str, help="base name for destination files")
     
-    parser.add_argument("-f", "--freq", dest='freq', default = "40.0mhz", type=str, help="Input frequency")
+    parser.add_argument("-f", "--freq", dest='freq', default = "40.0mhz", type=utils.parse_frequency, help="Input frequency")
 
     parser.add_argument(
         "--disable_analog_audio",
@@ -128,7 +297,6 @@ def handle_options(argstring = sys.argv):
 testmode = False
 if testmode:
     args = handle_options(['--NTSC', '-i', '../ggvsweep1.tbc.r16'])
-    #args = handle_options(['--NTSC', '-i', '../ggv_1khz_4p.tbc.r16'])
 else:
     args = handle_options(sys.argv)
 
@@ -155,116 +323,14 @@ else:
         efm_pll_object = efm_pll.EFM_PLL()
         efm_fd = open(args.outfile + '.efm', 'wb')
 
+ad = AudioDecoder(args)
+
+# FIXME
+ad.out_fd = out_fd
+ad.efm_fd = efm_fd
+
 # Common top-level code
 logger = utils_logging.init_logging(None)
-
-# Set up SysParams to hand off to needed sub-tasks
-SysParams = core.SysParams_PAL if args.vid_standard == 'PAL' else core.SysParams_NTSC
-
-freq = utils.parse_frequency(args.freq)
-SysParams['freq'] = freq
-SysParams['freq_hz'] = freq * 1.0e6
-SysParams['freq_hz'] = SysParams['freq_hz'] / 2
-
-SysParams['audio_filterwidth'] = 150000
-
-SysParams['blocklen'] = 65536
-# We need to drop the beginning (and end) of each block
-SysParams['blocklen_dropb'] = 4096-512
-SysParams['blocklen_drope'] = 512
-
-from functools import partial
-
-SP = SysParams
-
-blocklen = SysParams['blocklen']
-blockskip = SysParams['blocklen_dropb'] + SysParams['blocklen_drope']
-dropb = SysParams['blocklen_dropb']
-drope = SysParams['blocklen_drope']
-
-apass = SysParams['audio_filterwidth']
-afilt_len = 512
-
-freq = utils.parse_frequency(args.freq)
-freq_hz = (freq * 1.0e6)
-freq_hz_half = freq_hz / 2
-
-efm_filter = efm_pll.computeefmfilter(freq_hz, blocklen)
-
-def audio_bandpass_butter(center, closerange = 125000, longrange = 180000):
-    ''' Returns filter coefficients for first stage per-channel filtering '''
-    freqs_inner = [(center - closerange) / freq_hz_half, (center + closerange) / freq_hz_half]
-    freqs_outer = [(center - longrange) / freq_hz_half, (center + longrange) / freq_hz_half]
-    
-    N, Wn = sps.buttord(freqs_inner, freqs_outer, 1, 15)
-
-    return sps.butter(N, Wn, btype='bandpass')
-
-class AudioRF:
-    def __init__(self, center_freq):
-        self.center_freq = center_freq
-
-        # Compute stage 1 filters
-
-        audio1_fir = utils.filtfft([sps.firwin(afilt_len, [(self.center_freq-apass)/freq_hz_half, (self.center_freq+apass)/freq_hz_half], pass_zero=False), 1.0], blocklen)
-        lowbin, nbins, a1_freq = utils.fft_determine_slices(self.center_freq, 200000, freq_hz, blocklen)
-        hilbert = utils.build_hilbert(nbins)
-
-        self.a1_freq = a1_freq
-
-        # Add the demodulated output to this to get actual freq
-        self.low_freq = freq_hz * (lowbin / blocklen)
-        
-        self.slicer = lambda x: utils.fft_do_slice(x, lowbin, nbins, blocklen)
-        self.filt1 = self.slicer(audio1_fir) * hilbert
-        self.filt1f = audio1_fir * utils.build_hilbert(blocklen)
-        
-        self.audio1_buffer = utils.StridedCollector(blocklen, blockskip)
-        self.audio1_clip = blockskip // (blocklen // nbins)
-
-        # Compute stage 2 audio filters: 20k-ish LPF and deemp (center_freq independent)
-
-        N, Wn = sps.buttord(20000 / (a1_freq / 2), 24000 / (a1_freq / 2), 1, 9)
-        audio2_lpf = utils.filtfft(sps.butter(N, Wn), blocklen)
-        # 75e-6 is 75usec/2133khz (matching American FM emphasis) and 5.3e-6 is approx
-        # a 30khz break frequency
-        audio2_deemp = utils.filtfft(utils.emphasis_iir(5.3e-6, 75e-6, a1_freq), blocklen)
-
-        self.audio2_decimation = 4
-        self.audio2_filter = audio2_lpf * audio2_deemp
-
-    def process_stage1(self, fft_in):
-        ''' Apply first state audio filters '''
-        a1 = npfft.ifft(self.slicer(fft_in) * self.filt1)
-        a1u = utils.unwrap_hilbert(a1, self.a1_freq)
-        a1u = a1u[self.audio1_clip:]
-
-        return self.audio1_buffer.add(a1u)
-
-    def process_stage2(self):
-        ''' Applies second stage audio filters '''
-
-        if not self.audio1_buffer.have_block():
-            return None
-
-        a2_in = self.audio1_buffer.get_block()
-        a2_fft = npfft.fft(a2_in)
-        a2 = npfft.ifft(a2_fft * self.audio2_filter)
-
-        filtered = utils.sqsum(a2[dropb:-drope])
-
-        return filtered[::self.audio2_decimation]
-
-aa_channels = []
-
-if True:
-    aa_channels.append(AudioRF(SP['audio_lfreq']))
-    
-if True:
-    aa_channels.append(AudioRF(SP['audio_rfreq']))
-
-# Have input_buffer store 8-bit bytes, then convert afterwards
-input_buffer = utils.StridedCollector(blocklen*2, blockskip*2)
 
 inputs = []
 output = []
@@ -281,57 +347,7 @@ while True:
         
     # store the input buffer as a raw 8-bit data, then repack into 16-bit
     # (this allows reading of an odd # of bytes)
-    input_buffer.add(np.frombuffer(inbuf, 'int8', len(inbuf)))
-    
-    while input_buffer.have_block():
-        buf = input_buffer.get_block()
-        b = buf.tobytes()
-        s16 = np.frombuffer(b, 'int16', len(b)//2)
-
-        fft_in = npfft.fft(s16)
-
-        if not args.daa:
-
-            outputs = []
-
-            for channel in aa_channels:
-                if channel.process_stage1(fft_in):
-                    # if True, we have enough data to process stage2
-                    outputs.append(channel.process_stage2())
+    ad.input_buffer.add(np.frombuffer(inbuf, 'int8', len(inbuf)))
+    ad.process_input_buffer()
 
 
-            if len(outputs) == 0:
-                continue
-            elif (len(outputs) != len(aa_channels)):
-                print("ERROR: mismatch in # of processed channels")
-                sys.exit(-1)
-            else:
-                ofloat = []
-
-                for output, channel in zip(outputs, aa_channels):
-                    o = output + channel.low_freq - channel.center_freq
-                    #print(np.mean(o), np.std(o))
-                    ofloat.append(np.clip((o / 150000), -16, 16).astype(np.float32))
-                
-                if len(outputs) == 2:
-                    #print(len(outputs), np.mean(o32[0]), np.std(o32[0]), np.std(o32[1]))
-                    
-                    outdata = np.zeros(len(ofloat[0]) * 2, dtype=np.float32)
-                    outdata[0::2] = ofloat[0]
-                    outdata[1::2] = ofloat[1]
-                else:
-                    outdata = np.array(ofloat[0], dtype=np.float32)
-                    
-                out_fd.write(outdata)
-
-        if efm_decode:
-            filtered_efm = npfft.ifft(fft_in * efm_filter)[dropb:-drope]
-            filtered_efm2 = np.int16(np.clip(filtered_efm.real, -32768, 32767))
-
-            if args.prefm:
-                rawefm_fd.write(filtered_efm2.tobytes())
-
-            efm_out = efm_pll_object.process(filtered_efm2)
-            #print(efm_out.shape, max(filtered_efm.imag))
-            efm_fd.write(efm_out.tobytes())
-            

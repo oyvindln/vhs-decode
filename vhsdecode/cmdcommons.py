@@ -209,5 +209,7 @@ def get_rf_options(args):
 def get_extra_options(args):
     extra_options = {
         "useAGC": args.AGC and not args.noAGC,
+        # Only used for ld, but could maybe be used for vhs too.
+        "deemp_coeff": (0, 0)
     }
     return extra_options

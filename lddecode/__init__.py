@@ -2,6 +2,7 @@
 # Initialisation for the lddecode package.
 
 __all__ = [
+    "audio",
     "commpy_filters",
     "core",
     "efm_pll",
