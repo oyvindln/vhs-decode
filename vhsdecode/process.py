@@ -245,7 +245,7 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
                 len(chroma),
                 field.rf.Filters["FVideoNotch"],
                 field.rf.notch,
-                move=0
+                move=field.rf.chroma_shift
             )
 
             if not disable_tracking_cafc:
@@ -1576,6 +1576,12 @@ class VHSDecode(ldd.LDdecode):
         return f
 
 
+def computeCShift(cshift, fh, samp_rate):
+    from vhsdecode.addons.vsyncserration import f_to_samples
+    linelen = f_to_samples(samp_rate, fh)
+    return round(linelen * cshift)
+
+
 class VHSRFDecode(ldd.RFDecode):
     def __init__(
         self,
@@ -1968,6 +1974,14 @@ class VHSRFDecode(ldd.RFDecode):
             StackableMA(window_average=self.SysParams["FPS"] / 2)
         self.resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
 
+        fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
+        samp_rate = self.chromaAFC.getSampleRate() if self.cafc else self.freq_hz
+        self.chroma_shift = computeCShift(
+            rf_options.get("chroma_shift", 0.0),
+            fh,
+            samp_rate
+        )
+
     def computedelays(self, mtf_level=0):
         """Override computedelays
         It's normally used for dropout compensation, but the dropout compensation implementation
@@ -2094,6 +2108,7 @@ class VHSRFDecode(ldd.RFDecode):
             self.blocklen,
             self.Filters["FVideoNotch"],
             self.notch,
+            10 + self.chroma_shift
             # if cafc is enabled, this filtering will be done after TBC
         ) if not self.cafc else data[: self.blocklen]
 

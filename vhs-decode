@@ -149,6 +149,14 @@ parser.add_argument(
     default=False,
     help="Enables sync clipping",
 )
+parser.add_argument(
+    "-cshift",
+    "--chroma_shift",
+    metavar="chroma_shift",
+    type=float,
+    default=0.0,
+    help="Multiplier of a line to move(shift) the chroma signal relative to luminance"
+)
 
 args = parser.parse_args()
 
@@ -180,6 +188,7 @@ rf_options["disable_comb"] = args.disable_comb
 rf_options["nldeemp"] = args.nldeemp
 rf_options["cafc"] = args.cafc
 rf_options["sync_clip"] = args.sync_clip
+rf_options["chroma_shift"] = args.chroma_shift
 
 extra_options = get_extra_options(args)
 
