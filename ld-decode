@@ -18,6 +18,7 @@ from multiprocessing import Process, Pool, Queue, JoinableQueue, Pipe
 import threading
 import queue
 
+import lddecode.audio as audio
 from lddecode.core import *
 from lddecode.utils import *
 from lddecode.utils_logging import init_logging
@@ -268,33 +269,17 @@ if args.pal and (args.ntsc or args.ntscj):
 audio_pipe = None
 
 if args.newaudio:
-    spath = os.path.dirname(os.path.realpath(__file__))
-    cmd = [os.path.join(spath, 'lddecode', 'audio.py'), 
-           '-i', '-',
-           '-o', outname + '-n']
-
-    if args.daa:
-        cmd.append('--daa')
-
-    if args.pal:
-        cmd.append('--PAL')
-
-    if args.prefm:
-        cmd.append('--preEFM')
-
-    if args.noefm:
-        cmd.append('--noEFM')
-
     if False: # Flip this around when it becomes the default, remove when only
         args.daa = True
         args.noefm = True
         args.prefm = False
 
-    audio_process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    if audio_process is None:
-        print("ERROR: unable to open audio subprocess")
-
-    audio_pipe = audio_process.stdin
+    audio_pipe = Pipe()
+    audio_process = Process(
+        target=audio.startprocess, daemon=True, args=(audio_pipe[1], args)
+    )
+    audio_process.start()
+    audio_pipe = audio_pipe[0]
 
 extra_options = {
     "useAGC": not args.noAGC,
@@ -391,7 +376,6 @@ def cleanup():
     jsondumper.put(None)
     if audio_pipe is not None:
         audio_pipe.close()
-
 
 while not done and ldd.fields_written < (req_frames * 2):
     try:

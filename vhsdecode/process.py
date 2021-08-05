@@ -207,10 +207,7 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
 
 
 def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
-    out_chroma = utils.filter_simple(
-        data[: blocklen],
-        filter
-    )
+    out_chroma = utils.filter_simple(data[:blocklen], filter)
 
     if do_notch is not None and do_notch:
         out_chroma = sps.filtfilt(
@@ -224,15 +221,22 @@ def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
     # TODO: Not sure if we need this after hilbert filter change, needs check.
     out_chroma = np.roll(out_chroma, move)
     # crude DC offset removal
-    out_chroma = out_chroma - np.mean(
-        out_chroma
-    )
+    out_chroma = out_chroma - np.mean(out_chroma)
     return out_chroma
 
 
-def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, disable_tracking_cafc=False):
+def process_chroma(
+    field,
+    track_phase,
+    disable_deemph=False,
+    disable_comb=False,
+    disable_tracking_cafc=False,
+):
     # Run TBC/downscale on chroma (if new field, else uses cache)
-    if field.rf.field_number != field.rf.chroma_last_field or field.rf.chroma_last_field == -1:
+    if (
+        field.rf.field_number != field.rf.chroma_last_field
+        or field.rf.chroma_last_field == -1
+    ):
         chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
         field.rf.chroma_last_field = field.rf.field_number
 
@@ -245,21 +249,19 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
                 len(chroma),
                 field.rf.Filters["FVideoNotch"],
                 field.rf.notch,
-                move=field.rf.chroma_shift
+                move=0,
             )
 
             if not disable_tracking_cafc:
                 spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
                 ldd.logger.debug(
-                    "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
-                    (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
+                    "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg"
+                    % (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
                 )
 
         field.rf.chroma_tbc_buffer = chroma
     else:
         chroma = field.rf.chroma_tbc_buffer
-
-
 
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
@@ -302,7 +304,9 @@ def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False,
         lineoffset,
         linesout,
         outwidth,
-        field.rf.chromaAFC.getChromaHet() if (field.rf.cafc and not disable_tracking_cafc) else field.rf.chroma_heterodyne,
+        field.rf.chromaAFC.getChromaHet()
+        if (field.rf.cafc and not disable_tracking_cafc)
+        else field.rf.chroma_heterodyne,
         phase_rotation,
         starting_phase,
     )
@@ -354,7 +358,12 @@ def decode_chroma_vhs(field):
         rf.track_phase = field.try_detect_track()
         rf.needs_detect = False
 
-    uphet = process_chroma(field, rf.track_phase, disable_comb=rf.options.disable_comb, disable_tracking_cafc=False)
+    uphet = process_chroma(
+        field,
+        rf.track_phase,
+        disable_comb=rf.options.disable_comb,
+        disable_tracking_cafc=False,
+    )
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     rf.last_raw_loc = raw_loc
@@ -368,7 +377,9 @@ def decode_chroma_umatic(field):
     # make sure we re-check the phase occasionally.
     raw_loc = check_increment_field_no(field.rf)
 
-    uphet = process_chroma(field, None, True, field.rf.options.disable_comb, disable_tracking_cafc=False)
+    uphet = process_chroma(
+        field, None, True, field.rf.options.disable_comb, disable_tracking_cafc=False
+    )
     field.uphet_temp = uphet
     # Store previous raw location so we can detect if we moved in the next call.
     field.rf.last_raw_loc = raw_loc
@@ -894,14 +905,10 @@ def try_detect_track_vhs_pal(field):
     phase0_mean, phase1_mean = phase[0][1], phase[1][1]
     assumed_phase = int(phase0_mean < phase1_mean)
 
-    log_track_phase(
-        field.rf.track_phase,
-        phase0_mean,
-        phase1_mean,
-        assumed_phase
-    )
+    log_track_phase(field.rf.track_phase, phase0_mean, phase1_mean, assumed_phase)
 
     return assumed_phase
+
 
 def try_detect_track_vhs_ntsc(field):
     """Try to detect which track the current field was read from.
@@ -935,16 +942,70 @@ def try_detect_track_vhs_ntsc(field):
     assumed_phase = int(burst_mean_sum_1 < burst_mean_sum_0)
 
     log_track_phase(
-        field.rf.track_phase,
-        burst_mean_sum_0,
-        burst_mean_sum_1,
-        assumed_phase
+        field.rf.track_phase, burst_mean_sum_0, burst_mean_sum_1, assumed_phase
     )
 
     return assumed_phase
 
 
 class FieldShared:
+    def refinepulses(self):
+        LT = self.get_timings()
+
+        HSYNC, EQPL1, VSYNC, EQPL2 = range(4)
+
+        i = 0
+        valid_pulses = []
+        num_vblanks = 0
+
+        Pulse = namedtuple("Pulse", "start len")
+
+        while i < len(self.rawpulses):
+            curpulse = self.rawpulses[i]
+            if inrange(curpulse.len, *LT["hsync"]):
+                good = (
+                    self.pulse_qualitycheck(valid_pulses[-1], (0, curpulse))
+                    if len(valid_pulses)
+                    else False
+                )
+                valid_pulses.append((HSYNC, curpulse, good))
+                i += 1
+            elif inrange(curpulse.len, LT["hsync"][1], LT["hsync"][1] * 3):
+                # If the pulse is longer than expected, we could have ended up detecting the back
+                # porch as sync.
+                # try to move a bit lower to see if we hit a hsync.
+                data = self.data["video"]["demod_05"][curpulse.start:curpulse.start + curpulse.len]
+                threshold = self.rf.iretohz(self.rf.hztoire(data[0]) - 10)
+                pulses = self.rf.resync.findpulses(data, 0, threshold)
+                if len(pulses):
+                    newpulse = Pulse(curpulse.start + pulses[0].start, pulses[0].len)
+                    self.rawpulses[i] = newpulse
+                    curpulse = newpulse
+                else:
+                    spulse = (HSYNC, self.rawpulses[i], False)
+                    i += 1
+            elif (
+                i > 2
+                and inrange(self.rawpulses[i].len, *LT["eq"])
+                and (len(valid_pulses) and valid_pulses[-1][0] == HSYNC)
+            ):
+                # print(i, self.rawpulses[i])
+                done, vblank_pulses = self.run_vblank_state_machine(
+                    self.rawpulses[i - 2 : i + 24], LT
+                )
+                if done:
+                    [valid_pulses.append(p) for p in vblank_pulses[2:]]
+                    i += len(vblank_pulses) - 2
+                    num_vblanks += 1
+                else:
+                    spulse = (HSYNC, self.rawpulses[i], False)
+                    i += 1
+            else:
+                spulse = (HSYNC, self.rawpulses[i], False)
+                i += 1
+
+        return valid_pulses  # , num_vblanks
+
     def compute_linelocs(self):
         self.rawpulses = self.getpulses()
         if self.rawpulses is None or len(self.rawpulses) == 0:
@@ -952,6 +1013,27 @@ class FieldShared:
             return None, None, int(self.rf.freq_hz / 10)
 
         self.validpulses = validpulses = self.refinepulses()
+
+        # if len(validpulses) < 0:
+        #     import matplotlib.pyplot as plt
+        #     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        #     ax1.plot(self.data["video"]["demod_05"])
+        #     #ax1.axhline(self.pulse_hz_min_last, color="#FF0000")
+        #     #ax1.axhline(self.pulse_hz_max_last, color="#00FF00")
+
+        #     for raw_pulse in self.rawpulses:
+        #         ax1.axvline(raw_pulse.start, color="#910000")
+        #         ax1.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
+
+        #     for valid_pulse in validpulses:
+        #         ax1.axvline(valid_pulse[1][0], color="#00FF00")
+        #         ax1.axvline(valid_pulse[1][0] + valid_pulse[1][1], color="#009900")
+
+        #     ax2.plot(np.diff(self.data["video"]["demod_05"]))
+
+        #     #ax1.axhline(pulse_hz_min, color="#FF0000")
+        #     #ax1.axhline(pulse_hz_max, color="#00FF00")
+        #     plt.show()
 
         line0loc, lastlineloc, self.isFirstField = self.getLine0(validpulses)
         self.linecount = 263 if self.isFirstField else 262
@@ -1576,12 +1658,6 @@ class VHSDecode(ldd.LDdecode):
         return f
 
 
-def computeCShift(cshift, fh, samp_rate):
-    from vhsdecode.addons.vsyncserration import f_to_samples
-    linelen = f_to_samples(samp_rate, fh)
-    return round(linelen * cshift)
-
-
 class VHSRFDecode(ldd.RFDecode):
     def __init__(
         self,
@@ -1598,7 +1674,7 @@ class VHSRFDecode(ldd.RFDecode):
             parent_system(system),
             decode_analog_audio=False,
             has_analog_audio=False,
-            extra_options=extra_options
+            extra_options=extra_options,
         )
 
         # No idea if this is a common pythonic way to accomplish it but this gives us values that
@@ -1677,7 +1753,6 @@ class VHSRFDecode(ldd.RFDecode):
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_UMATIC)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_UMATIC)
             elif tape_format == "SVHS":
-                ldd.logger.warning("NTSC SVHS has not been tested yet!")
                 self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_SVHS)
                 self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_SVHS)
             else:
@@ -1701,8 +1776,6 @@ class VHSRFDecode(ldd.RFDecode):
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
-
-        cc = self.DecoderParams["color_under_carrier"] / 1000000
 
         DP = self.DecoderParams
 
@@ -1771,7 +1844,6 @@ class VHSRFDecode(ldd.RFDecode):
         db, da = FMDeEmphasisB(self.freq_hz, DP["deemph_gain"], DP["deemph_mid"]).get()
         # Sync de-emphasis
         db05, da05 = FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
-
 
         #        da3, db3 = gen_high_shelf(260000 / 1.0e6, 14, 1 / 2, inputfreq)
 
@@ -1915,10 +1987,10 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.chromaAFC = ChromaAFC(
             self.freq_hz,
-            DP["chroma_bpf_upper"] / DP['color_under_carrier'],
+            DP["chroma_bpf_upper"] / DP["color_under_carrier"],
             self.SysParams,
-            self.DecoderParams['color_under_carrier'],
-            tape_format=tape_format
+            self.DecoderParams["color_under_carrier"],
+            tape_format=tape_format,
         )
 
         self.Filters["FVideoBurst"] = self.chromaAFC.get_chroma_bandpass()
@@ -1965,22 +2037,12 @@ class VHSRFDecode(ldd.RFDecode):
                 # 1: utils.FiltersClass(iir_eq_hiband[0], iir_eq_hiband[1], self.freq_hz),
             }
 
-        self.chromaTrap = (
-            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
-        )
+        self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
-        self.AGClevels = \
-            StackableMA(window_average=self.SysParams["FPS"] / 2), \
-            StackableMA(window_average=self.SysParams["FPS"] / 2)
+        self.AGClevels = StackableMA(
+            window_average=self.SysParams["FPS"] / 2
+        ), StackableMA(window_average=self.SysParams["FPS"] / 2)
         self.resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
-
-        fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
-        samp_rate = self.chromaAFC.getSampleRate() if self.cafc else self.freq_hz
-        self.chroma_shift = computeCShift(
-            rf_options.get("chroma_shift", 0.0),
-            fh,
-            samp_rate
-        )
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -2008,7 +2070,9 @@ class VHSRFDecode(ldd.RFDecode):
 
         return result
 
-    def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False):
+    def demodblock(
+        self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False
+    ):
         rv = {}
         demod_start_time = time.time()
         if fftdata is not None:
@@ -2102,16 +2166,18 @@ class VHSRFDecode(ldd.RFDecode):
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
         # Filter out the color-under signal from the raw data.
-        out_chroma = demod_chroma_filt(
-            data,
-            self.Filters["FVideoBurst"],
-            self.blocklen,
-            self.Filters["FVideoNotch"],
-            self.notch,
-            10 + self.chroma_shift
-            # if cafc is enabled, this filtering will be done after TBC
-        ) if not self.cafc else data[: self.blocklen]
-
+        out_chroma = (
+            demod_chroma_filt(
+                data,
+                self.Filters["FVideoBurst"],
+                self.blocklen,
+                self.Filters["FVideoNotch"],
+                self.notch,
+                # if cafc is enabled, this filtering will be done after TBC
+            )
+            if not self.cafc
+            else data[: self.blocklen]
+        )
 
         if False:
             import matplotlib.pyplot as plt
@@ -2120,20 +2186,28 @@ class VHSRFDecode(ldd.RFDecode):
 
             # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
             #        ax1.plot(hilbert, color='#FF0000')
-            # ax1.plot(data, color="#00FF00")
-            # ax1.axhline(self.iretohz(0))
-            # ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            # print("Vsync IRE", self.SysParams["vsync_ire"])
-            #            ax2 = ax1.twinx()
-            #            ax3 = ax1.twinx()
-            ax1.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft.real)
-            #ax1.plot(env, color="#00FF00")
-            #ax1.axhline(0)
-            # ax1.plot(demod_b, color="#000000")
-            ax2.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, 20 * np.log10(abs(self.Filters["RFVideo"])))
-            ax2.axhline(0)
-            ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft_filt)
-            #ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, )
+            ax1.plot(out_video05, color="#00FF00")
+            #ax1.axhline(self.iretohz(0))
+            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"] - 5))
+            #print("Vsync IRE", self.SysParams["vsync_ire"])
+                       # ax2 = ax1.twinx()
+                       # ax3 = ax1.twinx()
+            # ax1.plot(
+            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft.real
+            # )
+            # # ax1.plot(env, color="#00FF00")
+            # # ax1.axhline(0)
+            # # ax1.plot(demod_b, color="#000000")
+            # ax2.plot(
+            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz,
+            #     20 * np.log10(abs(self.Filters["RFVideo"])),
+            # )
+            # ax2.axhline(0)
+            # ax3.plot(
+            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft_filt
+            # )
+            # ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, )
             # ax3.axhline(0)
             # ax4.plot(np.pad(np.diff(hilbert), (0, 1), mode="constant"))
             # ax4.axhline(0)
@@ -2157,10 +2231,8 @@ class VHSRFDecode(ldd.RFDecode):
         demod_end_time = time.time()
         if thread_benchmark:
             ldd.logger.debug(
-                "Demod thread %d, work done in %.02f msec" % (
-                    os.getpid(),
-                    (demod_end_time - demod_start_time) * 1e3
-                )
+                "Demod thread %d, work done in %.02f msec"
+                % (os.getpid(), (demod_end_time - demod_start_time) * 1e3)
             )
 
         return rv

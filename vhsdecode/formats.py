@@ -178,7 +178,7 @@ RFParams_NTSC_SVHS["video_lpf_extra"] = RFParams_PAL_SVHS["video_lpf_extra"]
 RFParams_NTSC_SVHS["video_lpf_extra_order"] = RFParams_PAL_SVHS["video_lpf_extra_order"]
 
 RFParams_NTSC_SVHS["video_hpf_extra"] = RFParams_PAL_SVHS["video_hpf_extra"]
-RFParams_NTSC_SVHS["video_hpf_extra_order"] = RFParams_NTSC_SVHS["video_hpf_extra"]
+RFParams_NTSC_SVHS["video_hpf_extra_order"] = RFParams_PAL_SVHS["video_hpf_extra_order"]
 
 # Low-pass filter on Y after demodulation
 RFParams_NTSC_SVHS["video_lpf_freq"] = RFParams_PAL_SVHS["video_lpf_freq"]

@@ -34,6 +34,27 @@ def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire):
     return True
 
 
+"""Pulse definition for findpulses_n. Needs to be outside the function to work with numba.
+Make sure to refresh numba cache if modified.
+"""
+Pulse = namedtuple("Pulse", "start len")
+
+
+@njit(cache=True)
+def findpulses_numba(sync_ref, low, high, min_synclen, max_synclen):
+    """Locate possible pulses by looking at areas within some range."""
+    mid_sync = high
+    where_all_picture = np.where(sync_ref > mid_sync)[0]
+    locs_len = np.diff(where_all_picture)
+    # min_synclen = self.eq_pulselen * 1 / 8
+    # max_synclen = self.linelen * 5 / 8
+    is_sync = np.bitwise_and(locs_len > min_synclen, locs_len < max_synclen)
+    where_all_syncs = np.where(is_sync)[0]
+    pulses_starts = where_all_picture[where_all_syncs]
+    pulses_lengths = locs_len[where_all_syncs]
+    return [Pulse(z[0], z[1]) for z in zip(pulses_starts, pulses_lengths)]
+
+
 # stores the last valid blacklevel, synclevel and vsynclocs state
 # preliminary solution to fix spurious decoding halts (numpy error case)
 class FieldState:
@@ -42,8 +63,12 @@ class FieldState:
         self.fv = self.SysParams["FPS"] * 2
         ma_depth = round(self.fv / 5) if self.fv < 60 else round(self.fv / 6)
         ma_min_watermark = int(ma_depth / 2)
-        self.blanklevels = utils.StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)
-        self.synclevels = utils.StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)
+        self.blanklevels = utils.StackableMA(
+            window_average=ma_depth, min_watermark=ma_min_watermark
+        )
+        self.synclevels = utils.StackableMA(
+            window_average=ma_depth, min_watermark=ma_min_watermark
+        )
         self.locs = None
 
     def setSyncLevel(self, level):
@@ -202,19 +227,12 @@ class Resync:
         pulse_hz_max = field.rf.iretohz(sync_ire + 10)
         return pulse_hz_min, pulse_hz_max
 
-    # lddu.findpulses() equivalent
+        # lddu.findpulses() equivalent
+
     def findpulses(self, sync_ref, low, high):
-        Pulse = namedtuple("Pulse", "start len")
-        mid_sync = high
-        where_all_picture = np.where(sync_ref > mid_sync)[0]
-        locs_len = np.diff(where_all_picture)
-        min_synclen = self.eq_pulselen * 1 / 8
-        max_synclen = self.linelen * 5 / 8
-        is_sync = np.bitwise_and(locs_len > min_synclen, locs_len < max_synclen)
-        where_all_syncs = np.where(is_sync)[0]
-        pulses_starts = where_all_picture[where_all_syncs]
-        pulses_lengths = locs_len[where_all_syncs]
-        return [Pulse(z[0], z[1]) for z in zip(pulses_starts, pulses_lengths)]
+        return findpulses_numba(
+            sync_ref, low, high, self.eq_pulselen * 1 / 8, self.linelen * 5 / 8
+        )
 
     def add_pulselevels_to_serration_measures(self, field):
         if self.VsyncSerration.hasSerration():
@@ -280,10 +298,13 @@ class Resync:
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
         # NOTE: Disabled for now as it doesn't seem to have much purpose at the moment and can
         # cause weird artifacts on the output.
-        demod_data = field.data["video"]["demod"] if not field.rf.sync_clip else \
-            self.VsyncSerration.safe_sync_clip(
+        demod_data = (
+            field.data["video"]["demod"]
+            if not field.rf.sync_clip
+            else self.VsyncSerration.safe_sync_clip(
                 sync_reference, field.data["video"]["demod"]
             )
+        )
 
         # if it has levels, then compensate blanking bias
         if self.VsyncSerration.hasLevels() or self.FieldState.hasLevels():
@@ -307,10 +328,9 @@ class Resync:
         else:
             # pass one using standard levels (fallback sync logic)
             # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-            pulse_hz_min, pulse_hz_max = \
-                self.findpulses_range(
-                    field, field.rf.iretohz(field.rf.SysParams["vsync_ire"])
-                )
+            pulse_hz_min, pulse_hz_max = self.findpulses_range(
+                field, field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+            )
 
             # checks if the DC offset is abnormal before correcting it
             new_sync = self.VsyncSerration.mean_bias()
@@ -329,4 +349,3 @@ class Resync:
         return self.findpulses(
             field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max
         )
-

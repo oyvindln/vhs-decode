@@ -78,11 +78,11 @@ def audio_bandpass_butter(center, closerange = 125000, longrange = 180000):
     return sps.butter(N, Wn, btype='bandpass')
 
 class AudioRF:
-    def __init__(self, freq, center_freq):
+    def __init__(self, freq, center_freq, vid_standard):
         self.center_freq = center_freq
 
         # Set up SysParams to hand off to needed sub-tasks
-        SysParams = core.SysParams_PAL if args.vid_standard == 'PAL' else core.SysParams_NTSC
+        SysParams = core.SysParams_PAL if vid_standard == 'PAL' else core.SysParams_NTSC
 
         self.freq = freq
         self.freq_hz = self.freq * 1.0e6
@@ -149,8 +149,27 @@ class AudioDecoder:
     def __init__(self, args):
         global blocklen, blockskip
 
-        self.out_fd = None
         self.efm_fd = None
+
+        if args.outfile == '-':
+            self.out_fd = sys.stdout
+            args.prefm = False
+            efm_decode = False
+        else:
+            if not args.daa:
+                self.out_fd = open(args.outfile + '.pcmf32', 'wb')
+
+            if args.prefm:
+                self.rawefm_fd = open(args.outfile + '.prefm', 'wb')
+            else:
+                args.prefm = False
+
+            efm_decode = not args.noefm
+            if efm_decode:
+                self.efm_pll_object = efm_pll.EFM_PLL()
+                self.efm_fd = open(args.outfile + '.efm', 'wb')
+
+        self.args = args
 
         # Have input_buffer store 8-bit bytes, then convert afterwards
         self.input_buffer = utils.StridedCollector(blocklen*2, blockskip*2)
@@ -158,7 +177,7 @@ class AudioDecoder:
         # Set up SysParams to hand off to needed sub-tasks
         SysParams = core.SysParams_PAL if args.vid_standard == 'PAL' else core.SysParams_NTSC
 
-        self.freq = args.freq
+        self.freq = args.inputfreq
         self.freq_hz = self.freq * 1.0e6
         self.efm_filter = efm_pll.computeefmfilter(self.freq_hz, blocklen)
         #print(self.freq_hz, len(self.efm_filter), self.efm_filter, file=sys.stderr)
@@ -166,10 +185,10 @@ class AudioDecoder:
         self.aa_channels = []
 
         if True:
-            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_lfreq']))
+            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_lfreq'], args.vid_standard))
             
         if True:
-            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_rfreq']))
+            self.aa_channels.append(AudioRF(self.freq, SysParams['audio_rfreq'], args.vid_standard))
 
 
     def process_input_buffer(self):
@@ -180,7 +199,7 @@ class AudioDecoder:
 
             fft_in = npfft.fft(s16)
 
-            if not args.daa:
+            if not self.args.daa:
 
                 outputs = []
 
@@ -214,140 +233,131 @@ class AudioDecoder:
                     if self.out_fd is not None:
                         self.out_fd.write(outdata)
 
-            if efm_decode:
+            if self.args.prefm or self.efm_fd:
                 filtered_efm = npfft.ifft(fft_in * self.efm_filter)[drop_begin:-drop_end]
                 filtered_efm2 = np.int16(np.clip(filtered_efm.real, -32768, 32767))
 
-                if args.prefm:
-                    rawefm_fd.write(filtered_efm2.tobytes())
+                if self.args.prefm:
+                    self.rawefm_fd.write(filtered_efm2.tobytes())
 
-                efm_out = efm_pll_object.process(filtered_efm2)
+                efm_out = self.efm_pll_object.process(filtered_efm2)
                 #print(efm_out.shape, max(filtered_efm.imag))
                 
                 if self.efm_fd is not None:
                     #print(len(buf), len(filtered_efm2), len(efm_out), file=sys.stderr)
-                    efm_fd.write(efm_out.tobytes())
+                    self.efm_fd.write(efm_out.tobytes())
 
-# Command line front end code
-
-def handle_options(argstring = sys.argv):
-    options_epilog = """foof"""
-
-    parser = argparse.ArgumentParser(
-        description="Extracts audio from raw/TBC'd RF laserdisc captures",
-    #    epilog=options_epilog,
-    )
-
-    # This is -i instead of a positional, since the first pos can't be overridden
-    parser.add_argument("-i", dest="infile", default='-', type=str, help="source file (must be signed 16-bit)")
-
-    parser.add_argument("-o", dest="outfile", default='test', type=str, help="base name for destination files")
-    
-    parser.add_argument("-f", "--freq", dest='freq', default = "40.0mhz", type=utils.parse_frequency, help="Input frequency")
-
-    parser.add_argument(
-        "--disable_analog_audio",
-        "--disable_analogue_audio",
-        "--daa",
-        dest="daa",
-        action="store_true",
-        default=False,
-        help="Disable analog(ue) audio decoding",
-    )
-
-    parser.add_argument(
-        "--PAL",
-        "-p",
-        "--pal",
-        dest="pal",
-        action="store_true",
-        help="source is in PAL format",
-    )
-
-    parser.add_argument(
-        "--NTSC", "-n", "--ntsc", dest="ntsc", action="store_true", help="source is in NTSC format"
-    )
-
-    parser.add_argument(
-        "--noEFM",
-        dest="noefm",
-        action="store_true",
-        default=False,
-        help="Disable EFM front end",
-    )
-
-    parser.add_argument(
-        "--preEFM",
-        dest="prefm",
-        action="store_true",
-        default=False,
-        help="Write filtered but otherwise pre-processed EFM data",
-    )
-    
-    args = parser.parse_args(argstring[1:])
-
-    if args.pal and args.ntsc:
-        print("ERROR: Can only be PAL or NTSC")
-        exit(1)
-
+def startprocess(inpipe, args):
+    ''' Hook for Multiprocessing.Process() 
+        procargs is a tuple containing the input pipe and args from ld-decode
+    '''
     args.vid_standard = "PAL" if args.pal else "NTSC"
-    
-    return args
+    args.inputfreq = 40 if args.inputfreq is None else args.inputfreq
+    args.outfile = args.outfile + '-new'
 
-testmode = False
-if testmode:
-    args = handle_options(['--NTSC', '-i', '../ggvsweep1.tbc.r16'])
-else:
+    ad = AudioDecoder(args)
+
+    while True:
+        data = inpipe.recv()
+        if data is None:
+            return
+
+        # XXX: for now convert to the binary format
+        data_bytes = data.tobytes()
+        data_int8 = np.frombuffer(data_bytes, 'int8', len(data_bytes))
+        ad.input_buffer.add(data_int8)
+
+        ad.process_input_buffer()
+        
+if __name__ == "__main__":
+    # Standalone command line front end code
+
+    # NOTE:  These arguments must be consistent with top-level ld-decode, since 
+    # they can be passed from it as well
+
+    def handle_options(argstring = sys.argv):
+        parser = argparse.ArgumentParser(
+            description="Extracts audio from raw/TBC'd RF laserdisc captures",
+        )
+
+        # This is -i instead of a positional, since the first pos can't be overridden
+        parser.add_argument("-i", dest="infile", default='-', type=str, help="source file (must be signed 16-bit)")
+
+        parser.add_argument("-o", dest="outfile", default='test', type=str, help="base name for destination files")
+        
+        parser.add_argument("-f", "--freq", dest='inputfreq', default = "40.0mhz", type=utils.parse_frequency, help="Input frequency")
+
+        parser.add_argument(
+            "--disable_analog_audio",
+            "--disable_analogue_audio",
+            "--daa",
+            dest="daa",
+            action="store_true",
+            default=False,
+            help="Disable analog(ue) audio decoding",
+        )
+
+        parser.add_argument(
+            "--PAL",
+            "-p",
+            "--pal",
+            dest="pal",
+            action="store_true",
+            help="source is in PAL format",
+        )
+
+        parser.add_argument(
+            "--NTSC", "-n", "--ntsc", dest="ntsc", action="store_true", help="source is in NTSC format"
+        )
+
+        parser.add_argument(
+            "--noEFM",
+            dest="noefm",
+            action="store_true",
+            default=False,
+            help="Disable EFM front end",
+        )
+
+        parser.add_argument(
+            "--preEFM",
+            dest="prefm",
+            action="store_true",
+            default=False,
+            help="Write filtered but otherwise pre-processed EFM data",
+        )
+        
+        args = parser.parse_args(argstring[1:])
+
+        if args.pal and args.ntsc:
+            print("ERROR: Can only be PAL or NTSC")
+            exit(1)
+
+        args.vid_standard = "PAL" if args.pal else "NTSC"
+
+        return args
+
     args = handle_options(sys.argv)
 
-if args.infile == '-':
-    in_fd = None
-else:
-    in_fd = open(args.infile, 'rb')
-
-if args.outfile == '-':
-    out_fd = sys.stdout
-    args.prefm = False
-    efm_decode = False
-else:
-    if not args.daa:
-        out_fd = open(args.outfile + '.pcmf32', 'wb')
-
-    if args.prefm:
-        rawefm_fd = open(args.outfile + '.prefm', 'wb')
-    else:
-        args.prefm = False
-
-    efm_decode = not args.noefm
-    if efm_decode:
-        efm_pll_object = efm_pll.EFM_PLL()
-        efm_fd = open(args.outfile + '.efm', 'wb')
-
-ad = AudioDecoder(args)
-
-# FIXME
-ad.out_fd = out_fd
-ad.efm_fd = efm_fd
-
-# Common top-level code
-logger = utils_logging.init_logging(None)
-
-inputs = []
-output = []
-allout = []
-
-while True:
     if args.infile == '-':
-        inbuf = sys.stdin.buffer.read(65536)
+        in_fd = None
     else:
-        inbuf = in_fd.read(65536)
+        in_fd = open(args.infile, 'rb')
 
-    if len(inbuf) == 0:
-        break
-        
-    # store the input buffer as a raw 8-bit data, then repack into 16-bit
-    # (this allows reading of an odd # of bytes)
-    ad.input_buffer.add(np.frombuffer(inbuf, 'int8', len(inbuf)))
-    ad.process_input_buffer()
+    ad = AudioDecoder(args)
 
+    # Common top-level code
+    logger = utils_logging.init_logging(None)
 
+    while True:
+        if args.infile == '-':
+            inbuf = sys.stdin.buffer.read(65536)
+        else:
+            inbuf = in_fd.read(65536)
+
+        if len(inbuf) == 0:
+            break
+            
+        # store the input buffer as a raw 8-bit data, then repack into 16-bit
+        # (this allows reading of an odd # of bytes)
+        ad.input_buffer.add(np.frombuffer(inbuf, 'int8', len(inbuf)))
+        ad.process_input_buffer()

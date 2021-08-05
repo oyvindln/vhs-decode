@@ -1,10 +1,13 @@
 import copy
 import itertools
+import platform
 import sys
 import threading
 import time
 
 from multiprocessing import Process, Queue, JoinableQueue, Pipe
+if platform.system() == 'Darwin':
+    from multiprocessing import set_start_method
 
 # standard numeric/scientific libraries
 import numpy as np
@@ -326,7 +329,7 @@ class RFDecode:
 
         deemp = list(self.DecoderParams["video_deemp"])
 
-        deemp_low, deemp_high = extra_options["deemp_coeff"]
+        deemp_low, deemp_high = extra_options.get("deemp_coeff", (0, 0))
         if deemp_low > 0:
             deemp[0] = deemp_low
         if deemp_high > 0:
@@ -1075,6 +1078,9 @@ class DemodCache:
 
         self.lock = threading.Lock()
         self.blocks = {}
+
+        if platform.system() == 'Darwin':
+            set_start_method('fork')
 
         self.q_in = JoinableQueue()
         self.q_in_metadata = []
@@ -2907,7 +2913,7 @@ class FieldPAL(Field):
         self.wowfactor = self.computewow(self.linelocs)
         self.burstmedian = self.calc_burstmedian()
 
-        self.linecount = 313  # if self.isFirstField else 313
+        self.linecount = 312 if self.isFirstField else 313
         self.lineoffset = 2 if self.isFirstField else 3
 
         self.linecode = [
@@ -3380,7 +3386,7 @@ class LDdecode:
                 self.outfile_rftbc.write(rftbc)
 
             if self.pipe_rftbc is not None:
-                self.pipe_rftbc.write(rftbc)
+                self.pipe_rftbc.send(rftbc)
 
         if audio is not None and self.outfile_audio is not None:
             self.outfile_audio.write(audio)

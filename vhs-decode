@@ -17,6 +17,9 @@ from vhsdecode.cmdcommons import (
     get_extra_options,
 )
 
+import pdb_attach
+pdb_attach.listen(50001)  # Listen on port 50001.
+
 supported_tape_formats = {"VHS", "SVHS", "UMATIC"}
 
 parser = common_parser("Extracts video from raw VHS rf captures")
@@ -150,6 +153,22 @@ parser.add_argument(
     help="Enables sync clipping",
 )
 parser.add_argument(
+    "-cafc",
+    "--chroma_AFC",
+    dest="cafc",
+    action="store_true",
+    default=False,
+    help="Enable downconverted chroma carrier AFC (Automatic freq. control), implies --recheck_phase",
+)
+parser.add_argument(
+    "-sclip",
+    "--sync_clip",
+    dest="sync_clip",
+    action="store_true",
+    default=False,
+    help="Enables sync clipping",
+)
+parser.add_argument(
     "-cshift",
     "--chroma_shift",
     metavar="chroma_shift",
@@ -186,6 +205,8 @@ rf_options["disable_diff_demod"] = args.disable_diff_demod
 rf_options["disable_dc_offset"] = args.disable_dc_offset
 rf_options["disable_comb"] = args.disable_comb
 rf_options["nldeemp"] = args.nldeemp
+rf_options["cafc"] = args.cafc
+rf_options["sync_clip"] = args.sync_clip
 rf_options["cafc"] = args.cafc
 rf_options["sync_clip"] = args.sync_clip
 rf_options["chroma_shift"] = args.chroma_shift

@@ -106,7 +106,11 @@ def common_parser(meta_title):
     )
     # help="Disable AGC (deprecated, already disabled by default)
     parser.add_argument(
-        "--noAGC", dest="noAGC", action="store_true", default=None, help=argparse.SUPPRESS
+        "--noAGC",
+        dest="noAGC",
+        action="store_true",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     # help="Enable AGC"
     parser.add_argument(
@@ -210,6 +214,6 @@ def get_extra_options(args):
     extra_options = {
         "useAGC": args.AGC and not args.noAGC,
         # Only used for ld, but could maybe be used for vhs too.
-        "deemp_coeff": (0, 0)
+        "deemp_coeff": (0, 0),
     }
     return extra_options
