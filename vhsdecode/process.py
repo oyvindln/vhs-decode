@@ -207,7 +207,10 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
 
 
 def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
-    out_chroma = utils.filter_simple(data[:blocklen], filter)
+    out_chroma = utils.filter_simple(
+        data[: blocklen],
+        filter
+    )
 
     if do_notch is not None and do_notch:
         out_chroma = sps.filtfilt(
@@ -221,22 +224,15 @@ def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
     # TODO: Not sure if we need this after hilbert filter change, needs check.
     out_chroma = np.roll(out_chroma, move)
     # crude DC offset removal
-    out_chroma = out_chroma - np.mean(out_chroma)
+    out_chroma = out_chroma - np.mean(
+        out_chroma
+    )
     return out_chroma
 
 
-def process_chroma(
-    field,
-    track_phase,
-    disable_deemph=False,
-    disable_comb=False,
-    disable_tracking_cafc=False,
-):
+def process_chroma(field, track_phase, disable_deemph=False, disable_comb=False, disable_tracking_cafc=False):
     # Run TBC/downscale on chroma (if new field, else uses cache)
-    if (
-        field.rf.field_number != field.rf.chroma_last_field
-        or field.rf.chroma_last_field == -1
-    ):
+    if field.rf.field_number != field.rf.chroma_last_field or field.rf.chroma_last_field == -1:
         chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
         field.rf.chroma_last_field = field.rf.field_number
 
@@ -249,19 +245,21 @@ def process_chroma(
                 len(chroma),
                 field.rf.Filters["FVideoNotch"],
                 field.rf.notch,
-                move=0,
+                move=field.rf.chroma_shift
             )
 
             if not disable_tracking_cafc:
                 spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
                 ldd.logger.debug(
-                    "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg"
-                    % (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
+                    "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg" %
+                    (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
                 )
 
         field.rf.chroma_tbc_buffer = chroma
     else:
         chroma = field.rf.chroma_tbc_buffer
+
+
 
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
@@ -304,9 +302,7 @@ def process_chroma(
         lineoffset,
         linesout,
         outwidth,
-        field.rf.chromaAFC.getChromaHet()
-        if (field.rf.cafc and not disable_tracking_cafc)
-        else field.rf.chroma_heterodyne,
+        field.rf.chromaAFC.getChromaHet() if (field.rf.cafc and not disable_tracking_cafc) else field.rf.chroma_heterodyne,
         phase_rotation,
         starting_phase,
     )
@@ -905,7 +901,12 @@ def try_detect_track_vhs_pal(field):
     phase0_mean, phase1_mean = phase[0][1], phase[1][1]
     assumed_phase = int(phase0_mean < phase1_mean)
 
-    log_track_phase(field.rf.track_phase, phase0_mean, phase1_mean, assumed_phase)
+    log_track_phase(
+        field.rf.track_phase,
+        phase0_mean,
+        phase1_mean,
+        assumed_phase
+    )
 
     return assumed_phase
 
@@ -1658,6 +1659,12 @@ class VHSDecode(ldd.LDdecode):
         return f
 
 
+def computeCShift(cshift, fh, samp_rate):
+    from vhsdecode.addons.vsyncserration import f_to_samples
+    linelen = f_to_samples(samp_rate, fh)
+    return round(linelen * cshift)
+
+
 class VHSRFDecode(ldd.RFDecode):
     def __init__(
         self,
@@ -2037,12 +2044,22 @@ class VHSRFDecode(ldd.RFDecode):
                 # 1: utils.FiltersClass(iir_eq_hiband[0], iir_eq_hiband[1], self.freq_hz),
             }
 
-        self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        self.chromaTrap = (
+            ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        )
 
-        self.AGClevels = StackableMA(
-            window_average=self.SysParams["FPS"] / 2
-        ), StackableMA(window_average=self.SysParams["FPS"] / 2)
+        self.AGClevels = \
+            StackableMA(window_average=self.SysParams["FPS"] / 2), \
+            StackableMA(window_average=self.SysParams["FPS"] / 2)
         self.resync = Resync(self.freq_hz, self.SysParams, debug=self.debug)
+
+        fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
+        samp_rate = self.chromaAFC.getSampleRate() if self.cafc else self.freq_hz
+        self.chroma_shift = computeCShift(
+            rf_options.get("chroma_shift", 0.0),
+            fh,
+            samp_rate
+        )
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -2070,9 +2087,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         return result
 
-    def demodblock(
-        self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False
-    ):
+    def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False):
         rv = {}
         demod_start_time = time.time()
         if fftdata is not None:
@@ -2166,18 +2181,16 @@ class VHSRFDecode(ldd.RFDecode):
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
         # Filter out the color-under signal from the raw data.
-        out_chroma = (
-            demod_chroma_filt(
-                data,
-                self.Filters["FVideoBurst"],
-                self.blocklen,
-                self.Filters["FVideoNotch"],
-                self.notch,
-                # if cafc is enabled, this filtering will be done after TBC
-            )
-            if not self.cafc
-            else data[: self.blocklen]
-        )
+        out_chroma = demod_chroma_filt(
+            data,
+            self.Filters["FVideoBurst"],
+            self.blocklen,
+            self.Filters["FVideoNotch"],
+            self.notch,
+            10 + self.chroma_shift
+            # if cafc is enabled, this filtering will be done after TBC
+        ) if not self.cafc else data[: self.blocklen]
+
 
         if False:
             import matplotlib.pyplot as plt
@@ -2186,28 +2199,20 @@ class VHSRFDecode(ldd.RFDecode):
 
             # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
             #        ax1.plot(hilbert, color='#FF0000')
-            ax1.plot(out_video05, color="#00FF00")
-            #ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"] - 5))
-            #print("Vsync IRE", self.SysParams["vsync_ire"])
-                       # ax2 = ax1.twinx()
-                       # ax3 = ax1.twinx()
-            # ax1.plot(
-            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft.real
-            # )
-            # # ax1.plot(env, color="#00FF00")
-            # # ax1.axhline(0)
-            # # ax1.plot(demod_b, color="#000000")
-            # ax2.plot(
-            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz,
-            #     20 * np.log10(abs(self.Filters["RFVideo"])),
-            # )
-            # ax2.axhline(0)
-            # ax3.plot(
-            #     np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft_filt
-            # )
-            # ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, )
+            # ax1.plot(data, color="#00FF00")
+            # ax1.axhline(self.iretohz(0))
+            # ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+            # print("Vsync IRE", self.SysParams["vsync_ire"])
+            #            ax2 = ax1.twinx()
+            #            ax3 = ax1.twinx()
+            ax1.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft.real)
+            #ax1.plot(env, color="#00FF00")
+            #ax1.axhline(0)
+            # ax1.plot(demod_b, color="#000000")
+            ax2.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, 20 * np.log10(abs(self.Filters["RFVideo"])))
+            ax2.axhline(0)
+            ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, indata_fft_filt)
+            #ax3.plot(np.arange(self.blocklen) / self.blocklen * self.freq_hz, )
             # ax3.axhline(0)
             # ax4.plot(np.pad(np.diff(hilbert), (0, 1), mode="constant"))
             # ax4.axhline(0)
@@ -2231,8 +2236,10 @@ class VHSRFDecode(ldd.RFDecode):
         demod_end_time = time.time()
         if thread_benchmark:
             ldd.logger.debug(
-                "Demod thread %d, work done in %.02f msec"
-                % (os.getpid(), (demod_end_time - demod_start_time) * 1e3)
+                "Demod thread %d, work done in %.02f msec" % (
+                    os.getpid(),
+                    (demod_end_time - demod_start_time) * 1e3
+                )
             )
 
         return rv

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CHROMA_DECODER="ntsc1d"
+CHROMA_DECODER="ntsc2d"
 CHROMA_GAIN=2
 FILTER_COMPLEX="[1:v]format=yuv422p10le[chroma];[0:v][chroma]mergeplanes=0x001112:yuv422p10le[output]"
 

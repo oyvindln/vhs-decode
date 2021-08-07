@@ -227,8 +227,7 @@ class Resync:
         pulse_hz_max = field.rf.iretohz(sync_ire + 10)
         return pulse_hz_min, pulse_hz_max
 
-        # lddu.findpulses() equivalent
-
+    # lddu.findpulses() equivalent
     def findpulses(self, sync_ref, low, high):
         return findpulses_numba(
             sync_ref, low, high, self.eq_pulselen * 1 / 8, self.linelen * 5 / 8

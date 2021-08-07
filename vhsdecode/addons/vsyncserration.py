@@ -43,7 +43,7 @@ def _safe_sync_clip(sync_ref, data, levels, eq_pulselen):
     clip_from = where_all_picture[where_all_syncs]
     clip_len = locs_len[where_all_syncs]
     for ix, begin in enumerate(clip_from):
-        data[begin : begin + clip_len[ix]] = sync
+        data[begin: begin + clip_len[ix]] = sync
 
     return data
 
@@ -101,16 +101,14 @@ class VsyncSerration:
         self.linelen = round(f_to_samples(self.samp_rate, self.fh))
         line_time = 1 / self.fh
         vbi_time = 6.5 * line_time
-        self.vbi_time_range = t_to_samples(
-            self.samp_rate, vbi_time * 3 / 4
-        ), t_to_samples(self.samp_rate, vbi_time * 5 / 4)
+        self.vbi_time_range = \
+            t_to_samples(self.samp_rate, vbi_time * 3 / 4), \
+            t_to_samples(self.samp_rate, vbi_time * 5 / 4)
 
         # result storage instances
-        self.levels = StackableMA(
-            window_average=ma_depth, min_watermark=ma_min_watermark
-        ), StackableMA(
-            window_average=ma_depth, min_watermark=ma_min_watermark
-        )  # sync, blanking
+        self.levels = \
+            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark), \
+            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)  # sync, blanking
 
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
@@ -130,7 +128,10 @@ class VsyncSerration:
 
     # returns true if it has levels above the min_watermark
     def hasLevels(self):
-        return self.levels[0].has_values() and self.levels[1].has_values()
+        return (
+                self.levels[0].has_values()
+                and self.levels[1].has_values()
+        )
 
     def hasSerration(self):
         return self.found_serration
@@ -145,7 +146,7 @@ class VsyncSerration:
         mask = np.zeros(blocklen)
         locs = raw_locs[np.where(raw_locs < blocklen - pulselen)[0]]
         for loc in locs:
-            mask[loc : loc + pulselen] = [1] * pulselen
+            mask[loc: loc + pulselen] = [1] * pulselen
         return mask[:blocklen]
 
     # this may need tweak
