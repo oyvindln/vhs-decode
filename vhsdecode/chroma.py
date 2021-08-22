@@ -181,7 +181,7 @@ def process_chroma(
             # it does the chroma filtering AFTER the TBC
             chroma = demod_chroma_filt(
                 chroma,
-                field.rf.chromaAFC.get_chroma_bandpass(),
+                field.rf.chromaAFC.get_chroma_bandpass(field.rf.cafc),
                 len(chroma),
                 field.rf.Filters["FVideoNotch"],
                 field.rf.notch,

@@ -392,8 +392,8 @@ class ChromaAFC:
     # filter at about twice the carrier. (This seems to be similar to what VCRs do)
     # TODO: Needs tweaking (it seems to read a static value from the threaded demod)
     # Note: order will be doubled since we use filtfilt.
-    def get_chroma_bandpass(self):
-        freq_hz_half = self.demod_rate / 2
+    def get_chroma_bandpass(self, is_cafc=False):
+        freq_hz_half = self.demod_rate / 2 if not is_cafc else self.out_frequency_half * 1e6
         return sps.butter(
             2,
             [

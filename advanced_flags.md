@@ -23,5 +23,3 @@ Advanced flags
 
 `-cafc` enables the downconverted chroma carrier AFC **A**utomatic **F**requency **C**ontrol, intended to make the chroma upconversion more precise.
 
-`-cshift` defines a multiple of the line length to which the chroma signal will be moved in time. It accepts a decimal value with sign.
-For example 0.5 moves the chroma forward 0.5 lines. If it is -0.5 it will move it 0.5 lines backward. 
