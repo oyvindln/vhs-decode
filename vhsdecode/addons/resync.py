@@ -308,7 +308,17 @@ class Resync:
         # if it has levels, then compensate blanking bias
         if self.VsyncSerration.hasLevels() or self.FieldState.hasLevels():
             if self.VsyncSerration.hasLevels():
-                sync, blank = self.VsyncSerration.getLevels()
+                new_sync, new_blank = self.VsyncSerration.getLevels()
+                if self.level_check(field, new_sync, new_blank, sync_reference):
+                    sync, blank = new_sync, new_blank
+                elif self.FieldState.hasLevels():
+                    sync, blank = self.FieldState.getLevels()
+                    ldd.logger.debug("Level check failed on serration measured levels [new_sync: %s, new_blank: %s], falling back to levels from FieldState [sync %s, blank %s].", new_sync, new_blank, sync, blank)
+                else:
+                    # Check failed on serration levels and field state does not contain levels
+                    # Not sure if this can happen, use defaults if so.
+                    ldd.logger.debug("Level check failed on serration measured levels, using defaults.")
+                    sync, blank = field.rf.SysParams["ire0"], field.rf.iretohz(field.rf.SysParams["vsync_ire"])
             else:
                 sync, blank = self.FieldState.getLevels()
 
@@ -335,6 +345,7 @@ class Resync:
             new_sync = self.VsyncSerration.mean_bias()
             vsync_hz = field.rf.iretohz(field.rf.SysParams["vsync_ire"])
             new_blank = field.rf.iretohz(field.rf.hztoire(new_sync) / 2)
+
             check = self.level_check(field, new_sync, new_blank, sync_reference)
             if (
                 not field.rf.disable_dc_offset

@@ -17,9 +17,6 @@ from vhsdecode.cmdcommons import (
     get_extra_options,
 )
 
-import pdb_attach
-pdb_attach.listen(50001)  # Listen on port 50001.
-
 supported_tape_formats = {"VHS", "SVHS", "UMATIC"}
 
 parser = common_parser("Extracts video from raw VHS rf captures")
