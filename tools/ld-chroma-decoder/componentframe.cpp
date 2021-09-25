@@ -29,7 +29,7 @@ ComponentFrame::ComponentFrame()
 {
 }
 
-void ComponentFrame::init(const LdDecodeMetaData::VideoParameters &videoParameters)
+void ComponentFrame::init(const LdDecodeMetaData::VideoParameters &videoParameters, bool mono)
 {
     width = videoParameters.fieldWidth;
     height = (videoParameters.fieldHeight * 2) - 1;
@@ -39,9 +39,18 @@ void ComponentFrame::init(const LdDecodeMetaData::VideoParameters &videoParamete
     yData.resize(size);
     yData.fill(0.0);
 
-    uData.resize(size);
-    uData.fill(0.0);
+    if(!mono) {
+        uData.resize(size);
+        uData.fill(0.0);
 
-    vData.resize(size);
-    vData.fill(0.0);
+        vData.resize(size);
+        vData.fill(0.0);
+    } else {
+        // Clear and deallocate U/V if they're not used.
+        uData.clear();
+        uData.squeeze();
+
+        vData.clear();
+        vData.squeeze();
+    }
 }

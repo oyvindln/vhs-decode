@@ -71,6 +71,10 @@ public:
     // For worker threads: convert a component frame to the configured output format
     void convert(const ComponentFrame &componentFrame, OutputFrame &outputFrame) const;
 
+    PixelFormat getPixelFormat() const {
+        return config.pixelFormat;
+    }
+
 private:
     // Configuration parameters
     Configuration config;

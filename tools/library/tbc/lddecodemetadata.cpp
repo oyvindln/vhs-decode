@@ -74,7 +74,6 @@ LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
     if (json.size({"videoParameters"}) > 0) {
         videoParameters.numberOfSequentialFields = json.value({"videoParameters", "numberOfSequentialFields"}).toInt();
         videoParameters.isSourcePal = json.value({"videoParameters", "isSourcePal"}).toBool();
-        videoParameters.isSourcePalM = json.value({"videoParameters", "isSourcePalM"}, false).toBool();
         videoParameters.isSubcarrierLocked = json.value({"videoParameters", "isSubcarrierLocked"}).toBool();
         videoParameters.isWidescreen = json.value({"videoParameters", "isWidescreen"}).toBool();
 
@@ -300,7 +299,6 @@ LdDecodeMetaData::Ntsc LdDecodeMetaData::getFieldNtsc(qint32 sequentialFieldNumb
 // This method gets the drop-out metadata for the specified sequential field number
 DropOuts LdDecodeMetaData::getFieldDropOuts(qint32 sequentialFieldNumber)
 {
-    DropOuts dropOuts;
     qint32 fieldNumber = sequentialFieldNumber - 1;
 
     if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
@@ -317,11 +315,22 @@ DropOuts LdDecodeMetaData::getFieldDropOuts(qint32 sequentialFieldNumber)
         qCritical("JSON file is invalid: Dropouts object is illegal");
     }
 
+    // Reserve space for the dropouts we have to avoid reallocation.
+    DropOuts dropOuts(startxSize);
+
     if (startxSize > 0) {
+        // Pre-create the lists used for lookup so we don't have to reallocate
+        // them for every line.
+        QVariantList startx = {"fields", fieldNumber, "dropOuts", "startx", 0};
+        QVariantList endx = {"fields", fieldNumber, "dropOuts", "endx", 0};
+        QVariantList fieldLine = {"fields", fieldNumber, "dropOuts", "fieldLine", 0};
         for (qint32 doCounter = 0; doCounter < startxSize; doCounter++) {
-            dropOuts.append(json.value({"fields", fieldNumber, "dropOuts", "startx", doCounter}).toInt(),
-                            json.value({"fields", fieldNumber, "dropOuts", "endx", doCounter}).toInt(),
-                            json.value({"fields", fieldNumber, "dropOuts", "fieldLine", doCounter}).toInt());
+            startx.last().setValue(doCounter);
+            endx.last().setValue(doCounter);
+            fieldLine.last().setValue(doCounter);
+            dropOuts.append(json.value(startx).toInt(),
+                            json.value(endx).toInt(),
+                            json.value(fieldLine).toInt());
         }
     } else {
         dropOuts.clear();

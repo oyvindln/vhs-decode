@@ -260,8 +260,11 @@ void OutputWriter::convertLine(qint32 lineNumber, const ComponentFrame &componen
     // Get pointers to the component data for the active region
     const qint32 inputLine = videoParameters.firstActiveFrameLine + lineNumber;
     const double *inY = componentFrame.y(inputLine) + videoParameters.activeVideoStart;
-    const double *inU = componentFrame.u(inputLine) + videoParameters.activeVideoStart;
-    const double *inV = componentFrame.v(inputLine) + videoParameters.activeVideoStart;
+    // Not used if output is GRAY16
+    const double *inU = (config.pixelFormat != GRAY16) ?
+                            componentFrame.u(inputLine) + videoParameters.activeVideoStart : nullptr;
+    const double *inV = (config.pixelFormat != GRAY16) ?
+                            componentFrame.v(inputLine) + videoParameters.activeVideoStart : nullptr;
 
     const qint32 outputLine = topPadLines + lineNumber;
 

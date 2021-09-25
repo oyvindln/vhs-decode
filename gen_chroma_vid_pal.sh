@@ -15,7 +15,7 @@ if [ -f "$1.wav" ] ; then
   -f rawvideo -r 25 -pixel_format yuv444p16le -s 928x576 \
   -i <( \
     ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | \
-    ld-chroma-decoder -f $CHROMA_DECODER --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - - \
+    ld-chroma-decoder -f $CHROMA_DECODER --luma-nr 0 --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - - \
   ) \
   -itsoffset -00:00:00.000 -i $1.wav \
   -filter_complex $FILTER_COMPLEX \
@@ -32,7 +32,7 @@ else
   -f rawvideo -r 25 -pixel_format yuv444p16le -s 928x576 \
   -i <( \
     ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | \
-    ld-chroma-decoder -f $CHROMA_DECODER --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - -
+    ld-chroma-decoder -f $CHROMA_DECODER --luma-nr 0 --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - -
   ) \
   -filter_complex $FILTER_COMPLEX \
   -map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \

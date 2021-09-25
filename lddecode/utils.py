@@ -1,34 +1,24 @@
 # A collection of helper functions used in dev notebooks and lddecode_core.py
 
-import atexit
-from base64 import b64encode
 from collections import namedtuple
-import copy
-import getopt
-import io
-from io import BytesIO
 import json
 import math
 import os
-import sys
 import subprocess
 
-from multiprocessing import Process, Pool, Queue, JoinableQueue, Pipe
+from multiprocessing import JoinableQueue
 import threading
-import queue
 
 from numba import jit, njit
 
 # standard numeric/scientific libraries
 import numpy as np
-import scipy as sp
 import scipy.signal as sps
 
-from scipy import interpolate
 
 # This runs a cubic scaler on a line.
 # originally from https://www.paulinternet.nl/?page=bicubic
-@njit(nogil=True)
+@njit(nogil=True, cache=True)
 def scale(buf, begin, end, tgtlen, mult=1):
     linelen = end - begin
     sfactor = linelen / tgtlen
@@ -158,9 +148,9 @@ def make_loader(filename, inputfreq=None):
 def load_unpacked_data(infile, sample, readlen, sampletype):
     # this is run for unpacked data:
     # 1 is for 8-bit cxadc data, 2 for 16bit DD, 3 for 16bit cxadc
-    
+
     samplelength = 2 if sampletype == 3 else sampletype
-    
+
     infile.seek(sample * samplelength, 0)
     inbuf = infile.read(readlen * samplelength)
 
@@ -184,8 +174,8 @@ def load_unpacked_data_u8(infile, sample, readlen):
 
 def load_unpacked_data_s16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 2)
-    
-    
+
+
 def load_unpacked_data_u16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 2)
 
@@ -249,7 +239,7 @@ def load_packed_data_4_40(infile, sample, readlen):
     start = (sample // 4) * 5
     offset = sample % 4
 
-    seekedto = infile.seek(start)
+    infile.seek(start)
 
     # we need another word in case offset != 0
     needed = int(np.ceil(readlen * 5 // 4)) + 5
@@ -259,8 +249,6 @@ def load_packed_data_4_40(infile, sample, readlen):
 
     if len(indata) < needed:
         return None
-
-    rot2 = np.right_shift(indata, 2)
 
     unpacked = np.zeros(readlen + 4, dtype=np.uint16)
 
@@ -559,7 +547,7 @@ def filtfft(filt, blocklen):
     return sps.freqz(filt[0], filt[1], blocklen, whole=1)[1]
 
 
-@njit
+@njit(cache=True)
 def inrange(a, mi, ma):
     return (a >= mi) & (a <= ma)
 
@@ -649,7 +637,7 @@ def calczc_sets(data, start, end, tgt=0, cliplevel=None):
 def build_hilbert(fft_size):
     if (fft_size // 2) - (fft_size / 2) != 0:
         raise Exception("build_hilbert: must have even fft_size")
-    
+
     output = np.zeros(fft_size)
     output[0] = output[fft_size // 2] = 1
     output[1:fft_size // 2] = 2
@@ -675,32 +663,34 @@ def unwrap_hilbert(hilbert, freq_hz):
 def fft_determine_slices(center, min_bandwidth, freq_hz, bins_in):
     ''' returns the # of sub-bins needed to get center+/-min_bandwidth.
         The returned lowbin is the first bin (symmetrically) needed to be saved.
-        
+
         This will need to be 'flipped' using fft_slice to get the trimmed set
     '''
-    
+
     # compute the width of each bin
     binwidth = freq_hz / bins_in
-    
+
     cbin = nb_round(center / binwidth)
-    
+
     # compute the needed number of fft bins...
     bbins = nb_round(min_bandwidth / binwidth)
     # ... and round that up to the next power of two
     nbins = 2 * (2 ** math.ceil(math.log2(bbins * 2)))
-    
+
     lowbin = cbin - (nbins // 4)
-    
+
     cut_freq = binwidth * nbins
-    
+
     return lowbin, nbins, cut_freq
 
 def fft_do_slice(fdomain, lowbin, nbins, blocklen):
-    ''' Uses lowbin and nbins as returned from fft_determine_slices to 
+    ''' Uses lowbin and nbins as returned from fft_determine_slices to
         cut the fft '''
     nbins_half = nbins//2
     return np.concatenate([fdomain[lowbin:lowbin+nbins_half], fdomain[blocklen-lowbin-nbins_half:blocklen-lowbin]])
 
+
+@njit(cache=True)
 def genwave(rate, freq, initialphase=0):
     """ Generate an FM waveform from target frequency data """
     out = np.zeros(len(rate), dtype=np.double)
@@ -718,7 +708,7 @@ def genwave(rate, freq, initialphase=0):
 
 
 # slightly faster than np.std for short arrays
-@njit
+@njit(cache=True)
 def rms(arr):
     return np.sqrt(np.mean(np.square(arr - np.mean(arr))))
 
@@ -756,7 +746,7 @@ def roundfloat(fl, places=3):
 @jit(cache=True)
 def findareas(array, cross):
     """ Find areas where `array` is <= `cross`
-    
+
     returns: array of tuples of said areas (begin, end, length)
     """
     starts = np.where(np.logical_and(array[1:] < cross, array[:-1] >= cross))[0]
@@ -774,7 +764,7 @@ def findareas(array, cross):
 
 def findpulses(array, low, high):
     """ Find areas where `array` is between `low` and `high`
-    
+
     returns: array of tuples of said areas (begin, end, length)
     """
 
@@ -818,25 +808,6 @@ def findpeaks(array, low=0):
     ]
 
 
-# originally from http://www.paulinternet.nl/?page=bicubic
-def cubic_interpolate(data, loc):
-    p = data[int(loc) - 1 : int(loc) + 3]
-    x = loc - np.floor(loc)
-
-    return p[1] + 0.5 * x * (
-        p[2]
-        - p[0]
-        + x
-        * (
-            2.0 * p[0]
-            - 5.0 * p[1]
-            + 4.0 * p[2]
-            - p[3]
-            + x * (3.0 * (p[1] - p[2]) + p[3] - p[0])
-        )
-    )
-
-
 def LRUupdate(l, k):
     """ This turns a list into an LRU table.  When called it makes sure item 'k' is at the beginning,
         so the list is in descending order of previous use.
@@ -849,47 +820,47 @@ def LRUupdate(l, k):
     l.insert(0, k)
 
 
-@njit
+@njit(cache=True)
 def nb_median(m):
     return np.median(m)
 
 
-@njit
+@njit(cache=True)
 def nb_round(m):
     return int(np.round(m))
 
 
-@njit
+@njit(cache=True)
 def nb_mean(m):
     return np.mean(m)
 
 
-@njit
+@njit(cache=True)
 def nb_min(m):
     return np.min(m)
 
 
-@njit
+@njit(cache=True)
 def nb_max(m):
     return np.max(m)
 
 
-@njit
+@njit(cache=True)
 def nb_abs(m):
     return np.abs(m)
 
 
-@njit
+@njit(cache=True)
 def nb_absmax(m):
     return np.max(np.abs(m))
 
 
-@njit
+@njit(cache=True)
 def nb_mul(x, y):
     return x * y
 
 
-@njit
+@njit(cache=True)
 def nb_where(x):
     return np.where(x)
 
@@ -897,9 +868,9 @@ def nb_where(x):
 def angular_mean(x, cycle_len=1.0, zero_base=True):
     """ Compute the mean phase, assuming 0..1 is one phase cycle
 
-        (Using this technique handles the 3.99, 5.01 issue 
+        (Using this technique handles the 3.99, 5.01 issue
         where otherwise the phase average would be 0.5.  while a
-        naive computation could be changed to rotate around 0.5, 
+        naive computation could be changed to rotate around 0.5,
         that breaks down when things are out of phase...)
     """
     x2 = x - np.floor(x)  # not strictly necessary but slightly more precise
@@ -927,20 +898,20 @@ def phase_distance(x, c=0.75):
 
 
 # Used to help w/CX routines
-@njit
+@njit(cache=True)
 def db_to_lev(db):
     return 10 ** (db / 20)
 
 
-@njit
+@njit(cache=True)
 def lev_to_db(rlev):
     return 20 * np.log10(rlev)
 
 
 # moved from core.py
-@njit
+@njit(cache=True)
 def dsa_rescale(infloat):
-    return int(np.round(infloat * 32767 / 150000))
+    return int(np.round(infloat * 32767 / 150000 * (np.sqrt(2)/2)))
 
 
 # Hotspot subroutines in FieldNTSC's compute_line_bursts function,
@@ -963,22 +934,11 @@ def distance_from_round(x):
 
 
 # Write the .tbc.json file (used by lddecode and notebooks)
-def write_json(ldd, outname):
-    jsondict = ldd.build_json(ldd.curfield)
-
-    fp = open(outname + ".tbc.json.tmp", "w")
-    json.dump(jsondict, fp, indent=4 if ldd.verboseVITS else None)
-    fp.write("\n")
-    fp.close()
-
-    os.rename(outname + ".tbc.json.tmp", outname + ".tbc.json")
-
-
-# Write the .tbc.json file (used by lddecode and notebooks)
 def write_json(ldd, jsondict, outname):
 
     fp = open(outname + ".tbc.json.tmp", "w")
-    json.dump(jsondict, fp, indent=4 if ldd.verboseVITS else None)
+    json.dump(jsondict, fp, indent=4 if ldd.verboseVITS else None,
+              separators=(',', ':') if not ldd.verboseVITS else None)
     fp.write("\n")
     fp.close()
 
@@ -989,7 +949,7 @@ def jsondump_thread(ldd, outname):
     """
     This creates a background thread to write a json dict to a file.
 
-    Probably had a bit too much fun here - this returns a queue that is 
+    Probably had a bit too much fun here - this returns a queue that is
     fed into a thread created by the function itself.  Feed it json
     dictionaries during runtime and None when done.
     """
@@ -1021,7 +981,7 @@ class StridedCollector:
         self.buffer = None
         self.blocklen = blocklen
         self.stride = stride
-        
+
     def add(self, data):
         if self.buffer is None:
             self.buffer = data
@@ -1029,19 +989,18 @@ class StridedCollector:
             self.buffer = np.concatenate([self.buffer, data])
 
         return self.have_block()
-        
+
     def have_block(self):
         return (self.buffer is not None) and (len(self.buffer) >= self.blocklen)
-    
+
     def get_block(self):
         if self.have_block():
             rv = self.buffer[0:self.blocklen]
             self.buffer = self.buffer[self.blocklen-self.stride:]
-                
+
             return rv
-            
+
         return None
-        
+
 if __name__ == "__main__":
     print("Nothing to see here, move along ;)")
-    

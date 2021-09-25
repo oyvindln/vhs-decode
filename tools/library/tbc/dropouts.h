@@ -33,6 +33,7 @@ class DropOuts
 {
 public:
     DropOuts() = default;
+    DropOuts(int reserve);
     ~DropOuts() = default;
     DropOuts(const DropOuts &) = default;
 
@@ -41,6 +42,7 @@ public:
 
     void append(const qint32 startx, const qint32 endx, const qint32 fieldLine);
     qint32 size() const;
+    void reserve(int size);
     void resize(qint32 size);
     void clear();
     void concatenate();

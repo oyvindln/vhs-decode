@@ -8,6 +8,7 @@ import os
 import sys
 
 import json
+from numpy.lib import utils
 
 import scipy as sp
 import scipy.signal as sps
@@ -66,10 +67,10 @@ Tune-Up AV II audio test tones
     - Several seconds of 0dB in both CX-analog and digital between 50hz and 10khz.
       (CX has a 500hz high pass filter, so it slowly comes on)
 
-level targets for ld-decode rev6:
+approx level targets for ld-decode rev7:
 
 0dB = ~14762 
-max = 0dB (rms 14762) to +16db (6.3x) - currently capped about +6dB
+max = 0dB (rms ~14762) to +16db (6.3x) - currently capped about +6dB
 high = -8dB (rms 5877) to 0dB (2.5118x)
 low = -18dB (rms 1865) to -20dB
 min = -22dB (rms 1172?) to -28dB (.50118x)
@@ -95,7 +96,7 @@ class CXExpander:
         self.fast = 0
         self.slow = 0
         
-        self.zerodb = 20400 # rms of 0dB output from ld-decode
+        self.zerodb = 14450 # approx rms of 0dB output from ld-decode (rev7), measured from GGV
         self.knee = -22     # beginning of 2:1 expansion in dB
         self.knee_level = db_to_lev(self.knee)
         
@@ -118,6 +119,8 @@ class CXExpander:
         
         m6db = db_to_lev(-6)
         
+        #print(rms(fleft), rms(fright), file=sys.stderr)
+
         for i in range(len(fleft)):
             highest = max(np.abs(fleft[i]), np.abs(fright[i]))
 

@@ -51,7 +51,6 @@ public:
         qint32 numberOfSequentialFields;
 
         bool isSourcePal;
-        bool isSourcePalM;
         bool isSubcarrierLocked;
         bool isWidescreen;
 

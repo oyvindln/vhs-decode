@@ -42,7 +42,8 @@ public:
     ComponentFrame();
 
     // Set the frame's size and clear it to black
-    void init(const LdDecodeMetaData::VideoParameters &videoParameters);
+    // If mono is true, only Y set to black, while U and V are cleared.
+    void init(const LdDecodeMetaData::VideoParameters &videoParameters, bool mono=false);
 
     // Get a pointer to a line of samples. Line numbers are 0-based within the frame.
     // Lines are stored in a contiguous array, so it's safe to get a pointer to
@@ -51,19 +52,19 @@ public:
         return yData.data() + getLineOffset(line);
     }
     double *u(qint32 line) {
-        return uData.data() + getLineOffset(line);
+        return uData.data() + getLineOffsetUV(line);
     }
     double *v(qint32 line) {
-        return vData.data() + getLineOffset(line);
+        return vData.data() + getLineOffsetUV(line);
     }
     const double *y(qint32 line) const {
         return yData.data() + getLineOffset(line);
     }
     const double *u(qint32 line) const {
-        return uData.data() + getLineOffset(line);
+        return uData.data() + getLineOffsetUV(line);
     }
     const double *v(qint32 line) const {
-        return vData.data() + getLineOffset(line);
+        return vData.data() + getLineOffsetUV(line);
     }
 
     qint32 getWidth() const {
@@ -76,7 +77,13 @@ public:
 private:
     qint32 getLineOffset(qint32 line) const {
         assert(line >= 0);
-        assert(line < height);
+        assert(line < yData.size());
+        return line * width;
+    }
+
+    qint32 getLineOffsetUV(qint32 line) const {
+        assert(line >= 0);
+        assert(line < uData.size());
         return line * width;
     }
 

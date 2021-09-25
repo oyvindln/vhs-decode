@@ -58,8 +58,12 @@ void MonoThread::decodeFrame(const SourceField &firstField, const SourceField &s
 {
     const LdDecodeMetaData::VideoParameters &videoParameters = config.videoParameters;
 
+    bool ignoreUV = decoderPool.getOutputWriter().getPixelFormat() == OutputWriter::PixelFormat::GRAY16;
+
     // Initialise and clear the component frame
-    componentFrame.init(videoParameters);
+    // Ignore UV if we're doing Grayscale output.
+    // TODO: Fix so we don't need U/V vectors for RGB and YUV output either.
+    componentFrame.init(videoParameters, ignoreUV);
 
     // Interlace the active lines of the two input fields to produce a component frame
     for (qint32 y = videoParameters.firstActiveFrameLine; y < videoParameters.lastActiveFrameLine; y++) {

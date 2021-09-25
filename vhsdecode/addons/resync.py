@@ -10,7 +10,7 @@ import hashlib
 from numba import njit
 
 
-@njit(cache=True)
+@njit(cache=True, parallel=True, nogil=True)
 def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire):
     """Check if adjusted levels give are somewhat sane."""
     # ldd.logger.info("am below new blank %s , amount below half_sync %s", amount_below, amount_below_half_sync)
@@ -40,7 +40,7 @@ Make sure to refresh numba cache if modified.
 Pulse = namedtuple("Pulse", "start len")
 
 
-@njit(cache=True)
+@njit(cache=True, parallel=True, nogil=True)
 def findpulses_numba(sync_ref, low, high, min_synclen, max_synclen):
     """Locate possible pulses by looking at areas within some range."""
     mid_sync = high
@@ -224,7 +224,7 @@ class Resync:
     def findpulses_range(self, field, vsync_hz):
         sync_ire = field.rf.hztoire(vsync_hz)
         pulse_hz_min = field.rf.iretohz(sync_ire - 10)
-        pulse_hz_max = field.rf.iretohz(sync_ire + 10)
+        pulse_hz_max = (field.rf.iretohz(sync_ire) + field.rf.iretohz(0)) / 2
         return pulse_hz_min, pulse_hz_max
 
     # lddu.findpulses() equivalent
@@ -313,12 +313,22 @@ class Resync:
                     sync, blank = new_sync, new_blank
                 elif self.FieldState.hasLevels():
                     sync, blank = self.FieldState.getLevels()
-                    ldd.logger.debug("Level check failed on serration measured levels [new_sync: %s, new_blank: %s], falling back to levels from FieldState [sync %s, blank %s].", new_sync, new_blank, sync, blank)
+                    ldd.logger.debug(
+                        "Level check failed on serration measured levels [new_sync: %s, new_blank: %s], falling back to levels from FieldState [sync %s, blank %s].",
+                        new_sync,
+                        new_blank,
+                        sync,
+                        blank,
+                    )
                 else:
                     # Check failed on serration levels and field state does not contain levels
                     # Not sure if this can happen, use defaults if so.
-                    ldd.logger.debug("Level check failed on serration measured levels, using defaults.")
-                    sync, blank = field.rf.SysParams["ire0"], field.rf.iretohz(field.rf.SysParams["vsync_ire"])
+                    ldd.logger.debug(
+                        "Level check failed on serration measured levels, using defaults."
+                    )
+                    sync, blank = field.rf.SysParams["ire0"], field.rf.iretohz(
+                        field.rf.SysParams["vsync_ire"]
+                    )
             else:
                 sync, blank = self.FieldState.getLevels()
 
@@ -354,6 +364,7 @@ class Resync:
             ):
                 field.data["video"]["demod_05"] = sync_reference - new_sync + vsync_hz
                 field.data["video"]["demod"] = demod_data - new_sync + vsync_hz
+
 
         # utils.plot_scope(field.data["video"]["demod_05"])
         return self.findpulses(

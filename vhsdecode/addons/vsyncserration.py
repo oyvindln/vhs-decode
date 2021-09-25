@@ -160,16 +160,17 @@ class VsyncSerration:
     # It is a hack to avoid edge distortion when using lowpass filters
     # of very low cutoff
     def vsync_envelope_double(self, data):
+        half = int(len(data) / 2)
+
         forward = self.vsync_envelope_simple(data)
         reverse_t = self.vsync_envelope_simple(np.flip(data))
         reverse = np.flip(reverse_t[0]), reverse_t[1]
-        half = int(len(data) / 2)
         # end of forward + beginning of reverse
         result = (
             np.append(reverse[0][:half], forward[0][half:]),
-            np.ones(len(data)) * forward[1],
+            forward[1]
         )
-        # dualplot_scope(forward[0], forward[1])
+        # dualplot_scope(forward[0], reverse[0])
         # dualplot_scope(result[0], result[1], title="VBI envelope")
         return result
 
@@ -281,7 +282,7 @@ class VsyncSerration:
     def vsync_envelope(self, data, padding=1024):  # 0x10000
         padded = np.append(np.flip(data[:padding]), data)
         forward = self.vsync_envelope_double(padded)
-        self.sync_level_bias = forward[1][padding:]
+        self.sync_level_bias = forward[1]
         diff = np.add(forward[0][padding:], -self.sync_level_bias)
         where_allmin = argrelextrema(diff, np.less)[0]
         if len(where_allmin) > 0:

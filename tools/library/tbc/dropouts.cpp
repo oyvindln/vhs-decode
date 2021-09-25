@@ -29,6 +29,12 @@ DropOuts::DropOuts(const QVector<qint32> &startx, const QVector<qint32> &endx, c
 {
 }
 
+DropOuts::DropOuts(int reserve_size)
+    : m_startx(), m_endx(), m_fieldLine()
+{
+    reserve(reserve_size);
+}
+
 // Assignment '=' operator
 DropOuts& DropOuts::operator=(const DropOuts &inDropouts)
 {
@@ -55,6 +61,13 @@ void DropOuts::append(const qint32 startx, const qint32 endx, const qint32 field
 qint32 DropOuts::size() const
 {
     return m_startx.size();
+}
+
+void DropOuts::reserve(int size)
+{
+    m_startx.reserve(size);
+    m_endx.reserve(size);
+    m_fieldLine.reserve(size);
 }
 
 // Resize the size of the DropOuts record

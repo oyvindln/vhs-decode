@@ -1,7 +1,6 @@
 from vhsdecode import utils
 import numpy as np
 import scipy.signal as sps
-from matplotlib import pyplot as plt
 from scipy.fftpack import fft, fftfreq
 import lddecode.core as ldd
 from scipy.signal import argrelextrema
@@ -264,6 +263,7 @@ class ChromaAFC:
 
         # Plot the FFT power
         if self.fft_plot:
+            from matplotlib import pyplot as plt
             plt.figure(figsize=(6, 5))
             plt.plot(sample_freq, power)
             plt.xlim(
@@ -310,6 +310,7 @@ class ChromaAFC:
 
         # An inner plot to show the peak frequency
         if self.fft_plot:
+            from matplotlib import pyplot as plt
             print(self.cc_phase)
             # print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
             yvert_range = 2 * power[power[pos_mask].argmax()]

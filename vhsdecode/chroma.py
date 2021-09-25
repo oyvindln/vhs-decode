@@ -4,6 +4,7 @@ import lddecode.utils as lddu
 import lddecode.core as ldd
 from vhsdecode.utils import get_line
 import vhsdecode.utils as utils
+import scipy.signal as sps
 
 from numba import njit
 
@@ -17,6 +18,7 @@ def chroma_to_u16(chroma):
     return np.uint16(chroma + S16_ABS_MAX)
 
 
+# Using parallel here makes this waaaay slower for some reason.
 @njit(cache=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     """Scale chroma according to the level of the color burst on each line."""
