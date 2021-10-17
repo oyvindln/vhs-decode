@@ -7,12 +7,81 @@ CXADC_TENBIT_FREQ = (8 * 315.0) / 88.0 / 2.0  # 14.318181818
 CXADC_TENBIT_FREQ_HIGH = 3150.0 / 88.0 / 2.0  # 17.897727272
 
 
-def common_parser(meta_title):
-    parser = argparse.ArgumentParser(description=meta_title)
+def file_samplerate_options(parser):
     parser.add_argument("infile", metavar="infile", type=str, help="source file")
     parser.add_argument(
         "outfile", metavar="outfile", type=str, help="base name for destination files"
     )
+    parser.add_argument(
+        "-f",
+        "--frequency",
+        dest="inputfreq",
+        metavar="FREQ",
+        type=lddu.parse_frequency,
+        default=None,
+        help="RF sampling frequency in source file (default is 40MHz)",
+    )
+    parser.add_argument(
+        "--cxadc",
+        dest="cxadc",
+        action="store_true",
+        default=False,
+        help="Use cxadc input frequency (~%.03f Mhz)" % CXADC_FREQ,
+    )
+    parser.add_argument(
+        "--cxadc3",
+        dest="cxadc3",
+        action="store_true",
+        default=False,
+        help="Use cxadc ten fsc input frequency (~%.03f Mhz)" % CXADC_FREQ_HIGH,
+    )
+    parser.add_argument(
+        "--10cxadc",
+        dest="cxadc_tenbit",
+        action="store_true",
+        default=False,
+        help="Use cxadc input frequency in ten bit mode (~%.03f Mhz)" % CXADC_TENBIT_FREQ,
+    )
+    parser.add_argument(
+        "--10cxadc3",
+        dest="cxadc3_tenbit",
+        action="store_true",
+        default=False,
+        help="Use cxadc ten fsc input frequency in ten bit mode (~%.03f Mhz)" % CXADC_TENBIT_FREQ_HIGH,
+    )
+
+    return parser
+
+
+def standard_video_options(parser):
+    parser.add_argument(
+        "-p", "--pal", dest="pal", action="store_true", help="source is in PAL format"
+    )
+    parser.add_argument(
+        "-n",
+        "--ntsc",
+        dest="ntsc",
+        action="store_true",
+        help="source is in NTSC format",
+    )
+    parser.add_argument(
+        "-pm",
+        "--palm",
+        dest="palm",
+        action="store_true",
+        help="source is in PAL-M format",
+    )
+    return parser
+
+
+def init_parser(meta_title):
+    return argparse.ArgumentParser(description=meta_title)
+
+
+def common_parser(meta_title):
+    parser = init_parser(meta_title)
+    parser = file_samplerate_options(parser)
+    parser = standard_video_options(parser)
     parser.add_argument(
         "-s",
         "--start",
@@ -37,23 +106,6 @@ def common_parser(meta_title):
         help="limit length to n frames",
     )
     parser.add_argument(
-        "-p", "--pal", dest="pal", action="store_true", help="source is in PAL format"
-    )
-    parser.add_argument(
-        "-n",
-        "--ntsc",
-        dest="ntsc",
-        action="store_true",
-        help="source is in NTSC format",
-    )
-    parser.add_argument(
-        "-pm",
-        "--palm",
-        dest="palm",
-        action="store_true",
-        help="source is in PAL-M format",
-    )
-    parser.add_argument(
         "-t",
         "--threads",
         metavar="threads",
@@ -62,47 +114,10 @@ def common_parser(meta_title):
         help="number of CPU threads to use",
     )
     parser.add_argument(
-        "-f",
-        "--frequency",
-        dest="inputfreq",
-        metavar="FREQ",
-        type=lddu.parse_frequency,
-        default=None,
-        help="RF sampling frequency in source file (default is 40MHz)",
-    )
-    parser.add_argument(
         "--NTSCJ",
         dest="ntscj",
         action="store_true",
         help="source is in NTSC-J (IRE 0 black) format (untested)",
-    )
-    parser.add_argument(
-        "--cxadc",
-        dest="cxadc",
-        action="store_true",
-        default=False,
-        help="Use cxadc input frequency (~28,63 Mhz)",
-    )
-    parser.add_argument(
-        "--cxadc3",
-        dest="cxadc3",
-        action="store_true",
-        default=False,
-        help="Use cxadc ten fsc input frequency (~35,79 Mhz)",
-    )
-    parser.add_argument(
-        "--10cxadc",
-        dest="cxadc_tenbit",
-        action="store_true",
-        default=False,
-        help="Use cxadc input frequency in ten bit mode (~14,31 Mhz)",
-    )
-    parser.add_argument(
-        "--10cxadc3",
-        dest="cxadc3_tenbit",
-        action="store_true",
-        default=False,
-        help="Use cxadc ten fsc input frequency in ten bit mode (~17,89 Mhz)",
     )
     # help="Disable AGC (deprecated, already disabled by default)
     parser.add_argument(

@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+
+from vhsdecode.cmdcommons import (
+    init_parser,
+    file_samplerate_options,
+    standard_video_options,
+    select_sample_freq,
+    select_system,
+    get_basics
+)
+
+parser = init_parser("Extracts audio from raw HiFi FM capture")
+parser = file_samplerate_options(parser)
+parser = standard_video_options(parser)
+
+args = parser.parse_args()
+filename, outname, firstframe, req_frames = get_basics(args)
+system = select_system(args)
+sample_freq = select_sample_freq(args)
+
+exit(0)
