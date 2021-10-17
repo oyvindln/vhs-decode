@@ -1,7 +1,7 @@
 import soundfile as sf
 import numpy as np
 from vhsdecode.utils import firdes_lowpass, firdes_highpass, FiltersClass, plot_scope, dualplot_scope, \
-    filter_plot, gen_wave_at_frequency
+    filter_plot, gen_wave_at_frequency, StackableMA
 from vhsdecode.addons.chromasep import samplerate_resample
 from vhsdecode.addons.gnuradioZMQ import ZMQSend
 from vhsdecode.addons.FMdeemph import FMDeEmphasis
@@ -74,7 +74,9 @@ class AFEParamsPAL:
     def __init__(self):
         self.LCarrierRef = 1.4e6
         self.RCarrierRef = 1.8e6
-        self.VCODeviation = 100e3
+        self.opVCODeviation = 50e3
+        self.maxVCODeviation = 150e3
+        self.VCODeviation = (self.opVCODeviation + self.maxVCODeviation) / 2
 
 
 class AFEFilterable:
@@ -82,8 +84,8 @@ class AFEFilterable:
         self.samp_rate = sample_rate
         self.filter_params = filters_params
         d = abs(self.filter_params.LCarrierRef - self.filter_params.RCarrierRef)
-        QL = self.filter_params.LCarrierRef / self.filter_params.VCODeviation
-        QR = self.filter_params.RCarrierRef / self.filter_params.VCODeviation
+        QL = self.filter_params.LCarrierRef / self.filter_params.opVCODeviation
+        QR = self.filter_params.RCarrierRef / self.filter_params.opVCODeviation
         if channel == 0:
             iir_front_peak = iirpeak(
                 self.filter_params.LCarrierRef,
@@ -180,21 +182,25 @@ path = '/home/sebastian/vault/VHS/HiFi/test_hifi.flac'
 sample_rate = 35.795454545e6
 if_rate = 8388608
 audio_rate = 192000
+blocks_second = 20
+tau = 56e-6
+
 ifresample_numerator = Fraction(if_rate / sample_rate).limit_denominator(1000).numerator
 ifresample_denominator = Fraction(if_rate / sample_rate).limit_denominator(1000).denominator
 audioRes_numerator = Fraction(audio_rate / if_rate).limit_denominator(1000).numerator
 audioRes_denominator = Fraction(audio_rate / if_rate).limit_denominator(1000).denominator
-block_size = int(sample_rate / 20)
+block_size = int(sample_rate / blocks_second)
 
 afeParamsPAL = AFEParamsPAL()
 afeL = AFEFilterable(afeParamsPAL, if_rate, 0)
 afeR = AFEFilterable(afeParamsPAL, if_rate, 1)
 fmL = FMdemod(if_rate, AFEParamsPAL().LCarrierRef, 1)
 fmR = FMdemod(if_rate, AFEParamsPAL().RCarrierRef, 1)
-tau = 56e-6
 deemphL = getDeemph(tau, if_rate)
 deemphR = getDeemph(tau, if_rate)
 lopassRF = AFEBandPass(AFEParamsFront(), sample_rate)
+dcCancelL = StackableMA(min_watermark=0, window_average=blocks_second)
+dcCancelR = StackableMA(min_watermark=0, window_average=blocks_second)
 
 # grc = ZMQSend()
 
@@ -209,18 +215,24 @@ with sf.SoundFile('output.wav', 'w+', channels=2, samplerate=audio_rate, subtype
             filterR = afeR.work(data)
             # grc.send(filterL)
 
-            demodL = deemphL.lfilt(fmL.work(filterL))
-            demodR = deemphR.lfilt(fmL.work(filterR))
-            print("Max %.02f" % np.max(demodL))
-            print("Mean %.02f" % np.mean(demodL))
+            audioL = samplerate_resample(
+                deemphL.lfilt(fmL.work(filterL)), audioRes_numerator, audioRes_denominator
+            )
 
-            clip = AFEParamsPAL().VCODeviation  # max(np.max(demod), abs(np.min(demod)))
-            demodL /= clip
-            demodL -= np.mean(demodL)
-            demodR /= clip
-            demodR -= np.mean(demodR)
+            audioR = samplerate_resample(
+                deemphR.lfilt(fmR.work(filterR)), audioRes_numerator, audioRes_denominator
+            )
 
-            audioL = samplerate_resample(demodL, audioRes_numerator, audioRes_denominator)
-            audioR = samplerate_resample(demodR, audioRes_numerator, audioRes_denominator)
+            dcL = dcCancelL.work(np.mean(audioL))
+            dcR = dcCancelR.work(np.mean(audioR))
+            print("Max L %.02f kHz, R %.02f kHz" % (np.max(audioL) / 1e3, np.max(audioR) / 1e3))
+            print("Mean L %.02f kHz, R %.02f kHz" % (dcL / 1e3, dcR / 1e3))
+
+            clip = AFEParamsPAL().VCODeviation
+            audioL -= dcL
+            audioL /= clip
+            audioR -= dcR
+            audioR /= clip
+
             stereo = list(map(list, zip(audioL, audioR)))
             w.write(stereo)
