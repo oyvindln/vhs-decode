@@ -1,6 +1,6 @@
 ![vhs-decode logo](docs/vhs-decode_logo_256px.png)
 
-# VHS-Decode (It does more then VHS now!)
+# VHS-Decode (It does more than VHS now!)
 
 A fork of [LD-Decode](https://github.com/happycube/ld-decode), the decoding software powering the [Domesday86 Project](https://www.domesday86.com/).  
 This version has been modified to work with the differences found in the tracked RF drum head signals taken directly from videotapes.
@@ -129,7 +129,7 @@ Note with WSL2 & Ubuntu, `./` in front of applications and scripts may be needed
 
 See the readme file for [CXADC](https://github.com/happycube/cxadc-linux3#readme) for more information on how to configure the driver and what each mode and capture rate means.
 
-To see a live preview of tape signal being received by CXADC card from video head tracked signal will be unstable or wobbly if settings are not the same you may only see signal flash if in 16-bit modes for example, this is quite useful if you dont own an CRT with H/V shifting as it will allow you to inspect the full area for alienment/tracking issues.
+To see a live preview of tape signal being received by CXADC card from video head tracked signal will be unstable or wobbly if settings are not the same you may only see signal flash if in 16-bit modes for example, this is quite useful if you don't own an CRT with H/V shifting as it will allow you to inspect the full area for alignment/tracking issues.
 
 PAL framing for 35.8 MHz/8-bit mode:
 
