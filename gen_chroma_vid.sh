@@ -31,7 +31,7 @@ usage() {
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
-	echo "-f, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
+	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
 	echo "                                            ntsc2d, ntsc3d, ntsc3dnoadapt; default automatic)"
 	echo "--ffll, --first_active_field_line <number>  The first visible line of a field."
 	echo "                                                Range 1-259 for NTSC (default: 20),"
@@ -131,7 +131,7 @@ while [ "$1" != "" ]; do
 		shift
 		decoder_opts+="--pad $1 "
 		;;
-	-f | --decoder)
+	-d | --decoder)
 		shift
 		chroma_decoder=$1
 		;;
@@ -263,56 +263,56 @@ else
 fi
 
 # There might be a better way of supporting monochrome output
-if [ "$monochome" = "1" ]; then
+if [ "$monochrome" = "1" ]; then
 	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
-			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m $decoder_opts --input-json "$input_tbc_json" - -
+			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "$decoder_opts" --input-json "$input_tbc_json" - -
 	) \
-	$audio_opts_1 \
-	-filter_complex $FILTER_COMPLEX \
+	"$audio_opts_1" \
+	-filter_complex "$FILTER_COMPLEX" \
 	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
-	-pixel_format $output_format -color_range tv -color_primaries $color_primaries -color_trc $color_trc \
-	-colorspace $color_space $audio_opts_2 \
+	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
+	-colorspace $color_space "$audio_opts_2" \
 	-shortest -y "$input_stripped.mkv"
 else
 	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
-			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m $decoder_opts --input-json "$input_tbc_json" - -
+			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "$decoder_opts" --input-json "$input_tbc_json" - -
 	) \
 	-i <(
 		ld-dropout-correct -i "$input_chroma_tbc" --input-json "$input_tbc_json" --output-json /dev/null - |
-			ld-chroma-decoder -f $chroma_decoder $decoder_opts --luma-nr 0 --chroma-gain $chroma_gain --chroma-phase $chroma_phase -p y4m --input-json "$input_tbc_json" - -
+			ld-chroma-decoder -f $chroma_decoder "$decoder_opts" --luma-nr 0 --chroma-gain $chroma_gain --chroma-phase "$chroma_phase" -p y4m --input-json "$input_tbc_json" - -
 	) \
-	$audio_opts_1 \
-	-filter_complex $FILTER_COMPLEX \
+	"$audio_opts_1" \
+	-filter_complex "$FILTER_COMPLEX" \
 	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
-	-pixel_format $output_format -color_range tv -color_primaries $color_primaries -color_trc $color_trc \
-	-colorspace $color_space $audio_opts_2 \
+	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
+	-colorspace $color_space "$audio_opts_2" \
 	-shortest -y "$input_stripped.mkv"
 fi
 
 # Encode internet-friendly clip of previous lossless result:
-#ffmpeg -hide_banner -i $1.mkv -vf scale=in_color_matrix=bt601:out_color_matrix=bt709:768x576,bwdif=1:0:0 -c:v libx264 -preset veryslow -b:v 6M -maxrate 6M -bufsize 6M -pixel_format yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 -aspect 4:3 -c:a libopus -b:a 192k -strict -2 -movflags +faststart -y $1_lossy.mp4
+#ffmpeg -hide_banner -i "$1.mkv" -vf scale=in_color_matrix=bt601:out_color_matrix=bt709:768x576,bwdif=1:0:0 -c:v libx264 -preset veryslow -b:v 6M -maxrate 6M -bufsize 6M -pixel_format yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 -aspect 4:3 -c:a libopus -b:a 192k -strict -2 -movflags +faststart -y "$1_lossy.mp4"
 
 # Old version of the script:
 ##!/bin/sh
 
-#rm -f $1_doc.tbc
-#rm -f $1_doc.tbc.json
-#rm -f $1_chroma_doc.tbc
-#rm -f $1.rgb
-#rm -f $1_chroma.rgb
-#rm -f $1.mkv
-#rm -f $1_chroma.mkv
+#rm -f "$1_doc.tbc"
+#rm -f "$1_doc.tbc.json"
+#rm -f "$1_chroma_doc.tbc"
+#rm -f "$1.rgb"
+#rm -f "$1_chroma.rgb"
+#rm -f "$1.mkv"
+#rm -f "$1_chroma.mkv"
 
-#ld-dropout-correct $1.tbc $1_doc.tbc
-#ld-dropout-correct -i --input-json $1.tbc.json $1_chroma.tbc $1_chroma_doc.tbc
+#ld-dropout-correct "$1.tbc" "$1_doc.tbc"
+#ld-dropout-correct -i --input-json "$1.tbc.json" "$1_chroma.tbc" "$1_chroma_doc.tbc"
 
-#ld-chroma-decoder -f mono  -p yuv -b $1_doc.tbc $1.rgb
-#ld-chroma-decoder -f pal2d -p yuv --input-json $1.tbc.json $1_chroma_doc.tbc $1_chroma.rgb
+#ld-chroma-decoder -f mono  -p yuv -b "$1_doc.tbc" "$1.rgb"
+#ld-chroma-decoder -f pal2d -p yuv --input-json "$1.tbc.json" "$1_chroma_doc.tbc" "$1_chroma.rgb"
 
-#ffmpeg -f rawvideo -r 25 -pix_fmt yuv444p16 -s 928x576 -i $1_chroma.rgb -r 25 -pix_fmt gray16 -s 928x576 -i $1.rgb -filter_complex "[0:v]format=yuv444p16le[chroma];[1:v]format=yuv444p16le[luma];[chroma][luma]mergeplanes=0x100102:yuv444p16le[output]" -map "[output]":v -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y -shortest $1.mkv
-#ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i $1.rgb -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y $1_luma.mkv
-#ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i $1_chroma.rgb -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y $1_chroma.mkv
+#ffmpeg -f rawvideo -r 25 -pix_fmt yuv444p16 -s 928x576 -i "$1_chroma.rgb" -r 25 -pix_fmt gray16 -s 928x576 -i "$1.rgb" -filter_complex "[0:v]format=yuv444p16le[chroma];[1:v]format=yuv444p16le[luma];[chroma][luma]mergeplanes=0x100102:yuv444p16le[output]" -map "[output]":v -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y -shortest "$1.mkv"
+#ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_luma.mkv"
+#ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1_chroma.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_chroma.mkv"
