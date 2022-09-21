@@ -59,7 +59,7 @@ def common_parser_cli(meta_title):
 def common_parser_inner(parser, use_gui=False):
     parser.add_argument(
         "--system", metavar="system", type=str.upper,
-        help="video system (overriden by individual options)", default="NTSC", choices=["PAL", "PALM", "NTSC", "MESECAM"]
+        help="video system (overriden by individual options)", default="NTSC", choices=["PAL", "PALM", "NTSC", "MESECAM", "SECAM"]
     )
     file_options_group = parser.add_argument_group("File options")
     file_options_group.add_argument(

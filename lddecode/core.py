@@ -538,6 +538,7 @@ class RFDecode:
         SF["FVideo05"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * F0_5_fft
 
         SF["Fburst"] = filtfft(
+
             sps.butter(
                 1,
                 [

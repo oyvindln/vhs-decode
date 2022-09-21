@@ -150,6 +150,20 @@ def get_format_params(system: str, tape_format: str, logger):
         return get_sysparams_mpal_vhs(SysParams_NTSC), get_rfparams_mpal_vhs(
             RFParams_NTSC
         )
+    elif system == "SECAM":
+        if tape_format != "VHS":
+            logger.warning(
+                'Tape format "%s" not supported for MESECAM yet', tape_format
+            )
+        from vhsdecode.format_defs.vhs import (
+            get_rfparams_secam_vhs,
+            get_sysparams_secam_vhs,
+        )
+
+        return get_sysparams_secam_vhs(SysParams_PAL), get_rfparams_secam_vhs(
+            RFParams_PAL
+        )
+
     elif system == "MESECAM":
         if tape_format != "VHS":
             logger.warning(

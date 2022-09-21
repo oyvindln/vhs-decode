@@ -1,5 +1,11 @@
 """Module containing parameters for VHS and SVHS"""
 
+# Frequency of SECAM color component carriers.
+# https://www.itu.int/dms_pubrec/itu-r/rec/bt/R-REC-BT.470-6-199811-S!!PDF-E.pdf
+# Not sure if these should be left here or not
+SECAM_FOR = 4406250
+SECAM_FOB = 4250000
+
 
 def fill_rfparams_vhs_shared(rfparams):
     """Fill in parameters that are shared between systems for VHS"""
@@ -298,6 +304,35 @@ def get_sysparams_mesecam_vhs(sysparams_pal):
     # This differs from normal SECAM, possibly it's done like this to put the upconverted
     # subcarriers at the correct frequencies.
     # TODO: Needs testing
+    # This is one of the secam freqs - not sure if it's
+    # correct to use this or if PAL one should be used instead.
     sysparams["fsc_mhz"] = 4.406
+
+    return sysparams
+
+
+def get_rfparams_secam_vhs(rfparams_pal):
+    params = get_rfparams_pal_vhs(rfparams_pal)
+
+    # SECAM carriers on tape
+    # TODO: need accurate freq.
+    SECAM_FCB_TAPE = SECAM_FOB / 4
+    SECAM_FCR_TAPE = SECAM_FOR / 4
+
+    # Average of the two carriers specified, need to check if this works correctly
+    # and calculate exact value
+    params["color_under_carrier"] = (SECAM_FCB_TAPE + SECAM_FCR_TAPE) / 2
+
+    return params
+
+
+def get_sysparams_secam_vhs(sysparams_pal):
+    """Get system params for MESECAM VHS"""
+
+    # This will be the same as PAL other than chroma
+    sysparams = get_sysparams_pal_vhs(sysparams_pal)
+
+    # Using average of carriers as FSC, may or may not be correct.
+    sysparams["fsc_mhz"] = ((SECAM_FOR + SECAM_FOB) / 2) / 1e6
 
     return sysparams

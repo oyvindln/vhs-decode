@@ -1,14 +1,13 @@
 import math
 import numpy as np
 import scipy.signal as sps
-import copy
 
 import itertools
 
 import lddecode.core as ldd
 import lddecode.utils as lddu
 from lddecode.utils import inrange
-from vhsdecode.utils import get_line
+from vhsdecode.process import parent_system
 
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
@@ -16,24 +15,7 @@ from vhsdecode.addons.chromasep import ChromaSepClass
 # from vhsdecode.process import getpulses_override as vhs_getpulses_override
 # from vhsdecode.addons.vsyncserration import VsyncSerration
 
-# Use PyFFTW's faster FFT implementation if available
-try:
-    import pyfftw.interfaces.numpy_fft as npfft
-    import pyfftw.interfaces
-
-    pyfftw.interfaces.cache.enable()
-    pyfftw.interfaces.cache.set_keepalive_time(10)
-except ImportError:
-    import numpy.fft as npfft
-
-
-def chroma_to_u16(chroma):
-    """Scale the chroma output array to a 16-bit value for output."""
-    S16_ABS_MAX = 32767
-
-    if np.max(chroma) > S16_ABS_MAX or abs(np.min(chroma)) > S16_ABS_MAX:
-        ldd.logger.warning("Chroma signal clipping.")
-    return np.uint16(chroma + S16_ABS_MAX)
+from lddecode.core import npfft
 
 
 def generate_f05_filter(filters, freq_half, blocklen):
@@ -325,7 +307,7 @@ class CVBSDecode(ldd.LDdecode):
             freader,
             logger,
             analog_audio=False,
-            system=system,
+            system=parent_system(system),
             doDOD=False,
             threads=threads,
             extra_options=extra_options,
@@ -343,12 +325,14 @@ class CVBSDecode(ldd.LDdecode):
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
-        if system == "PAL":
+        if system == "PAL" or system == "SECAM":
             self.FieldClass = FieldPALCVBS
         elif system == "NTSC":
             self.FieldClass = FieldNTSCCVBS
         else:
             raise Exception("Unknown video system!", system)
+
+        self._color_system = system
 
         self.demodcache = ldd.DemodCache(
             self.rf, self.infile, self.freader, num_worker_threads=self.numthreads
@@ -404,7 +388,7 @@ class VHSDecodeInner(ldd.RFDecode):
 
         # First init the rf decoder normally.
         super(VHSDecodeInner, self).__init__(
-            inputfreq, system, decode_analog_audio=False, has_analog_audio=False
+            inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
         )
 
         self.chroma_trap = rf_options.get("chroma_trap", False)
@@ -417,12 +401,18 @@ class VHSDecodeInner(ldd.RFDecode):
         self.field_number = 0
         self.last_raw_loc = None
 
-        # Then we override the laserdisc parameters with VHS ones.
+        self._color_system = system
 
-        self.SysParams, self.DecoderParams = vhs_formats.get_format_params(system, "UMATIC", ldd.logger)
+        # Then we override the laserdisc parameters as needed.
+        # NOTE: temporary workaround, should not need this ideally.
+        tape_format = "UMATIC" if system != "SECAM" else "VHS"
+
+        self.SysParams, self.DecoderParams = vhs_formats.get_format_params(system, tape_format, ldd.logger)
 
         # TEMP just set this high so it doesn't mess with anything.
         self.DecoderParams["video_lpf_freq"] = 6800000
+
+        print("FSC ", )
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
@@ -478,6 +468,12 @@ class VHSDecodeInner(ldd.RFDecode):
 
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
+    def computevideofilters(self):
+        super(VHSDecodeInner, self).computevideofilters()
+
+    def _computevideofilters(self):
+        pass
+
     def computedelays(self, mtf_level=0):
         """Override computedelays
         It's normally used for dropout compensation, but the dropout compensation implementation
@@ -523,12 +519,12 @@ class VHSDecodeInner(ldd.RFDecode):
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
-        )
+        ).astype(np.float32)
 
-        if False:
+        if True:
             import matplotlib.pyplot as plt
 
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+            fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
             # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
             #        ax1.plot(hilbert, color='#FF0000')
             # ax1.plot(data, color="#00FF00")
@@ -546,12 +542,15 @@ class VHSDecodeInner(ldd.RFDecode):
             #            ax4.plot(hilbert.imag)
             #            crossings = find_crossings(env, 700)
             #            ax3.plot(crossings, color="#0000FF")
+            spectrum = npfft.rfft(luma)
+            ax3.plot(spectrum)
+            ax4.plot(self.Filters["Fburst"][:len(self.Filters["Fburst"]) // 2] * 1e6)
             plt.show()
         #            exit(0)
 
         video_out = np.rec.array(
-            [luma, luma05, videoburst, data],
-            names=["demod", "demod_05", "demod_burst", "raw"],
+            [luma, luma05, videoburst],
+            names=["demod", "demod_05", "demod_burst"],
         )
 
         rv["video"] = (

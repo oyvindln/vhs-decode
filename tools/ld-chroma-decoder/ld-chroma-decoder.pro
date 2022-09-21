@@ -26,6 +26,7 @@ SOURCES += \
     outputwriter.cpp \
     palcolour.cpp \
     paldecoder.cpp \
+    secamdecoder.cpp \
     sourcefield.cpp \
     transformpal.cpp \
     transformpal2d.cpp \

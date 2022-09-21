@@ -43,6 +43,7 @@
 #include "outputwriter.h"
 #include "palcolour.h"
 #include "paldecoder.h"
+#include "secamdecoder.h"
 #include "transformpal.h"
 
 // Load the thresholds file for the Transform decoders, if specified. We must
@@ -498,6 +499,8 @@ int main(int argc, char *argv[])
         combConfig.dimensions = 3;
         combConfig.adaptive = false;
         decoder = std::make_unique<NtscDecoder>(combConfig);
+    } else if (decoderName == "secam") {
+        decoder = std::make_unique<SecamDecoder>();
     } else if (decoderName == "mono") {
         decoder = std::make_unique<MonoDecoder>();
     } else {
