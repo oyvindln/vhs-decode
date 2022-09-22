@@ -365,6 +365,42 @@ class CVBSDecode(ldd.LDdecode):
         return 20 * np.log10(100 / noise)
 
     def buildmetadata(self, f):
+
+        if False:
+            import matplotlib.pyplot as plt
+
+            fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
+            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
+            #        ax1.plot(hilbert, color='#FF0000')
+            # ax1.plot(data, color="#00FF00")
+            # ax1.axhline(self.iretohz(0))
+            # ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+            # ax1.axhline(self.iretohz(7.5))
+            # ax1.axhline(self.iretohz(100))
+            # print("Vsync IRE", self.SysParams["vsync_ire"])
+            #            ax2 = ax1.twinx()
+            #            ax3 = ax1.twinx()
+            ax1.plot(f.dspicture)
+            #ax2.plot(luma05[:2048])
+            #            ax4.plot(env, color="#00FF00")
+            #            ax3.plot(np.angle(hilbert))
+            #            ax4.plot(hilbert.imag)
+            #            crossings = find_crossings(env, 700)
+            #            ax3.plot(crossings, color="#0000FF")
+            spectrum = npfft.rfft(f.dspicture)
+            spectrum[0:5] = 0
+            ax3.plot(spectrum)
+            fieldsize = len(f.dspicture)
+            ax3.axvline(fieldsize / 4)
+
+            print("fieldsize / 4 ", fieldsize / 4)
+            print("fsc_mhz", (f.rf.SysParams["fsc_mhz"] * 1e6))
+
+            ax4.plot(lddu.filtfft(f.rf.Filters["fob_bp"], fieldsize)[:fieldsize // 2])
+            ax4.plot(lddu.filtfft(f.rf.Filters["for_bp"], fieldsize)[:fieldsize // 2], color="#FF0000")
+            # ax4.plot(f.rf.Filters["fob_bp_fft"][len(spectrum)] * 1e6)
+            plt.show()
+
         # Avoid crash if this is NaN
         if math.isnan(f.burstmedian):
             f.burstmedian = 0.0
@@ -412,10 +448,21 @@ class VHSDecodeInner(ldd.RFDecode):
         # TEMP just set this high so it doesn't mess with anything.
         self.DecoderParams["video_lpf_freq"] = 6800000
 
-        print("FSC ", )
-
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
+        self._computevideofilters()
+
+        # Increase the cutoff at the end of blocks to avoid edge distortion from filters
+        # making it through.
+        self.blockcut_end = 1024
+        self.demods = 0
+
+        self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+
+    def computevideofilters(self):
+        super(VHSDecodeInner, self).computevideofilters()
+
+    def _computevideofilters(self):
 
         self.Filters["FVideo"] = self.Filters["Fvideo_lpf"]
         generate_f05_filter(self.Filters, self.freq_half, self.blocklen)
@@ -461,24 +508,35 @@ class VHSDecodeInner(ldd.RFDecode):
         )
         self.Filters["FChromaBpf"] = chroma_bandpass_final
 
-        # Increase the cutoff at the end of blocks to avoid edge distortion from filters
-        # making it through.
-        self.blockcut_end = 1024
-        self.demods = 0
+        if self._color_system == "SECAM":
+            # Just for testing, not planning to do this filtering in cvbs-decode
+            from vhsdecode.format_defs.vhs import SECAM_FOR, SECAM_FOB
+            out_freq_half_hz = out_frequency_half * 1e6
+            self.Filters["for_bp"] = sps.butter(
+                3,
+                [
+                    (SECAM_FOR - 0.02e6) / out_freq_half_hz,
+                    (SECAM_FOR + 0.02e6) / out_freq_half_hz,
+                ],
+                btype="bandpass",
+            )
 
-        self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+            #self.Filters["for_bp_fft"] = lddu.filtfft(self.Filters["for_bp"], self.)
 
-    def computevideofilters(self):
-        super(VHSDecodeInner, self).computevideofilters()
+            self.Filters["fob_bp"] = sps.butter(
+                3,
+                [
+                    (SECAM_FOB - 0.02e6) / out_freq_half_hz,
+                    (SECAM_FOB + 0.02e6) / out_freq_half_hz,
+                ],
+                btype="bandpass",
+            )
 
-    def _computevideofilters(self):
-        pass
+            #self.Filters["fob_bp_fft"] = lddu.filtfft(self.Filters["fob_bp"], self.blocklen)
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
-        It's normally used for dropout compensation, but the dropout compensation implementation
-        in ld-decode assumes composite color. This function is called even if it's disabled, and
-        seems to break with the VHS setup, so we disable it by overriding it for now.
+        It's normally used for dropout compensation, but that's not a thing with baseband cvbs.
         """
         # Set these to 0 for now, the metrics calculations look for them.
         self.delays = {}
@@ -521,7 +579,7 @@ class VHSDecodeInner(ldd.RFDecode):
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
         ).astype(np.float32)
 
-        if True:
+        if False:
             import matplotlib.pyplot as plt
 
             fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
@@ -544,7 +602,7 @@ class VHSDecodeInner(ldd.RFDecode):
             #            ax3.plot(crossings, color="#0000FF")
             spectrum = npfft.rfft(luma)
             ax3.plot(spectrum)
-            ax4.plot(self.Filters["Fburst"][:len(self.Filters["Fburst"]) // 2] * 1e6)
+            ax4.plot(self.Filters["fob_bp_fft"][:self.blocklen // 2] * 1e6)
             plt.show()
         #            exit(0)
 
