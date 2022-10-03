@@ -328,15 +328,17 @@ def get_rfparams_secam_vhs(rfparams_pal):
 
 def get_sysparams_secam_vhs(sysparams_pal):
     """Get system params for SECAM VHS"""
-    from lddecode.core import calclinelen
+    # from lddecode.core import calclinelen
 
     # This will be the same as PAL other than chroma
     sysparams = get_sysparams_pal_vhs(sysparams_pal)
 
-    # Using average of carriers as FSC, may or may not be correct.
-    sysparams["fsc_mhz"] = ((SECAM_FOR + SECAM_FOB) / 2) / 1e6
+    # Using pal sample rate for output for now.
 
-    sysparams["outlinelen"] = calclinelen(sysparams, 4, "fsc_mhz")
-    sysparams["outfreq"] = 4 * sysparams["fsc_mhz"]
+    # Using average of carriers as FSC, may or may not be correct.
+    # sysparams["fsc_mhz"] = ((SECAM_FOR + SECAM_FOB) / 2) / 1e6
+
+    # sysparams["outlinelen"] = calclinelen(sysparams, 4, "fsc_mhz")
+    # sysparams["outfreq"] = 4 * sysparams["fsc_mhz"]
 
     return sysparams

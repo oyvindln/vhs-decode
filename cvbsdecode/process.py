@@ -315,7 +315,7 @@ class CVBSDecode(ldd.LDdecode):
         # Adjustment for output to avoid clipping.
         self.level_adjust = level_adjust
         # Overwrite the rf decoder with the VHS-altered one
-        self.rf = VHSDecodeInner(
+        self.rf = CVBSDecodeInner(
             system=system,
             tape_format="UMATIC",
             inputfreq=inputfreq,
@@ -366,6 +366,7 @@ class CVBSDecode(ldd.LDdecode):
 
     def buildmetadata(self, f):
 
+
         if False:
             import matplotlib.pyplot as plt
 
@@ -396,9 +397,52 @@ class CVBSDecode(ldd.LDdecode):
             print("fieldsize / 4 ", fieldsize / 4)
             print("fsc_mhz", (f.rf.SysParams["fsc_mhz"] * 1e6))
 
-            ax4.plot(lddu.filtfft(f.rf.Filters["fob_bp"], fieldsize)[:fieldsize // 2])
-            ax4.plot(lddu.filtfft(f.rf.Filters["for_bp"], fieldsize)[:fieldsize // 2], color="#FF0000")
+            def toDB(input):
+                return 20 * np.log10(abs(input))
+
+            # ax4.plot(toDB(lddu.filtfft(f.rf.Filters["fob_bp"], fieldsize)[:fieldsize // 2].real))
+            # ax4.plot(toDB(lddu.filtfft(f.rf.Filters["for_bp"], fieldsize)[:fieldsize // 2].real), color="#FF0000")
             # ax4.plot(f.rf.Filters["fob_bp_fft"][len(spectrum)] * 1e6)
+
+            fob_bp_fir = f.rf.Filters["fob_bp_fir"]
+
+            # w, h = sps.freqz(fir_b, 1.0, worN=np.logspace(0, 3, 100), fs=(f.rf.SysParams["fsc_mhz"] * 4 * 1e6))
+            # w, h = sps.freqz(fir_b, 1.0)
+
+            # ax2.semilogx(w, 20 * np.log10(abs(h)))
+            print("len ", len(fob_bp_fir[0]))
+            # ax2.plot(toDB(lddu.filtfft(fob_bp_fir, fieldsize)[:fieldsize // 2]))
+            #ax2.plot(toDB(lddu.filtfft(f.rf.Filters["fob_bp_fir_2"], fieldsize)[:fieldsize // 2]))
+            #ax2.plot(toDB(lddu.filtfft(f.rf.Filters["for_bp_fir_2"], fieldsize)[:fieldsize // 2]))
+            ax2.plot(toDB(lddu.filtfft(f.rf.Filters["fob_bp_fir"], fieldsize)[:fieldsize // 2]))
+            ax2.plot(toDB(lddu.filtfft(f.rf.Filters["for_bp_fir"], fieldsize)[:fieldsize // 2]))
+
+            test = sps.lfilter(*f.rf.Filters["fob_bp_fir"], f.dspicture)
+            #test2 = sps.lfilter(*f.rf.Filters["for_bp_fir"], f.dspicture)
+
+            f_len = len(f.rf.Filters["fob_bp_fir"][0])
+
+            print("f len", f_len)
+
+            samp_rate = f.rf.SysParams["fsc_mhz"] * 4 * 1e6
+
+            delay = int(0.5 * (f_len - 1))
+
+            print("delay", delay)
+
+            #combined = test2
+
+            delayed = np.roll(test, -delay)
+
+            ax4.plot(delayed)
+            ax4.plot(test)
+            #ax4.plot(np.roll(test, -delay))
+
+            #spectrum = npfft.rfft(test + test2)
+            #spectrum[0:5] = 0
+            # ax3.plot(spectrum)
+            ax1.plot(f.dspicture - delayed)
+
             plt.show()
 
         # Avoid crash if this is NaN
@@ -419,11 +463,11 @@ class CVBSDecode(ldd.LDdecode):
         return None
 
 
-class VHSDecodeInner(ldd.RFDecode):
+class CVBSDecodeInner(ldd.RFDecode):
     def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
 
         # First init the rf decoder normally.
-        super(VHSDecodeInner, self).__init__(
+        super(CVBSDecodeInner, self).__init__(
             inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
         )
 
@@ -446,7 +490,7 @@ class VHSDecodeInner(ldd.RFDecode):
         self.SysParams, self.DecoderParams = vhs_formats.get_format_params(system, tape_format, ldd.logger)
 
         # TEMP just set this high so it doesn't mess with anything.
-        self.DecoderParams["video_lpf_freq"] = 6800000
+        self.DecoderParams["video_lpf_freq"] = 5200000
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
@@ -460,7 +504,7 @@ class VHSDecodeInner(ldd.RFDecode):
         self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
 
     def computevideofilters(self):
-        super(VHSDecodeInner, self).computevideofilters()
+        super(CVBSDecodeInner, self).computevideofilters()
 
     def _computevideofilters(self):
 
@@ -508,29 +552,111 @@ class VHSDecodeInner(ldd.RFDecode):
         )
         self.Filters["FChromaBpf"] = chroma_bandpass_final
 
-        if self._color_system == "SECAM":
+        #if self._color_system == "SECAM":
+        if False:
             # Just for testing, not planning to do this filtering in cvbs-decode
             from vhsdecode.format_defs.vhs import SECAM_FOR, SECAM_FOB
             out_freq_half_hz = out_frequency_half * 1e6
-            self.Filters["for_bp"] = sps.butter(
-                3,
-                [
-                    (SECAM_FOR - 0.02e6) / out_freq_half_hz,
-                    (SECAM_FOR + 0.02e6) / out_freq_half_hz,
-                ],
-                btype="bandpass",
-            )
+            # self.Filters["for_bp"] = sps.butter(
+            #     3,
+            #     [
+            #         (SECAM_FOR - 0.02e6) / out_freq_half_hz,
+            #         (SECAM_FOR + 0.02e6) / out_freq_half_hz,
+            #     ],
+            #     btype="bandpass",
+            # )
 
             #self.Filters["for_bp_fft"] = lddu.filtfft(self.Filters["for_bp"], self.)
 
-            self.Filters["fob_bp"] = sps.butter(
-                3,
-                [
-                    (SECAM_FOB - 0.02e6) / out_freq_half_hz,
-                    (SECAM_FOB + 0.02e6) / out_freq_half_hz,
-                ],
-                btype="bandpass",
-            )
+            # self.Filters["fob_bp"] = sps.butter(
+            #     3,
+            #     [
+            #         (SECAM_FOB - 0.02e6) / out_freq_half_hz,
+            #         (SECAM_FOB + 0.02e6) / out_freq_half_hz,
+            #     ],
+            #     btype="bandpass",
+            # )
+
+            deviation = 0.28e6
+
+            #for 230
+            #fob 280
+
+            lower_b = SECAM_FOB - deviation
+            higher_b = SECAM_FOB + deviation
+
+            lower_r = SECAM_FOR - deviation
+            higher_r = SECAM_FOR + deviation
+
+            attenuation = 20
+
+            trans_width = 150000
+
+            # print("for_bp", self.Filters["for_bp"])
+            # print("fob_bp", self.Filters["fob_bp"])
+
+            out_freq_hz = out_freq_half_hz * 2
+
+            numtaps, beta = sps.kaiserord(attenuation, trans_width / out_freq_half_hz)
+
+            print("numtaps", numtaps)
+
+            fir_b = sps.firwin(numtaps, (lower_b, higher_b), window=('kaiser', beta), fs=out_freq_hz, pass_zero=False)
+            #print("coeffs: ", fir_b)
+            fir_a = 1.0
+
+            self.Filters["fob_bp_fir"] = [fir_b, fir_a]
+
+            fir_b = sps.firwin(numtaps, (lower_r, higher_r), window=('kaiser', beta), fs=out_freq_hz, pass_zero=False)
+            #print("coeffs: ", fir_b)
+            fir_a = 1.0
+
+            self.Filters["for_bp_fir"] = [fir_b, fir_a]
+
+            # print("FOB BP FIR", self.Filters["fob_bp_fir"])
+            # print("FOR BP FIR", self.Filters["for_bp_fir"])
+
+            #############
+
+            freq_hz = self.freq_hz
+            freq_half_hz = freq_hz / 2
+
+            numtaps, beta = sps.kaiserord(attenuation, trans_width / freq_half_hz)
+
+            print("numtaps b", numtaps)
+
+            fir_b = sps.firwin(numtaps, (lower_b, higher_b), window=('kaiser', beta), fs=freq_hz, pass_zero=False)
+            # print("coeffs: ", fir_b)
+            fir_a = 1.0
+
+            self.Filters["fob_bp_fir_i"] = [fir_b, fir_a]
+
+            fir_b = sps.firwin(numtaps, (lower_r, higher_r), window=('kaiser', beta), fs=freq_hz, pass_zero=False)
+            # print("coeffs: ", fir_b)
+            fir_a = 1.0
+
+            self.Filters["for_bp_fir_i"] = [fir_b, fir_a]
+
+
+
+            ############
+
+
+            # self.Filters["PAL_TEST"] = [[-0.00199265, 0.01226292, 0.01767698, -0.01034077, -0.05538487, -0.03793064,
+            #                              0.09913768, 0.29007115, 0.38112572, 0.29007115, 0.09913768, -0.03793064,
+            #                              -0.05538487, -0.01034077, 0.01767698, 0.01226292, -0.00199265], fir_a]
+
+            # self.Filters["PAL_TEST"] = [[-0.25, 0, 0.5, 0, -0.25], fir_a]
+
+            #fir_b = sps.remez(361, [0, lower_b - trans_width, lower_b, higher_b, higher_b + trans_width, out_freq_half_hz], [0.0, 1.0, 0.0], fs=out_freq_hz)
+
+            #self.Filters["fob_bp_fir_2_f"] = lddu.filtfft([fir_b, fir_a], self.SysParams["outlinelen"])
+            #self.Filters["fob_bp_fir_2"] = [fir_b, fir_a]
+
+            #fir_b = sps.remez(361, [0, lower_r - trans_width, lower_r, higher_r, higher_r + trans_width, out_freq_half_hz], [0.0, 1.0, 0.0], fs=out_freq_hz)
+            # print(len(test))
+            #self.Filters["fob_br_fir_2_f"] = lddu.filtfft([fir_b, fir_a], self.SysParams["outlinelen"])
+            #self.Filters["for_bp_fir_2"] = [fir_b, fir_a]
 
             #self.Filters["fob_bp_fft"] = lddu.filtfft(self.Filters["fob_bp"], self.blocklen)
 
@@ -568,7 +694,17 @@ class VHSDecodeInner(ldd.RFDecode):
                 luma,
             )
 
+        flen = (len(self.Filters["F05"]) // 2) + 1
+
         luma_fft = npfft.rfft(luma)
+        luma = npfft.irfft(luma_fft * self.Filters["FVideo"][:flen])
+
+        # if self._color_system == "SECAM":
+        #     f_len = len(self.Filters["fob_bp_fir_i"][0])
+        #     delay = int(0.5 * (f_len - 1))
+        #     luma_nob = np.roll(sps.lfilter(*self.Filters["fob_bp_fir_i"], luma), -delay)
+        #     luma_nor = np.roll(sps.lfilter(*self.Filters["for_bp_fir_i"], luma), -delay)
+        # luma = luma - luma_nob
 
         luma05_fft = (
             luma_fft * self.Filters["F05"][: (len(self.Filters["F05"]) // 2) + 1]
@@ -586,15 +722,16 @@ class VHSDecodeInner(ldd.RFDecode):
             # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
             #        ax1.plot(hilbert, color='#FF0000')
             # ax1.plot(data, color="#00FF00")
-            ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(7.5))
-            ax1.axhline(self.iretohz(100))
+            # ax1.axhline(self.iretohz(0))
+            # ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
+            # ax1.axhline(self.iretohz(7.5))
+            # ax1.axhline(self.iretohz(100))
             # print("Vsync IRE", self.SysParams["vsync_ire"])
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
-            ax1.plot(luma[:2048])
-            ax2.plot(luma05[:2048])
+            ax1.plot(luma)
+            ax2.plot(luma - luma_nob)
+            # ax2.plot(luma05)
             #            ax4.plot(env, color="#00FF00")
             #            ax3.plot(np.angle(hilbert))
             #            ax4.plot(hilbert.imag)
@@ -602,7 +739,9 @@ class VHSDecodeInner(ldd.RFDecode):
             #            ax3.plot(crossings, color="#0000FF")
             spectrum = npfft.rfft(luma)
             ax3.plot(spectrum)
-            ax4.plot(self.Filters["fob_bp_fft"][:self.blocklen // 2] * 1e6)
+            ax4.plot(luma_nob)
+            ax4.plot(luma_nor)
+            #ax4.plot(self.Filters["fob_bp_fft"][:self.blocklen // 2] * 1e6)
             plt.show()
         #            exit(0)
 

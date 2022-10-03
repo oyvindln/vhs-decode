@@ -470,6 +470,8 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    qDebug() << "Decoder is " << decoderName;
+
     // Select the decoder
     std::unique_ptr<Decoder> decoder;
     if (decoderName == "pal2d") {

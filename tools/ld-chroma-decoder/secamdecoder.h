@@ -50,8 +50,6 @@ public:
 
 private:
     Configuration config;
-    const FIRFilter<std::array<double, 17>> dbFilter;
-    const FIRFilter<std::array<double, 17>> drFilter;
 };
 
 class SecamThread : public DecoderThread
@@ -71,6 +69,12 @@ private:
 
     // Settings
     const SecamDecoder::Configuration &config;
+
+    FIRFilter<std::array<double, 101>> dbFilter;
+    FIRFilter<std::array<double, 101>> drFilter;
+
+    QVector<double> fob_buffer;
+    QVector<double> for_buffer;
 };
 
 #endif // SECAMDECODER_H

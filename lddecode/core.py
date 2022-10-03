@@ -552,7 +552,7 @@ class RFDecode:
         SF["FVideoBurst"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * SF["Fburst"]
 
         if self.system == "PAL":
-            SF["Fpilot"] = filtfft(
+            SF["Fpilot"]  = filtfft(
                 sps.butter(
                     1,
                     [
