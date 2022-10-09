@@ -63,7 +63,7 @@ if [ "$1" = "" ]; then
 	exit 0
 fi
 
-decoder_opts=""
+decoder_opts=()
 
 while [ "$1" != "" ]; do
 	case $1 in
@@ -81,11 +81,11 @@ while [ "$1" != "" ]; do
 		;;
 	-s | --start)
 		shift
-		decoder_opts+="-s $1 "
+		decoder_opts+=( -s "$1" )
 		;;
 	-l | --length)
 		shift
-		decoder_opts+="-l $1 "
+		decoder_opts+=( -l "$1" )
 		;;
 	-h | --help)
 		usage
@@ -93,7 +93,7 @@ while [ "$1" != "" ]; do
 		;;
 	-f | --full)
 		shift
-		decoder_opts+="${decoder_opts} --full-frame"
+		decoder_opts+=( --full-frame )
 		;;
 	--chroma-gain)
 		shift
@@ -105,15 +105,15 @@ while [ "$1" != "" ]; do
 		;;
 	-r | --reverse)
 		shift
-		decoder_opts+="-r "
+		decoder_opts+=( -r )
 		;;
 	-t | --threads)
 		shift
-		decoder_opts+="-t $1 "
+		decoder_opts+=( -t "$1" )
 		;;
 	-q | --quiet)
 		shift
-		decoder_opts+="-q "
+		decoder_opts+=( -q )
 		;;
 	--input-json)
 		shift
@@ -129,7 +129,7 @@ while [ "$1" != "" ]; do
 		;;
 	--pad | --output-padding)
 		shift
-		decoder_opts+="--pad $1 "
+		decoder_opts+=( --pad "$1" )
 		;;
 	-d | --decoder)
 		shift
@@ -137,55 +137,55 @@ while [ "$1" != "" ]; do
 		;;
 	--ffll | --first_active_field_line)
 		shift
-		decoder_opts+="--ffll $1 "
+		decoder_opts+=( --ffll "$1" )
 		;;
 	--lfll | --last_active_field_line)
 		shift
-		decoder_opts+="--lfll $1 "
+		decoder_opts+=( --lfll "$1" )
 		;;
 	--ffrl | --first_active_frame_line)
 		shift
-		decoder_opts+="--ffrl $1 "
+		decoder_opts+=( --ffrl "$1" )
 		;;
 	--lfrl | --last_active_frame_line)
 		shift
-		decoder_opts+="--lfrl $1 "
+		decoder_opts+=( --lfrl "$1" )
 		;;
 	-o | --oftest)
 		shift
-		decoder_opts+="-o "
+		decoder_opts+=( -o )
 		;;
 	--chroma-nr)
 		shift
-		decoder_opts+="--chroma-nr $1 "
+		decoder_opts+=( --chroma-nr "$1" )
 		;;
 	--luma-nr)
 		shift
-		decoder_opts+="--luma-nr $1 "
+		decoder_opts+=( --luma-nr "$1" )
 		;;
 	--simple-pal)
 		shift
-		decoder_opts+="--simple-pal $1 "
+		decoder_opts+=( --simple-pal "$1" )
 		;;
 	--transform-mode)
 		shift
-		decoder_opts+="--transform-mode $1 "
+		decoder_opts+=( --transform-mode "$1" )
 		;;
 	--transform-threshold)
 		shift
-		decoder_opts+="--transform-threshold $1 "
+		decoder_opts+=( --transform-threshold "$1" )
 		;;
 	--transform-thresholds)
 		shift
-		decoder_opts+="--transform-thresholds $1 "
+		decoder_opts+=( --transform-thresholds "$1" )
 		;;
 	--show-ffts)
 		shift
-		decoder_opts+="--show-ffts "
+		decoder_opts+=( --show-ffts )
 		;;
 	--ntsc-phase-comp)
 		shift
-		decoder_opts+="--ntsc-phase-comp "
+		decoder_opts+=( --ntsc-phase-comp )
 		;;
 	*)
 		input=$1
@@ -250,16 +250,16 @@ if [ "$videosystem" = "ntsc" ]; then
 	color_space="smpte170m"
 	color_primaries="smpte170m"
 	color_trc="smpte170m"
-	decoder_opts="${decoder_opts} --ntsc-phase-comp"
+	decoder_opts+=( --ntsc-phase-comp )
 fi
+
+audio_opts_1=()
+audio_opts_2=()
 
 if [ -f "$audiotrack" ]; then
 	echo "Muxing in audio track $audiotrack"
-	audio_opts_1="-itsoffset -00:00:00.000 -i $audiotrack"
-	audio_opts_2="-c:a flac -compression_level 12 -map 2:a?"
-else
-	audio_opts_1=""
-	audio_opts_2=""
+	audio_opts_1+=( -itsoffset -00:00:00.000 -i "$audiotrack" )
+	audio_opts_2+=( -c:a flac -compression_level 12 -map 2:a? )
 fi
 
 # There might be a better way of supporting monochrome output
@@ -267,30 +267,30 @@ if [ "$monochrome" = "1" ]; then
 	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
-			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "$decoder_opts" --input-json "$input_tbc_json" - -
+			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
-	"$audio_opts_1" \
+	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
 	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
-	-colorspace $color_space "$audio_opts_2" \
+	-colorspace $color_space "${audio_opts_2[@]}" \
 	-shortest -y "$input_stripped.mkv"
 else
 	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
-			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "$decoder_opts" --input-json "$input_tbc_json" - -
+			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
 	-i <(
 		ld-dropout-correct -i "$input_chroma_tbc" --input-json "$input_tbc_json" --output-json /dev/null - |
-			ld-chroma-decoder -f $chroma_decoder "$decoder_opts" --luma-nr 0 --chroma-gain $chroma_gain --chroma-phase "$chroma_phase" -p y4m --input-json "$input_tbc_json" - -
+			ld-chroma-decoder -f $chroma_decoder "${decoder_opts[@]}" --luma-nr 0 --chroma-gain $chroma_gain --chroma-phase "$chroma_phase" -p y4m --input-json "$input_tbc_json" - -
 	) \
-	"$audio_opts_1" \
+	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
 	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
-	-colorspace $color_space "$audio_opts_2" \
-	-shortest -y "$input_stripped.mkv"
+	-colorspace $color_space "${audio_opts_2[@]}" \
+	-shortest -y "${input_stripped}.mkv"
 fi
 
 # Encode internet-friendly clip of previous lossless result:
