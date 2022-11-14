@@ -256,6 +256,11 @@ fi
 audio_opts_1=()
 audio_opts_2=()
 
+if [ "$audiotrack" != "" ] && [ ! -f "$audiotrack" ]; then
+    echo "Cannot find audiotrack. Aborting"
+    exit 1;
+fi
+
 if [ -f "$audiotrack" ]; then
 	echo "Muxing in audio track $audiotrack"
 	audio_opts_1+=( -itsoffset -00:00:00.000 -i "$audiotrack" )
