@@ -1,6 +1,6 @@
 ![vhs-decode logo](docs/vhs-decode_logo_256px.png)
 
-# VHS-Decode (It does more than VHS now!)
+# VHS-Decode
 
 A fork of [LD-Decode](https://github.com/happycube/ld-decode), the decoding software powering the [Domesday86 Project](https://www.domesday86.com/).  
 This version has been modified to work with the differences found in the tracked RF drum head signals taken directly from videotapes.
