@@ -13,9 +13,9 @@ SMPTE ColourBars (16:9) Test Tape With [WSS](https://en.wikipedia.org/wiki/Wides
 
 # [Supported Tape Formats](https://github.com/oyvindln/vhs-decode/wiki/Tape-Support-List)
 
-**(S-)VHS** 625-line and 525-line - NTSC, NTSC-J, PAL and PAL-M **Fully Supported**
+**(S-)VHS** 625-line and 525-line - NTSC, NTSC-J, PAL and PAL-M - **Fully Supported**
 
-**U-Matic** 625-line and 525-line Low Band, PAL and NTSC. - **Fully Supported**
+**U-Matic** 625-line and 525-line Low Band, PAL and NTSC - **Fully Supported**
 
 **Betamax** 625-line and 525-line, PAL & NTSC - **Working**
 
@@ -99,7 +99,7 @@ For alligator clips, this is Red on signal/Black on ground; if you have bigger t
 
 For direct soldering, RG178 or RG316 cable to an BNC bulk head is recommended. This allows a short, clean direct run to a fixed mounting point you can drill or melt/file out, or just thread the cable through a ventilation slit or other pre-existing open space.
 
-3. Test to see if an 10uf capacitor is needed. If you want to see your tape during RF capture or are playing SVHS or other higher bandwidth tapes, you will need to add a 10uf capacitor in-line before your bulkhead/probe connection, to avoid signal dropout. (Applies to most VCRs but not all; example, many JVC units.)
+3. Test to see if a 10uf capacitor is needed. If you want to see your tape during RF capture or are playing SVHS or other higher bandwidth tapes, you will need to add a 10uf capacitor in-line before your bulkhead/probe connection, to avoid signal dropout. (Applies to most VCRs but not all; example, many JVC units.)
 
 **Note** Do not make sharp bends in any RF cabling.
 
@@ -408,3 +408,5 @@ filename.log        - Timecode Indexed Action/Output Log
 [Google Doc Documentation](https://docs.google.com/document/d/1ZzR3gbW6iSVSNP0qoDIS0ExeRecKehlTQ0EJyx2g568/edit?usp=sharing)
 
 ## *If in doubt - feel free to read the docs/wiki again, or submit a question!*
+
+For future documentation changes, speak with TheRealHarrypm#1667 on Discord or [HarryPM](https://github.com/harrypm)
