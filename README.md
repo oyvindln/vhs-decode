@@ -45,7 +45,7 @@ Preferably adjusted per tape and in excellent mechanical and head condition, pro
 
 **Note** SVHS NTSC Decks - Pricing for these units may be inflated, thus it's possible you can import PAL decks with NTSC support for 1/3rd the price. However, this only applies if conventional reference SVHS captures are required.
 
-Its good practice to not cross contaminate tapes, especially if dealing with mouldy or contaminated tapes.  Always clean your tape track/drum/heads before and afterwards with 99.9% Isopropyl Alcohol, and lint free cloths/pads/paper. This ensures less dropouts from dirty playback heads.
+Its good practice to not cross contaminate tapes, especially if dealing with mouldy or contaminated tapes.  Always clean your tape track/drum/heads before and afterwards with 99.9% Isopropanol, and lint free cloths/pads/paper. This ensures less dropouts from dirty playback heads.
 
 It also helps to make sure to re-lubricate metal and plastic moving joints, cogs, and bearings, with appropriate grease and oil products, to avoid mechanical failures.
 
@@ -71,7 +71,7 @@ There is now a [CXADC Wiki](https://github.com/happycube/cxadc-linux3/wiki), exp
 
 The budget approach is using a video capture card based on a Conexant CX23880/1/2/3 PCI chipset. With a modified Linux driver, these cards can be forced to output RAW data that can be captured to a file, instead of decoding video normally as they otherwise would.
 
-There are now ‘’New’’ Chinese variants that can be found on AliExpress that have integrated Asmedia or ITE 1x PCIE bridge chips allowing modern systems to use them.
+There are now \"New\" Chinese variants that can be found on AliExpress that have integrated Asmedia or ITE 1x PCIE bridge chips allowing modern systems to use them.
 
 The cards however, at stock without any modifications, have more self-noise compared to the Domesday Duplicator setup, with about a 3db signal to noise difference. Currently, in recent testing, the CX23883-39 based white PCB variant cards have consistently lower noise.
 
@@ -97,13 +97,13 @@ For some Sony decks you can use Dupont connectors on the pins to save effort sol
 
 For alligator clips, this is Red on signal/Black on ground; if you have bigger test points like on rackmount and later prosumer decks.
 
-For direct soldering, RG178 or RG316 cable to an BNC bulk head is recommended. This allows a short, clean direct run to a fixed mounting point you can drill or melt/file out, or just thread the cable though a ventilation slit or other pre-existing open space.
+For direct soldering, RG178 or RG316 cable to an BNC bulk head is recommended. This allows a short, clean direct run to a fixed mounting point you can drill or melt/file out, or just thread the cable through a ventilation slit or other pre-existing open space.
 
 3. Test to see if an 10uf capacitor is needed. If you want to see your tape during RF capture or are playing SVHS or other higher bandwidth tapes, you will need to add a 10uf capacitor in-line before your bulkhead/probe connection, to avoid signal dropout. (Applies to most VCRs but not all; example, many JVC units.)
 
 **Note** Do not make sharp bends in any RF cabling.
 
-**Note** With Coax cable (RGxxx etc), the centre stranded wire is signal, and outer shield wire is ground twist. The ground strands tight to make a solder-able connection, and ensure to use ample flux to flow solder correctly. Afterwards, you may wipe with 99.9% Isopropyl Alcohol to clean the flux off.
+**Note** With Coax cable (RGxxx etc), the centre stranded wire is signal, and outer shield wire is ground twist. The ground strands tight to make a solder-able connection, and ensure to use ample flux to flow solder correctly. Afterwards, you may wipe with 99.9% Isopropanol to clean the flux off.
 
 **Note** Some UMATIC decks have a direct RF output on the back that may be viable for RF capture (At the moment, this requires further testing and expansion on data/information)
 
