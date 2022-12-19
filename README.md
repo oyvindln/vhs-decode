@@ -399,7 +399,7 @@ filename.log        - Timecode Indexed Action/Output Log
 
 [Facebook](https://www.facebook.com/groups/2070493199906024)
 
-[VideoHelp Forum](https://forum.videohelp.com/threads/394168-Current-status-of-ld-decode-vhs-decode-(true-backup-of-RF-signals\)#post2558660)
+[VideoHelp Forum](https://forum.videohelp.com/threads/394168-Current-status-of-ld-decode-vhs-decode-(true-backup-of-RF-signals)#post2558660)
 
 # More Documentation
 
