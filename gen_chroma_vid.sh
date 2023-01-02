@@ -8,8 +8,11 @@ chroma_phase=0
 output_format="yuv422p10le"
 monochrome=0
 chroma_decoder=""
+video_codec="ffv1"
+video_container="mkv"
 
-FILTER_COMPLEX="[1:v]format=yuv422p10le[chroma];[0:v][chroma]mergeplanes=0x001112:yuv422p10le[output]"
+#output_format is set here as that could be changed to yuv444p10le if desired
+FILTER_COMPLEX="[1:v]format=$output_format[chroma];[0:v][chroma]mergeplanes=0x001112:$output_format[output]"
 
 usage() {
 	echo "Usage: $(basename "$0") [-i input (without .tbc)] [-v videosystem]"
@@ -29,6 +32,9 @@ usage() {
 	echo "--input-json <filename>                     Specify the input JSON file"
 	echo "-p, --output-format <output-format>         Output format (ffmpeg output formats; default yuv422p10le);"
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
+	echo "--video-codec                               Specify the output video codec to use (ex. v210); default is FFV1"
+	echo "--video-container                           Specify the output video container to use (ex. mov); default is mkv."
+    echo "                                            Specify only the container type, do not include a period."
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
 	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
@@ -69,11 +75,11 @@ while [ "$1" != "" ]; do
 	case $1 in
 	-i | --input)
 		shift
-		input=$1
+		input="$1"
 		;;
 	-v | --videosystem)
 		shift
-		videosystem=$1
+		videosystem="$1"
 		;;
 	-a | --audio)
 		shift
@@ -97,11 +103,11 @@ while [ "$1" != "" ]; do
 		;;
 	--chroma-gain)
 		shift
-		chroma_gain=$1
+		chroma_gain="$1"
 		;;
 	--chroma-phase)
 		shift
-		chroma_phase=$1
+		chroma_phase="$1"
 		;;
 	-r | --reverse)
 		shift
@@ -117,11 +123,20 @@ while [ "$1" != "" ]; do
 		;;
 	--input-json)
 		shift
-		input_tbc_json=$1
+		input_tbc_json="$1"
 		;;
 	-p | --output-format)
 		shift
-		output_format=$1
+		output_format="$1"
+		;;
+	--video-codec)
+		shift
+		video_codec="$1"
+		;;
+#Note: ffmpeg does not seem to like v210 in .mxf
+	--video-container)
+		shift
+		video_container="$1"
 		;;
 	-b | --blackandwhite)
 		shift
@@ -133,7 +148,7 @@ while [ "$1" != "" ]; do
 		;;
 	-d | --decoder)
 		shift
-		chroma_decoder=$1
+		chroma_decoder="$1"
 		;;
 	--ffll | --first_active_field_line)
 		shift
@@ -188,7 +203,7 @@ while [ "$1" != "" ]; do
 		decoder_opts+=( --ntsc-phase-comp )
 		;;
 	*)
-		input=$1
+		input="$1"
 		;;
 	esac
 	shift
@@ -200,9 +215,9 @@ if [ "$input" = "" ]; then
 	exit 1
 fi
 
-input_stripped=${input%.tbc}
-input_tbc=$input_stripped.tbc
-input_chroma_tbc=${input%.tbc}_chroma.tbc
+input_stripped="${input%.tbc}"
+input_tbc="$input_stripped".tbc
+input_chroma_tbc="${input%.tbc}"_chroma.tbc
 
 if [ "$input_tbc_json" = "" ]; then
 	input_tbc_json=$input_tbc.json
@@ -276,10 +291,10 @@ if [ "$monochrome" = "1" ]; then
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
-	-shortest -y "$input_stripped.mkv"
+	-shortest -y "$input_stripped"."$video_container"
 else
 	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
 	-i <(
@@ -292,10 +307,10 @@ else
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
-	-shortest -y "${input_stripped}.mkv"
+	-shortest -y "${input_stripped}"."$video_container"
 fi
 
 # Encode internet-friendly clip of previous lossless result:
