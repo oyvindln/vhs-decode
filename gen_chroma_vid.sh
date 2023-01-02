@@ -34,7 +34,7 @@ usage() {
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
 	echo "--video-codec                               Specify the output video codec to use (ex. v210); default is FFV1"
 	echo "--video-container                           Specify the output video container to use (ex. mov); default is mkv."
-    echo "                                            Specify only the container type, do not include a period."
+        echo "                                            Specify only the container type, do not include a period."
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
 	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
