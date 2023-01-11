@@ -2,16 +2,24 @@
 input=""
 input_tbc_json=""
 videosystem=""
+aspect_ratio=""
 audiotrack=""
+audio_codec="-c:a flac -compression_level 12" # FLAC is defualt. 
 chroma_gain=-1 # Not a default value.  It's a sentinel value for the video standards below
 chroma_phase=0
-output_format="yuv422p10le"
+output_format="" # Default is 4:2:2 10-bit yuv422p10le / could be 4:4:4 10-bit yuv444p10le
 monochrome=0
 chroma_decoder=""
-video_codec="ffv1"
-video_container="mkv"
+video_codec=""
+video_arguments=""
+video_container=""
+encoder_profile=""
+thread_queue_size="-thread_queue_size 4096"
 
-#output_format is set here as that could be changed to yuv444p10le if desired
+# Audio Options: s24le 24-bit Interger PCM / f32le 32-bit Float PCM / u32le 32-bit Interger PCM
+
+# Note V210 only uses .MOV / ProRes Can use .MOV or .MXF / .MKV can be used on anything but might have support issues.
+
 FILTER_COMPLEX="[1:v]format=$output_format[chroma];[0:v][chroma]mergeplanes=0x001112:$output_format[output]"
 
 usage() {
@@ -34,7 +42,7 @@ usage() {
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
 	echo "--video-codec                               Specify the output video codec to use (ex. v210); default is FFV1"
 	echo "--video-container                           Specify the output video container to use (ex. mov); default is mkv."
-        echo "                                            Specify only the container type, do not include a period."
+    echo "                                            Specify only the container type, do not include a period."
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
 	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
@@ -51,6 +59,8 @@ usage() {
 	echo "--lfrl, --last_active_frame_line <number>   The last visible line of a frame."
 	echo "                                                Range 1-525 for NTSC (default: 525),"
 	echo "                                                      1-620 for PAL (default: 620)"
+	echo "--ffll 2 --lfll 308 --ffrl 2 --lfrl 620     Export PAL top VBI area"
+    echo "--ffll 1 --lfll 259 --ffrl 2 --lfrl 525     Export NTSC top VBI area"
 	echo "-o, --oftest                                NTSC: Overlay the adaptive filter map (only used for testing)"
 	echo "--chroma-nr <number>                        NTSC: Chroma noise reduction level in dB (default 0.0)"
 	echo "--luma-nr <number>                          Luma noise reduction level in dB (default 1.0)"
@@ -60,6 +70,9 @@ usage() {
 	echo "--transform-thresholds <file>               Transform: File containing per-bin similarity thresholds in 'threshold' mode"
 	echo "--show-ffts                                 Transform: Overlay the input and output FFTs"
 	echo "--ntsc-phase-comp                           Use NTSC QADM decoder taking burst phase into account (BETA)"
+    echo "--v210                                      Output Uncompressed 4:2:2 10-bit V210 (295mbps) in the .mov container"
+	echo "--prores_hq                                 Output Vissully Lossless 4:2:2 10-bit ProRes HQ (70mbps) in the .mov container"
+	echo "--prores_4444xq                             Output Vissully Lossless 4:4:4 10-bit ProRes 4444 XQ (130mbps) in the .mov container"
 	echo
 	echo "Example: $(basename "$0") -i /media/decoded/tape19 -v pal -a /media/decoded/tape19.wav"
 }
@@ -76,6 +89,18 @@ while [ "$1" != "" ]; do
 	-i | --input)
 		shift
 		input="$1"
+		;;
+	--v210)
+		shift
+		encoder_profile="$1"
+		;;
+	--prores_hq)
+		shift
+		encoder_profile="$1"
+	    ;;
+	--prores_4444xq)
+		shift
+		encoder_profile="$1"
 		;;
 	-v | --videosystem)
 		shift
@@ -133,7 +158,6 @@ while [ "$1" != "" ]; do
 		shift
 		video_codec="$1"
 		;;
-#Note: ffmpeg does not seem to like v210 in .mxf
 	--video-container)
 		shift
 		video_container="$1"
@@ -239,7 +263,16 @@ if [ "$videosystem" = "" ]; then
 	else
 		videosystem="ntsc"
 	fi
-fi
+
+if [ "$aspect_ratio" = "" ]; then
+	# Very dumb way of checking if the source has WSS 16:9 Widescreen flagging
+	# There is probably a better way of doing this...
+	wss_found="$(head "$input_tbc_json" | grep -c -e \\\"isWidescreen\\\":true)"
+	if [ "$wss_found" = 1 ]; then
+		aspect_ratio="-aspect 16:9"
+	else
+		aspect_ratio="-aspect 4:3"
+	fi
 
 if [ "$videosystem" = "pal" ]; then
 	echo "Processing tbc as PAL"
@@ -252,6 +285,46 @@ if [ "$videosystem" = "pal" ]; then
 	color_space="bt470bg"
 	color_primaries="bt470bg"
 	color_trc="gamma28"
+fi
+
+if [ "$encoder_profile" = "--FFV1" ]; then
+		echo "Encoding to FFV1"
+	fi
+		video_codec="ffv1"
+		video_container="mkv"
+		audio_codec="-c:a flac -compression_level 12"
+		video_arguments="-coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+		output_format="yuv422p10le"
+fi
+
+if [ "$encoder_profile" = "--v210" ]; then
+		echo "Encoding to V210"
+	fi
+		video_codec="v210"
+		video_container="mov"
+		audio_codec="-c:a s24le"
+		video_arguments="-top 1 -vf setfield=tff -flags +ilme+ildct"
+		output_format="yuv422p10le"
+fi
+
+if [ "$encoder_profile" = "--prores_hq" ]; then
+		echo "Encoding to ProRes HQ"
+	fi
+	    video_codec="prores"
+		audio_codec="-c:a s24le"
+		video_container="mov"
+		video_arguments="-profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -top 1"
+		output_format="yuv422p10le"
+fi
+
+if [ "$encoder_profile" = "prores_4444xq" ]; then
+		echo "Encoding to ProRes 4444XQ"
+	fi
+		video_codec="prores"
+		audio_codec="-c:a s24le"
+		video_container="mov"
+		video_arguments="-profile:v 5 -vendor apl0 -bits_per_mb 8000 -mbs_per_slice 8 -top 1"
+		output_format="yuv444p10le"
 fi
 
 if [ "$videosystem" = "ntsc" ]; then
@@ -279,24 +352,25 @@ fi
 if [ -f "$audiotrack" ]; then
 	echo "Muxing in audio track $audiotrack"
 	audio_opts_1+=( -itsoffset -00:00:00.000 -i "$audiotrack" )
-	audio_opts_2+=( -c:a flac -compression_level 12 -map 2:a? )
+	audio_opts_2+=( "$audio_codec" -map 2:a? )
 fi
 
 # There might be a better way of supporting monochrome output
+
 if [ "$monochrome" = "1" ]; then
-	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
+	ffmpeg -hide_banner "$thread_queue_size" -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
 			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" "$video_arguments" \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
 	-shortest -y "$input_stripped"."$video_container"
 else
-	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
+	ffmpeg -hide_banner "$thread_queue_size" -color_range tv \
 	-i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
 			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
@@ -307,14 +381,28 @@ else
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" "$video_arguments" \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
 	-shortest -y "${input_stripped}"."$video_container"
 fi
 
+
+# Render top VBI Area
+# ./gen_chroma_vid.sh --ffll 2 --lfll 308 --ffrl 2 --lfrl 620 <tbc-name>
+# ./gen_chroma_vid.sh --ffll 1 --lfll 259 --ffrl 2 --lfrl 525 <tbc-name>
+
+
 # Encode internet-friendly clip of previous lossless result:
 #ffmpeg -hide_banner -i "$1.mkv" -vf scale=in_color_matrix=bt601:out_color_matrix=bt709:768x576,bwdif=1:0:0 -c:v libx264 -preset veryslow -b:v 6M -maxrate 6M -bufsize 6M -pixel_format yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 -aspect 4:3 -c:a libopus -b:a 192k -strict -2 -movflags +faststart -y "$1_lossy.mp4"
+
+# Scaled Version
+#ffmpeg -hide_banner -i "$1.mkv" -vf scale=in_color_matrix=bt601:out_color_matrix=bt709:1440x1080,bwdif=1:0:0 -c:v libx264 -preset veryslow -b:v 6M -maxrate 6M -bufsize 6M -pixel_format yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 -aspect 4:3 -c:a libopus -b:a 192k -strict -2 -movflags +faststart -y "$1_1440x1080_lossy.mp4"
+
+
+# Encode an editor-friendly version of the previous lossless result:
+# ffmpeg -hide_banner -i "$1.mkv" -vf setfield=tff -flags +ilme+ildct -c:v prores -profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -pixel_format yuv422p10lep -vendor apl0 -bits_per_mb 8000 -color_range tv -color_primaries bt709 -color_trc bt709 -colorspace bt709 -vf setdar=4/3,setfield=tff -c:a s24le "$1_ProResHQ.mov"
+
 
 # Old version of the script:
 ##!/bin/sh
@@ -336,3 +424,20 @@ fi
 #ffmpeg -f rawvideo -r 25 -pix_fmt yuv444p16 -s 928x576 -i "$1_chroma.rgb" -r 25 -pix_fmt gray16 -s 928x576 -i "$1.rgb" -filter_complex "[0:v]format=yuv444p16le[chroma];[1:v]format=yuv444p16le[luma];[chroma][luma]mergeplanes=0x100102:yuv444p16le[output]" -map "[output]":v -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y -shortest "$1.mkv"
 #ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_luma.mkv"
 #ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1_chroma.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_chroma.mkv"
+
+# HOW TO EDIT THIS SCRIPT!
+# The goto and repalce sorce localtion of script, these are the locations thats actaully running it.
+#./usr/local/bin/gen_chroma_vid.sh
+#./usr/local/lib/python3.10/dist-packages/ld_decode-7-py3.10-linux-x86_64.egg/EGG-INFO/scripts/gen_chroma_vid.sh
+
+# FFV1 Stock - "-coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+
+# Thread queue size can be changed to lower or higher value helpful in some cases, 1024 / 2048 etc
+  
+# FFV1 Encoding - "-c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+
+# V210 Encoding - "-c:v v210 -top 1 -vf setfield=tff -flags +ilme+ildct"
+
+# ProRes HQ Encoding - "-c:v prores -profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -top 1"
+
+# ProRes 4444XQ Encoding - "-c:v prores -profile:v 5 -vendor apl0 -bits_per_mb 8000 -mbs_per_slice 8 -top 1"
