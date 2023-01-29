@@ -28,7 +28,8 @@ usage() {
 	echo "Options:"
 	echo "-i, --input                                 Name of the input, without extension. This option is mandatory."
 	echo "-v, --videosystem                           Either pal or ntsc. Default is pal"
-	echo "-a, --audio                                 Optional Audiotrack (*.wav, mp3, aac et. al.) to mux with generated video"
+	echo "--a1, --audio1                              HiFi Audiotrack (*.wav, mp3, aac et. al.) to mux with generated video"
+    echo "--a2, --audio2                              Linear Audiotrack (*.wav, mp3, aac et. al.) to mux with generated video"
 	echo "-s, --start                                 Specify the start frame number"
 	echo "-l, --length                                Specify the length (number of frames to process)"
 	echo "-f, --full                                  Sets output to full-frame of video signal e.g 1135x625 PAL & 910x525 NTSC (experimental)"
@@ -42,7 +43,7 @@ usage() {
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
 	echo "--video-codec                               Specify the output video codec to use (ex. v210); default is FFV1"
 	echo "--video-container                           Specify the output video container to use (ex. mov); default is mkv."
-        echo "                                            Specify only the container type, do not include a period."
+    echo "                                            Specify only the container type, do not include a period."
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
 	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
@@ -60,7 +61,7 @@ usage() {
 	echo "                                                Range 1-525 for NTSC (default: 525),"
 	echo "                                                      1-620 for PAL (default: 620)"
 	echo "--ffll 2 --lfll 308 --ffrl 2 --lfrl 620     Export PAL top VBI area"
-        echo "--ffll 1 --lfll 259 --ffrl 2 --lfrl 525     Export NTSC top VBI area"
+    echo "--ffll 1 --lfll 259 --ffrl 2 --lfrl 525     Export NTSC top VBI area"
 	echo "-o, --oftest                                NTSC: Overlay the adaptive filter map (only used for testing)"
 	echo "--chroma-nr <number>                        NTSC: Chroma noise reduction level in dB (default 0.0)"
 	echo "--luma-nr <number>                          Luma noise reduction level in dB (default 1.0)"
@@ -70,9 +71,13 @@ usage() {
 	echo "--transform-thresholds <file>               Transform: File containing per-bin similarity thresholds in 'threshold' mode"
 	echo "--show-ffts                                 Transform: Overlay the input and output FFTs"
 	echo "--ntsc-phase-comp                           Use NTSC QADM decoder taking burst phase into account (BETA)"
-        echo "--v210                                      Output Uncompressed 4:2:2 10-bit V210 (295mbps) in the .mov container"
+    echo "--ffv1                                      (Deafult) Lossless Compressed FFV1 4:2:2 (70-120mbps) in the .mkv containter"
+	echo "--v210                                      Output Uncompressed 4:2:2 10-bit V210 (295mbps) in the .mov container"
+	echo "--v410                                      Output Uncompressed 4:4:4 10-bit V210 (428mbps) in the .mov container"
 	echo "--prores_hq                                 Output Vissully Lossless 4:2:2 10-bit ProRes HQ (70mbps) in the .mov container"
 	echo "--prores_4444xq                             Output Vissully Lossless 4:4:4 10-bit ProRes 4444 XQ (130mbps) in the .mov container"
+	echo "--language_1 <language>                     Sets the Language marker for audio track 1 such as eng,jpn,ger,spn"
+    echo "--language_2 <language>                     Sets the Language marker for audio track 2 such as eng,jpn,ger,spn"
 	echo
 	echo "Example: $(basename "$0") -i /media/decoded/tape19 -v pal -a /media/decoded/tape19.wav"
 }
@@ -94,6 +99,14 @@ while [ "$1" != "" ]; do
 		shift
 		encoder_profile="$1"
 		;;
+	--v410)
+		shift
+		encoder_profile="$1"
+		;;
+    --ffv1)
+		shift
+		encoder_profile="$1"
+		;;
 	--prores_hq)
 		shift
 		encoder_profile="$1"
@@ -106,9 +119,13 @@ while [ "$1" != "" ]; do
 		shift
 		videosystem="$1"
 		;;
-	-a | --audio)
+	--a1 | --audio1)
 		shift
 		audiotrack="$1"
+		;;
+    --a2 | --audio2)
+		shift
+		audiotrack_2="$1"
 		;;
 	-s | --start)
 		shift
@@ -269,9 +286,9 @@ if [ "$aspect_ratio" = "" ]; then
 	# There is probably a better way of doing this...
 	wss_found="$(head "$input_tbc_json" | grep -c -e \\\"isWidescreen\\\":true)"
 	if [ "$wss_found" = 1 ]; then
-		aspect_ratio="-aspect 16:9"
+		aspect_ratio="-aspect 1.777777"
 	else
-		aspect_ratio="-aspect 4:3"
+		aspect_ratio="-aspect 1.333333"
 	fi
 
 if [ "$videosystem" = "pal" ]; then
@@ -285,46 +302,6 @@ if [ "$videosystem" = "pal" ]; then
 	color_space="bt470bg"
 	color_primaries="bt470bg"
 	color_trc="gamma28"
-fi
-
-if [ "$encoder_profile" = "--FFV1" ]; then
-		echo "Encoding to FFV1"
-	fi
-		video_codec="ffv1"
-		video_container="mkv"
-		audio_codec="-c:a flac -compression_level 12"
-		video_arguments="-coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
-		output_format="yuv422p10le"
-fi
-
-if [ "$encoder_profile" = "--v210" ]; then
-		echo "Encoding to V210"
-	fi
-		video_codec="v210"
-		video_container="mov"
-		audio_codec="-c:a s24le"
-		video_arguments="-top 1 -vf setfield=tff -flags +ilme+ildct"
-		output_format="yuv422p10le"
-fi
-
-if [ "$encoder_profile" = "--prores_hq" ]; then
-		echo "Encoding to ProRes HQ"
-	fi
-	    video_codec="prores"
-		audio_codec="-c:a s24le"
-		video_container="mov"
-		video_arguments="-profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -top 1"
-		output_format="yuv422p10le"
-fi
-
-if [ "$encoder_profile" = "prores_4444xq" ]; then
-		echo "Encoding to ProRes 4444XQ"
-	fi
-		video_codec="prores"
-		audio_codec="-c:a s24le"
-		video_container="mov"
-		video_arguments="-profile:v 5 -vendor apl0 -bits_per_mb 8000 -mbs_per_slice 8 -top 1"
-		output_format="yuv444p10le"
 fi
 
 if [ "$videosystem" = "ntsc" ]; then
@@ -341,18 +318,101 @@ if [ "$videosystem" = "ntsc" ]; then
 	decoder_opts+=( --ntsc-phase-comp )
 fi
 
-audio_opts_1=()
-audio_opts_2=()
+## FFV1 - Deafult Profile
+
+if [ "$encoder_profile" = "" ]; then
+	echo "Encoding to FFV1"
+	video_codec="-c:v ffv1"
+	video_container="mkv"
+	audio_codec="-c:a flac -compression_level 12"
+	video_arguments="-coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+	output_format="yuv422p10le"
+fi
+
+## FFV1 Encoding
+
+if [ "$encoder_profile" = "--FFV1" ]; then
+	echo "Encoding to FFV1"
+	video_codec="-c:v ffv1"
+	video_container="mkv"
+	audio_codec="-c:a flac -compression_level 12"
+	video_arguments="-coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+	output_format="yuv422p10le"
+fi
+
+# V210 4:2:2 Encoding 
+
+if [ "$encoder_profile" = "--v210" ]; then
+	echo "Encoding to V210"
+	video_codec="-c:v v210"
+	audio_codec="-c:a s24le"
+    video_container="mov"
+	video_arguments="-top 1 -f mov"
+	output_format="yuv422p10le"
+fi
+
+# V410 4:4:4 Encoding
+
+if [ "$encoder_profile" = "--v410" ]; then
+	echo "Encoding to V410"
+	video_codec="-c:v v410"
+	audio_codec="-c:a s24le"
+    video_container="mov"
+	video_arguments="-top 1 -f mov" 
+	output_format="yuv444p10le"
+fi
+
+## ProRes HQ 4:2:2 Encoding
+
+if [ "$encoder_profile" = "--prores_hq" ]; then
+	echo "Encoding to ProRes HQ"
+    video_codec="-c:v prores"
+	audio_codec="-c:a s24le"
+	video_container="mov"
+	video_arguments="-profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -top 1 -f mov"
+	output_format="yuv422p10le"
+fi
+
+## ProRes 4444XQ 4:4:4 Encoding
+
+if [ "$encoder_profile" = "--prores_4444xq" ]; then
+	echo "Encoding to ProRes 4444XQ"
+	video_codec="-c:v prores"
+	audio_codec="-c:a s24le"
+	video_container="mov"
+    video_arguments="-profile:v 5 -vendor apl0 -bits_per_mb 8000 -mbs_per_slice 8 -top 1 -f mov"
+	output_format="yuv444p10le"
+fi
+
+## Audio Options
+
+audio_opts_1=() # Delay Time Offset HH:MM:SS:FFF
+audio_opts_2=() # Audio Codec Deafult is FLAC
+audio_opts_3=() # Sets Track Lanauage using ISO 639 codes i.g eng/jpn etc 
+
+## No Audio Track Found
 
 if [ "$audiotrack" != "" ] && [ ! -f "$audiotrack" ]; then
     echo "Cannot find audiotrack. Aborting"
     exit 1;
 fi
 
+## Audio Track 1 HiFi Audio
+
 if [ -f "$audiotrack" ]; then
 	echo "Muxing in audio track $audiotrack"
 	audio_opts_1+=( -itsoffset -00:00:00.000 -i "$audiotrack" )
-	audio_opts_2+=( "$audio_codec" -map 2:a? )
+	audio_opts_2+=( "$audio_codec" -map 2:a? -metadata:s:a:0 title="HiFi" )
+	audio_opts_3+=( -metadata:s:a:1 language="$language_1" )
+fi
+
+## Audio Track 2 Linear Audio
+
+if [ -f "$audiotrack_2" ]; then
+	echo "Muxing in audio track $audiotrack_2"
+	audio_opts_1+=( -itsoffset -00:00:00.000 -i "$audiotrack_2" )
+	audio_opts_2+=( "$audio_codec" -map 3:a? -metadata:s:a:1 title="Linear" ) 
+	audio_opts_3+=( -metadata:s:a:1 language="$language_2" )
 fi
 
 # There might be a better way of supporting monochrome output
@@ -365,9 +425,9 @@ if [ "$monochrome" = "1" ]; then
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v "$video_codec" "$video_arguments" \
+	-map "[output]":v "$video_codec" "$video_arguments" "$aspect_ratio" \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
-	-colorspace $color_space "${audio_opts_2[@]}" \
+	-colorspace $color_space "${audio_opts_2[@]}" "${audio_opts_3[@]}" \
 	-shortest -y "$input_stripped"."$video_container"
 else
 	ffmpeg -hide_banner "$thread_queue_size" -color_range tv \
@@ -381,17 +441,18 @@ else
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v "$video_codec" "$video_arguments" \
+	-map "[output]":v "$video_codec" "$video_arguments" "$aspect_ratio" \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
-	-colorspace $color_space "${audio_opts_2[@]}" \
+	-colorspace $color_space "${audio_opts_2[@]}" "${audio_opts_3[@]}" \
 	-shortest -y "${input_stripped}"."$video_container"
 fi
 
 
-# Render top VBI Area
+# Render top VBI Area PAL
 # ./gen_chroma_vid.sh --ffll 2 --lfll 308 --ffrl 2 --lfrl 620 <tbc-name>
-# ./gen_chroma_vid.sh --ffll 1 --lfll 259 --ffrl 2 --lfrl 525 <tbc-name>
 
+# Render top VBI Area NTSC
+# ./gen_chroma_vid.sh --ffll 1 --lfll 259 --ffrl 2 --lfrl 525 <tbc-name>
 
 # Encode internet-friendly clip of previous lossless result:
 #ffmpeg -hide_banner -i "$1.mkv" -vf scale=in_color_matrix=bt601:out_color_matrix=bt709:768x576,bwdif=1:0:0 -c:v libx264 -preset veryslow -b:v 6M -maxrate 6M -bufsize 6M -pixel_format yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709 -aspect 4:3 -c:a libopus -b:a 192k -strict -2 -movflags +faststart -y "$1_lossy.mp4"
