@@ -61,7 +61,7 @@ Preferably adjusted per tape and in excellent mechanical and head condition, pro
 
 Its good practice to not cross contaminate tapes especially if dealing with mouldy or contaminated tapes.  
 
-It also helps to make sure to re-lubricate metal and plastic moving joints cogs and bearings with appropriate grease's and oils to avoid mechanincal failures.
+It also helps to make sure to re-lubricate metal and plastic moving joints cogs and bearings with appropriate grease's and oils to avoid mechanical failures.
 ## A RF Capture Device
 
 Currently standardised to 2 methods but RF capture is not limited to these methods.
