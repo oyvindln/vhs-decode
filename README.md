@@ -33,7 +33,7 @@ The frequently asked questions page and the [Wiki](https://github.com/oyvindln/v
 
 This repository also contains an **experimental** CVBS decoder, `cvbs-decode`, which shares code with ld-decode and vhs-decode. Capable of decoding basic raw digitized NTSC and PAL composite video, including colour if the source is somewhat stable. 
 
-RAW CVBS has been captured using CX Cards & CXADC, however, this is somewhat buggy as the cx chip can decide to resample or do other things if it detects a valid video signal normally this happens when an unknown internal gain threshhold is reached.
+RAW CVBS has been captured using CX Cards & CXADC, however, this is somewhat buggy as the cx chip can decide to resample or do other things if it detects a valid video signal normally this happens when an unknown internal gain threshold is reached.
 
 Test samples & signals can be generated using [HackTV](https://github.com/fsphil/hacktv)
 
@@ -61,7 +61,7 @@ Preferably adjusted per tape and in excellent mechanical and head condition, pro
 
 Its good practice to not cross contaminate tapes especially if dealing with mouldy or contaminated tapes.  
 
-It also helps to make sure to re-lubricate metal and plastic moving joints cogs and bearings with appropriate grease's and oils to avoid mechnincal failures.
+It also helps to make sure to re-lubricate metal and plastic moving joints cogs and bearings with appropriate grease's and oils to avoid mechanincal failures.
 ## A RF Capture Device
 
 Currently standardised to 2 methods but RF capture is not limited to these methods.
@@ -88,7 +88,7 @@ Capture & Config uses simple command-line arguments and parameters [CXADC](https
 
 The budget approach is using a video capture card based on a Conexant CX23880/1/2/3 PCI chipset. With a modified Linux driver, these cards can be forced to output RAW data that can be captured to file, instead of decoding video normally as they otherwise would.
 
-While you can use any generic card with the correct chips, today we recommend the ‘’New’’ Chinese variants that can be found on AliExpress that have integrated Asmedia or ITE 1x PCIE bridge chips allowing modern systems to use them, and consisent proformance.
+While you can use any generic card with the correct chips, today we recommend the ‘’New’’ Chinese variants that can be found on AliExpress that have integrated Asmedia or ITE 1x PCIE bridge chips allowing modern systems to use them, and consistent performance.
 
 [Ware to Buy? & More Info](https://github.com/oyvindln/vhs-decode/wiki/CX-Cards)
 
@@ -335,7 +335,7 @@ Decompress FLAC compressed captures:
 
 VHS-Decode produces two timebase corrected 16-bit `GREY16` headerless files separated into chroma/luma composite video signals in the `.tbc` format alongside `.json` and `.log` files, usable with the LD-Decode family of tools ld-analyse, ld-process-vbi, ld-process-vits and ld-dropout-correct.
 
-The gen chroma scrips will use decoded .tbc files and generate standard video files by default a lossless, interlaced top field first and high-bitrate (roughly 70-100 Mb/s) FFV1 codec video which, which although ideal for archival and further processing.
+The gen chroma scrips will use decoded .tbc files and generate standard video files by default a lossless, interlaced top field first and high-bitrate (roughly 70-100 Mb/s) FFV1 codec video which, which although ideal for archival and further processing, not supported in big NLEs.
 
 *gen_chroma_vid.sh automatically detects PAL/NTSC based on the .JSON, although legacy scripts still exsist*
 
