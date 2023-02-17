@@ -13,6 +13,7 @@ video_container="mkv"
 
 #output_format is set here as that could be changed to yuv444p10le if desired
 FILTER_COMPLEX="[1:v]format=$output_format[chroma];[0:v][chroma]mergeplanes=0x001112:$output_format[output]"
+FILTER_COMPLEX_MONO="[0:v]format=$output_format[output]"
 
 usage() {
 	echo "Usage: $(basename "$0") [-i input (without .tbc)] [-v videosystem]"
@@ -290,7 +291,7 @@ if [ "$monochrome" = "1" ]; then
 			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
 	"${audio_opts_1[@]}" \
-	-filter_complex "$FILTER_COMPLEX" \
+	-filter_complex "$FILTER_COMPLEX_MONO" \
 	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
