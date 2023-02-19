@@ -4,7 +4,7 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 """
 import math
-
+from scipy.signal import butter
 
 def gen_high_shelf(f0, dbgain, qfactor, fs):
     """Generate high shelving filter coeficcients (digital).
@@ -57,7 +57,7 @@ class FMDeEmphasisB:
         return self.btaps, self.ataps
 
 
-class FMDeEmphasis:
+class FMDeEmphasisC:
     r"""
       FM Deemphasis IIR filter
 
@@ -156,6 +156,16 @@ class FMDeEmphasis:
         self.ataps = [1.0, -p1]
 
         # Since H(s = 0) = 1.0, then H(z = 1) = 1.0 and has 0 dB gain at DC
+
+    def get(self):
+        return self.btaps, self.ataps
+
+
+# builds a first order butterworth digital IIR filter
+class FMDeEmphasis:
+    def __init__(self, fs, tau=1.25e-6):
+        f = 1 / (2 * math.pi * tau)
+        self.btaps, self.ataps = butter(N=1, Wn=f, btype='lowpass', analog=False, output='ba', fs=fs)
 
     def get(self):
         return self.btaps, self.ataps

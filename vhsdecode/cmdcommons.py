@@ -1,7 +1,7 @@
 import argparse
 import lddecode.utils as lddu
 
-
+DDD_FREQ = 40
 CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
 CXADC_FREQ_HIGH = 3150.0 / 88.0  # 35.795454545
 CXADC_TENBIT_FREQ = (8 * 315.0) / 88.0 / 2.0  # 14.318181818
@@ -10,7 +10,7 @@ CXADC_TENBIT_FREQ_HIGH = 3150.0 / 88.0 / 2.0  # 17.897727272
 
 def add_argument_hidden_in_gui(parser, use_gui, *args, **kwargs):
     if use_gui:
-        parser.add_argument(*args, **kwargs, gooey_options={"visible": False})
+        parser.add_argument(*args, **kwargs, gooey_options={'visible': False})
     else:
         parser.add_argument(*args, **kwargs)
 
@@ -25,29 +25,17 @@ def common_parser(meta_title, use_gui=False):
 def common_parser_gui(meta_title):
     from gooey import Gooey, GooeyParser
 
-    @Gooey(program_name="VHS decode")
+    @Gooey(program_name='VHS decode')
     def common_parser_gui_inner(meta_title):
         parser = GooeyParser(description=meta_title)
-        parser.add_argument(
-            "infile",
-            metavar="infile",
-            type=str,
-            help="source file",
-            widget="FileChooser",
-        )
-        parser.add_argument(
-            "outfile",
-            metavar="outfile",
-            type=str,
-            help="source file",
-            widget="FileSaver",
-        )
+        parser.add_argument("infile", metavar="infile", type=str, help="source file", widget="FileChooser")
+        parser.add_argument("outfile", metavar="outfile", type=str, help="source file", widget="FileSaver")
         return common_parser_inner(parser, True)
 
     return common_parser_gui_inner(meta_title)
 
 
-def common_parser_cli(meta_title):
+def common_parser_cli(meta_title, default_threads=4):
     parser = argparse.ArgumentParser(description=meta_title)
     parser.add_argument("infile", metavar="infile", type=str, help="source file")
     parser.add_argument(
@@ -65,17 +53,13 @@ def common_parser_cli(meta_title):
     parser.add_argument(
         "--AGC", dest="AGC", action="store_true", default=False, help=argparse.SUPPRESS
     )
-    return common_parser_inner(parser)
+    return common_parser_inner(parser, default_threads=default_threads)
 
 
-def common_parser_inner(parser, use_gui=False):
+def common_parser_inner(parser, use_gui=False, default_threads=4):
     parser.add_argument(
-        "--system",
-        metavar="system",
-        type=str.upper,
-        help="video system (overriden by individual options)",
-        default="NTSC",
-        choices=["PAL", "MPAL", "PALM", "NTSC", "MESECAM"],
+        "--system", metavar="system", type=str.upper,
+        help="video system (overriden by individual options)", default="NTSC", choices=["PAL", "PALM", "NTSC"]
     )
     file_options_group = parser.add_argument_group("File options")
     file_options_group.add_argument(
@@ -144,13 +128,13 @@ def common_parser_inner(parser, use_gui=False):
         "--threads",
         metavar="threads",
         type=int,
-        default=4,
+        default=default_threads,
         help="number of CPU threads to use",
     )
 
     extra_filtering_group = parser.add_argument_group("Extra filtering")
     extra_filtering_group.add_argument(
-        "--ct",
+        "-ct",
         "--chroma_trap",
         dest="chroma_trap",
         action="store_true",
@@ -158,9 +142,8 @@ def common_parser_inner(parser, use_gui=False):
         help="Enable filter to reduce chroma interference on luma.",
     )
     extra_filtering_group.add_argument(
-        "--sl",
+        "-sl",
         "--sharpness",
-        dest="sharpness",
         metavar="sharpness",
         type=int,
         default=0,
@@ -183,15 +166,11 @@ def common_parser_inner(parser, use_gui=False):
         help="Q factor for notch filter",
     )
 
-    system_group = parser.add_argument_group("Video system options")
+    system_group = parser.add_argument_group('Video system options')
     add_argument_hidden_in_gui(
         system_group,
         use_gui,
-        "-p",
-        "--pal",
-        dest="pal",
-        action="store_true",
-        help="source is in PAL format",
+        "-p", "--pal", dest="pal", action="store_true", help="source is in PAL format"
     )
     add_argument_hidden_in_gui(
         system_group,
@@ -205,7 +184,7 @@ def common_parser_inner(parser, use_gui=False):
     add_argument_hidden_in_gui(
         system_group,
         use_gui,
-        "--pm",
+        "-pm",
         "--palm",
         dest="palm",
         action="store_true",
@@ -239,6 +218,8 @@ def select_sample_freq(args):
         else CXADC_TENBIT_FREQ_HIGH
         if args.cxadc3_tenbit
         else args.inputfreq
+        if args.inputfreq is not None
+        else DDD_FREQ
     )
     return sample_freq
 
@@ -253,8 +234,6 @@ def select_system(args):
         system = "NTSC"
     elif args.system:
         system = args.system
-        if system == "PALM":
-            system = "MPAL"
     else:
         system = "NTSC"
 
