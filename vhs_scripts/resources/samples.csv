@@ -13,25 +13,19 @@ VHS,PAL,--cxadc3,~/vault/VHS/broken_vcr_recording.r8,gen_chroma_vid_pal.sh,Misal
 VHS,PAL,--cxadc3,~/vault/VHS/field_issue2.r8,gen_chroma_vid_pal.sh,
 VHS,PAL,--recheck_phase --cxadc3,~/vault/VHS/no_fieldissues_testclip.r8,gen_chroma_vid_pal.sh,
 VHS,PAL,--cxadc3,~/vault/VHS/nosync.r8,gen_chroma_vid_pal.sh,
-VHS,PAL,--cxadc3,~/vault/VHS/divzero-brokenpipe-calczc.r8,gen_chroma_vid_pal.sh,Vsync and AGC issues
+VHS,PAL,--cxadc3 --noAGC,~/vault/VHS/divzero-brokenpipe-calczc.r8,gen_chroma_vid_pal.sh,Vsync and AGC issues
 VHS,PAL,--cxadc3,~/vault/VHS/brightness-jump.r8 ,gen_chroma_vid_pal.sh,
 VHS,PAL,--cxadc3,~/vault/VHS/chroma-outage_pal_cxadc3.r8,gen_chroma_vid_pal.sh,
 VHS,NTSC,-sl 30 --cxadc,~/vault/VHS/straight-to-card-bnc-filter.r8,gen_chroma_vid_ntsc.sh,
 VHS,PAL,,~/vault/VHS/colorbars_PAL.r16,gen_chroma_vid_pal.sh,
 VHS,PALM,-sl 30  --10cxadc,~/vault/VHS/dobr_sample_10bit_palm.vhs.flac,gen_chroma_vid_palm.sh,
-UMATIC,NTSC,--cxadc,~/vault/U-Matic/monoscope.flac,gen_chroma_vid_ntsc.sh,
-UMATIC,NTSC,--cxadc,~/vault/U-Matic/rf_sweep.r8,gen_chroma_vid_ntsc.sh,
+UMATIC,NTSC,-ct,~/vault/U-Matic/monoscope.r16,gen_chroma_vid_ntsc.sh,
+UMATIC,NTSC,--cxadc -ct,~/vault/U-Matic/rf_sweep.r8,gen_chroma_vid_ntsc.sh,
 UMATIC,NTSC,--cxadc,~/vault/U-Matic/bars.r8,gen_chroma_vid_ntsc.sh,
-VHS,PAL,--cxadc3,~/vault/VHS/redbull_commercial.flac,gen_chroma_vid_pal.sh,Field reading issues
+VHS,PAL,--cxadc3 --noAGC,~/vault/VHS/redbull_commercial.flac,gen_chroma_vid_pal.sh,Field reading issues
 VHS,NTSC,--10cxadc3,~/vault/VHS/ojtest.fsc_r16.vhs,gen_chroma_vid_ntsc.sh,
 VHS,NTSC,--cxadc,~/vault/VHS/sb_newdeck_sample.vhs,gen_chroma_vid_ntsc.sh,
 VHS,NTSC,--cxadc,~/vault/VHS/md_slv779-hf.vhs.flac,gen_chroma_vid_ntsc.sh,Assertion error
 VHS,NTSC,--cxadc -sl 50,~/vault/VHS/beastwars1_1.vhs.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--cxadc -sl 100 --NTSCJ,~/vault/VHS/mmpr_jp_s2v1_0-54-30.vhs.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--cxadc -sl 50,~/vault/VHS/armageddon_ws_3.vhs.flac,gen_chroma_vid_ntsc.sh,AGC issues
-VHS,NTSC,-sl 50 -f 40,~/vault/VHS/arthursony13.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--10cxadc,~/vault/VHS/crafters1.vhs.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--cxadc,~/vault/VHS/eldorado_land6.28m.vhs.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--10cxadc,~/vault/VHS/scorch1.vhs.flac,gen_chroma_vid_ntsc.sh,
-VHS,NTSC,--10cxadc,~/vault/VHS/mmpr_A_2.vhs.flac,gen_chroma_vid_ntsc.sh,
-
+VHS,NTSC,--cxadc -sl 100 --NTSCJ --noAGC,~/vault/VHS/mmpr_jp_s2v1_0-54-30.vhs.flac,gen_chroma_vid_ntsc.sh,
+VHS,NTSC,--cxadc -sl 50 --noAGC,~/vault/VHS/armageddon_ws_3.vhs.flac,gen_chroma_vid_ntsc.sh,AGC issues
