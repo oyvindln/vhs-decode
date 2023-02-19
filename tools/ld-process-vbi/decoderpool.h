@@ -44,7 +44,7 @@ public:
 
     // Member functions used by worker threads
     bool getInputField(qint32 &fieldNumber, SourceVideo::Data &fieldVideoData, LdDecodeMetaData::Field &fieldMetadata, LdDecodeMetaData::VideoParameters &videoParameters);
-    bool setOutputField(qint32 fieldNumber, LdDecodeMetaData::Field fieldMetadata);
+    bool setOutputField(qint32 fieldNumber, const LdDecodeMetaData::Field& fieldMetadata);
 
 private:
     QString inputFilename;

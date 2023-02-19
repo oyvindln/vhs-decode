@@ -123,8 +123,8 @@ namespace ezpwd {
     // external language APIs.
     // 
     template <
-	size_t			PARITY, 
-	size_t			N	= 64,
+	unsigned		PARITY, 
+	unsigned		N	= 64,
 	typename		SERIAL	= serialize::base< N, serialize::ezpwd< N >>>
     class corrector {
     public:
@@ -488,13 +488,13 @@ namespace ezpwd {
 				rscodec;
     };
 
-    template < size_t PARITY, size_t N, typename SERIAL >
+    template < unsigned PARITY, unsigned N, typename SERIAL >
     const ezpwd::RS<N-1,N-1-PARITY>
 				corrector<PARITY,N,SERIAL>::rscodec;
 
 } // namespace ezpwd
 
-template < size_t PARITY, size_t N, typename SERIAL >
+template < unsigned PARITY, unsigned N, typename SERIAL >
 std::ostream		       &operator<<(
 				    std::ostream       &lhs,
 				    const ezpwd::corrector<PARITY,N,SERIAL>

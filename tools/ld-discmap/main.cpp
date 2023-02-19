@@ -3,7 +3,7 @@
     main.cpp
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     parser.setApplicationDescription(
                 "ld-discmap - TBC and VBI alignment and correction\n"
                 "\n"
-                "(c)2019-2020 Simon Inns\n"
+                "(c)2019-2022 Simon Inns\n"
                 "GPLv3 Open-Source - github: https://github.com/happycube/ld-decode");
     parser.addHelpOption();
     parser.addVersionOption();

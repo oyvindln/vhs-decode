@@ -3,7 +3,7 @@
     discmapper.cpp
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -72,10 +72,7 @@ bool DiscMapper::process(QFileInfo _inputFileInfo, QFileInfo _inputMetadataFileI
     qDebug() << discMap;
 
     // Show the disc type and video format:
-    if (discMap.isDiscCav() && discMap.isDiscPal()) qInfo() << "Input TBC is CAV PAL";
-    if (!discMap.isDiscCav() && discMap.isDiscPal()) qInfo() << "Input TBC is CLV PAL";
-    if (discMap.isDiscCav() && !discMap.isDiscPal()) qInfo() << "Input TBC is CAV NTSC";
-    if (!discMap.isDiscCav() && !discMap.isDiscPal()) qInfo() << "Input TBC is CLV NTSC";
+    qInfo().noquote() << "Input TBC is a" << discMap.discType() << "disc using" << discMap.discFormat();
 
     // Remove lead-in and lead-out frames from the map
     removeLeadInOut(discMap);
@@ -174,8 +171,14 @@ void DiscMapper::removeInvalidFramesByPhase(DiscMap &discMap)
         if (discMap.isDiscPal() && expectedNextPhase == 9) expectedNextPhase = 1;
         if (!discMap.isDiscPal() && expectedNextPhase == 5) expectedNextPhase = 1;
         if (discMap.getSecondFieldPhase(frameNumber) != expectedNextPhase) {
-            qDebug() << "VBI Frame number" << discMap.vbiFrameNumber(frameNumber) << "(" << frameNumber << ") first and second field phases are not in sequence! -"
-            << expectedNextPhase << "expected but got" << discMap.getSecondFieldPhase(frameNumber);
+            if (discMap.vbiFrameNumber(frameNumber) != -1) {
+                qDebug() << "Marking frame" << frameNumber << "for deletion (VBI Frame#" << discMap.vbiFrameNumber(frameNumber) << ") as first and second field phases are not in sequence! -"
+                << expectedNextPhase << "expected but got" << discMap.getSecondFieldPhase(frameNumber);
+            } else {
+                qDebug() << "Marking frame" << frameNumber << "for deletion (VBI Frame# invalid) as first and second field phases are not in sequence! -"
+                << expectedNextPhase << "expected but got" << discMap.getSecondFieldPhase(frameNumber);
+            }
+
             discMap.setMarkedForDeletion(frameNumber);
             removals++;
         }
@@ -385,13 +388,22 @@ void DiscMapper::removeDuplicateNumberedFrames(DiscMap &discMap)
                 }
             }
         } else {
-            // Having frames without numbering (that are not pulldown) is a bad thing...
-            qInfo() << "";
-            qInfo() << "Warning:";
-            qInfo() << "There are frames without a frame number (that are not flagged as pulldown) in the duplicate frame list";
-            qInfo() << "This probably means that the disc map contains pulldown frames that do not follow the normal 1 in 5";
-            qInfo() << "pulldown pattern - and disc mapping will likely fail!";
-            qInfo() << "";
+            if (!discMap.isDiscPal()) {
+                // Having NTSC frames without numbering (that are not pulldown) is a bad thing...
+                qInfo() << "";
+                qInfo() << "Warning:";
+                qInfo() << "There are frames without a frame number (that are not flagged as pulldown) in the duplicate frame list";
+                qInfo() << "This probably means that the disc map contains pulldown frames that do not follow the normal 1 in 5";
+                qInfo() << "pulldown pattern - and disc mapping will likely fail!";
+                qInfo() << "";
+            } else {
+                qInfo() << "";
+                qInfo() << "Warning:";
+                qInfo() << "There are frames without a frame number in the duplicate frame list.  Since numberless frames are";
+                qInfo() << "usually unmappable, disc mapping will likely fail unless the --delete-unmappable-frames option is";
+                qInfo() << "used.";
+                qInfo() << "";
+            }
         }
     }
 
@@ -452,6 +464,23 @@ void DiscMapper::reorderFrames(DiscMap &discMap)
     // Perform the sort
     discMap.sort();
     qInfo() << "Sorting complete";
+
+    if (discMap.numberOfFrames() > 2) {
+        // There is an edge case where the first VBI frame number can be corrupt and cause
+        // a large gap between the first and second frames; we catch that edge case here
+        qint32 frameNumber = 0;
+        qint32 initialGap = discMap.vbiFrameNumber(frameNumber + 1) - discMap.vbiFrameNumber(frameNumber);
+
+        if (initialGap > 1000) {
+            qInfo() << "Warning: The gap between the first and second VBI number is" << initialGap;
+            qInfo() << "this is over the 1000 frame threshold, so the first frame will be deleted to";
+            qInfo() << "avoid generating a big gap.";
+
+            discMap.setMarkedForDeletion(frameNumber);
+            discMap.flush();
+            qInfo() << "Removed first frame - disc map size now" << discMap.numberOfFrames() << "frames";
+        }
+    }
 }
 
 // Pad the disc map if there are missing frames in the disc map sequence
@@ -503,9 +532,19 @@ void DiscMapper::padDiscMap(DiscMap &discMap)
                     // Check if this is a CLV IEC ammendment 2 timecode gap
                     if (!discMap.isClvOffset(frameNumber)) {
                         // Not a CLV offset frame
+                        qint32 gapLength = discMap.vbiFrameNumber(frameNumber + 1) - discMap.vbiFrameNumber(frameNumber) - 1;
                         qDebug() << "Sequence break: Current VBI frame is" << discMap.vbiFrameNumber(frameNumber) <<
                                     "next frame is" << discMap.vbiFrameNumber(frameNumber + 1) << "gap of" <<
-                                    discMap.vbiFrameNumber(frameNumber + 1) - discMap.vbiFrameNumber(frameNumber) - 1 << "frames";
+                                    gapLength << "frames";
+
+                        // If the gap is long, use Info to warn the user than discmapping might have failed...
+                        if (gapLength > 1000) {
+                            qInfo() << "Warning: Detected a sequence break between VBI frame"  << discMap.vbiFrameNumber(frameNumber) << "and" <<
+                                       "VBI frame" << discMap.vbiFrameNumber(frameNumber + 1) << "representing";
+                            qInfo() << "a gap of" << gapLength << "frames.  This is over the threshold of 1000 frames and could indicate that mapping";
+                            qInfo() << "has failed due to badly corrupted VBI frame number data in the source TBC file.";
+                        }
+
                         numberOfGaps++;
                         qint32 missingFrames = discMap.vbiFrameNumber(frameNumber + 1) - discMap.vbiFrameNumber(frameNumber) - 1;
                         totalMissingFrames += missingFrames;
@@ -586,6 +625,7 @@ void DiscMapper::deleteUnmappableFrames(DiscMap &discMap)
         // For CLV discs a timecode of 00:00:00.00 is valid, so technically a frame number of 0 is legal
         // (only for CLV discs, but it probably doesn't matter if we apply that to CAV too here)
         if (discMap.vbiFrameNumber(frameNumber) < 0 && !discMap.isPulldown(frameNumber)) {
+            qDebug() << "Marking frame" << frameNumber << "for deletion (unmappable)";
             discMap.setMarkedForDeletion(frameNumber);
         }
     }
@@ -689,17 +729,30 @@ bool DiscMapper::saveDiscMap(DiscMap &discMap)
 
             // Save the audio (not field order dependent)
             if (!noAudio) {
-                // Read the audio
-                sourceAudioFirstField = sourceAudio.getAudioData(discMap.getFirstFieldAudioDataStart(frameNumber),
-                                                                 discMap.getFirstFieldAudioDataLength(frameNumber));
-                sourceAudioSecondField = sourceAudio.getAudioData(discMap.getSecondFieldAudioDataStart(frameNumber),
-                                                                  discMap.getSecondFieldAudioDataLength(frameNumber));
+                // Ensure there is audio to read from the first and second fields
+                if ((discMap.getFirstFieldAudioDataLength(frameNumber) > 0) &&
+                        (discMap.getSecondFieldAudioDataLength(frameNumber) > 0)) {
+                    // Read the audio
+                    sourceAudioFirstField = sourceAudio.getAudioData(discMap.getFirstFieldAudioDataStart(frameNumber),
+                                                                     discMap.getFirstFieldAudioDataLength(frameNumber));
+                    sourceAudioSecondField = sourceAudio.getAudioData(discMap.getSecondFieldAudioDataStart(frameNumber),
+                                                                      discMap.getSecondFieldAudioDataLength(frameNumber));
 
-                // Write the audio
-                if (!targetAudio.write(reinterpret_cast<const char *>(sourceAudioFirstField.data()),
-                                       sourceAudioFirstField.size() * 2)) writeFail = true;
-                if (!targetAudio.write(reinterpret_cast<const char *>(sourceAudioSecondField.data()),
-                                       sourceAudioSecondField.size() * 2)) writeFail = true;
+                    // Write the audio
+                    if (!targetAudio.write(reinterpret_cast<const char *>(sourceAudioFirstField.data()),
+                                           sourceAudioFirstField.size() * 2)) writeFail = true;
+                    if (!targetAudio.write(reinterpret_cast<const char *>(sourceAudioSecondField.data()),
+                                           sourceAudioSecondField.size() * 2)) writeFail = true;
+                } else {
+                    if (discMap.getFirstFieldAudioDataLength(frameNumber) < 1) {
+                        qInfo() << "Warning: Input file seems to have zero audio data in the first field of frame number #" << frameNumber;
+                        qInfo() << "The audio output might be corrupt.";
+                    }
+                    if (discMap.getSecondFieldAudioDataLength(frameNumber) < 1) {
+                        qInfo() << "Warning: Input file seems to have zero audio data in the second field of frame number #" << frameNumber;
+                        qInfo() << "The audio output might be corrupt.";
+                    }
+                }
             }
         } else {
             // Padded frame - write two dummy fields

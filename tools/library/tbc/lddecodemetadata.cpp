@@ -4,6 +4,8 @@
 
     ld-decode-tools TBC library
     Copyright (C) 2018-2020 Simon Inns
+    Copyright (C) 2022 Ryan Holtz
+    Copyright (C) 2022-2023 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -24,27 +26,563 @@
 
 #include "lddecodemetadata.h"
 
-LdDecodeMetaData::LdDecodeMetaData()
+#include "jsonio.h"
+
+#include <cassert>
+#include <fstream>
+
+// Default values used when configuring VideoParameters for a particular video system.
+// See the comments in VideoParameters for the meanings of these values.
+// For descriptions of the systems, see ITU BT.1700.
+struct VideoSystemDefaults {
+    VideoSystem system;
+    const char *name;
+    double fSC;
+    qint32 minActiveFrameLine;
+    qint32 firstActiveFieldLine;
+    qint32 lastActiveFieldLine;
+    qint32 firstActiveFrameLine;
+    qint32 lastActiveFrameLine;
+};
+
+static constexpr VideoSystemDefaults palDefaults {
+    PAL,
+    "PAL",
+    (283.75 * 15625) + 25,
+    2,
+    22, 308,
+    // Interlaced line 44 is PAL line 23 (the first active half-line)
+    // Interlaced line 619 is PAL line 623 (the last active half-line)
+    44, 620,
+};
+
+static constexpr VideoSystemDefaults ntscDefaults {
+    NTSC,
+    "NTSC",
+    315.0e6 / 88.0,
+    1,
+    20, 259,
+    // Interlaced line 40 is NTSC line 21 (the closed-caption line before the first active half-line)
+    // Interlaced line 524 is NTSC line 263 (the last active half-line)
+    40, 525,
+};
+
+static constexpr VideoSystemDefaults palMDefaults {
+    PAL_M,
+    "PAL-M",
+    5.0e6 * (63.0 / 88.0) * (909.0 / 910.0),
+    ntscDefaults.minActiveFrameLine,
+    ntscDefaults.firstActiveFieldLine, ntscDefaults.lastActiveFieldLine,
+    ntscDefaults.firstActiveFrameLine, ntscDefaults.lastActiveFrameLine,
+};
+
+// These must be in the same order as enum VideoSystem
+static constexpr VideoSystemDefaults VIDEO_SYSTEM_DEFAULTS[] = {
+    palDefaults,
+    ntscDefaults,
+    palMDefaults,
+};
+
+// Return appropriate defaults for the selected video system
+static const VideoSystemDefaults &getSystemDefaults(const LdDecodeMetaData::VideoParameters &videoParameters)
 {
-    // Set defaults
-    isFirstFieldFirst = false;
+    return VIDEO_SYSTEM_DEFAULTS[videoParameters.system];
 }
 
-// This method opens the JSON metadata file and reads the content into the
-// metadata structure read for use
+// Look up a video system by name.
+// Return true and set system if found; if not found, return false.
+bool parseVideoSystemName(QString name, VideoSystem &system)
+{
+    // Search VIDEO_SYSTEM_DEFAULTS for a matching name
+    for (const auto &defaults: VIDEO_SYSTEM_DEFAULTS) {
+        if (name == defaults.name) {
+            system = defaults.system;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Read Vbi from JSON
+void LdDecodeMetaData::Vbi::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "vbiData") {
+            reader.beginArray();
+
+            // There should be exactly 3 values, but handle more or less
+            unsigned int i = 0;
+            while (reader.readElement()) {
+                int value;
+                reader.read(value);
+
+                if (i < vbiData.size()) vbiData[i++] = value;
+            }
+            while (i < vbiData.size()) vbiData[i++] = 0;
+
+            reader.endArray();
+        } else {
+            reader.discard();
+        }
+    }
+
+    reader.endObject();
+
+    inUse = true;
+}
+
+// Write Vbi to JSON
+void LdDecodeMetaData::Vbi::write(JsonWriter &writer) const
+{
+    assert(inUse);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("vbiData");
+    writer.beginArray();
+    for (auto value : vbiData) {
+        writer.writeElement();
+        writer.write(value);
+    }
+    writer.endArray();
+
+    writer.endObject();
+}
+
+// Read VideoParameters from JSON
+void LdDecodeMetaData::VideoParameters::read(JsonReader &reader)
+{
+    bool isSourcePal = false;
+    std::string systemString = "";
+
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "activeVideoEnd") reader.read(activeVideoEnd);
+        else if (member == "activeVideoStart") reader.read(activeVideoStart);
+        else if (member == "black16bIre") reader.read(black16bIre);
+        else if (member == "colourBurstEnd") reader.read(colourBurstEnd);
+        else if (member == "colourBurstStart") reader.read(colourBurstStart);
+        else if (member == "fieldHeight") reader.read(fieldHeight);
+        else if (member == "fieldWidth") reader.read(fieldWidth);
+        else if (member == "gitBranch") reader.read(gitBranch);
+        else if (member == "gitCommit") reader.read(gitCommit);
+        else if (member == "isMapped") reader.read(isMapped);
+        else if (member == "isSourcePal") reader.read(isSourcePal); // obsolete
+        else if (member == "isSubcarrierLocked") reader.read(isSubcarrierLocked);
+        else if (member == "isWidescreen") reader.read(isWidescreen);
+        else if (member == "numberOfSequentialFields") reader.read(numberOfSequentialFields);
+        else if (member == "sampleRate") reader.read(sampleRate);
+        else if (member == "system") reader.read(systemString);
+        else if (member == "white16bIre") reader.read(white16bIre);
+        else reader.discard();
+    }
+
+    reader.endObject();
+
+    // Work out which video system is being used
+    if (systemString == "") {
+        // Not specified -- detect based on isSourcePal and fieldHeight
+        if (isSourcePal) {
+            if (fieldHeight < 300) system = PAL_M;
+            else system = PAL;
+        } else system = NTSC;
+    } else if (!parseVideoSystemName(QString::fromStdString(systemString), system)) {
+        reader.throwError("unknown value for videoParameters.system");
+    }
+
+    isValid = true;
+}
+
+// Write VideoParameters to JSON
+void LdDecodeMetaData::VideoParameters::write(JsonWriter &writer) const
+{
+    assert(isValid);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("activeVideoEnd", activeVideoEnd);
+    writer.writeMember("activeVideoStart", activeVideoStart);
+    writer.writeMember("black16bIre", black16bIre);
+    writer.writeMember("colourBurstEnd", colourBurstEnd);
+    writer.writeMember("colourBurstStart", colourBurstStart);
+    writer.writeMember("fieldHeight", fieldHeight);
+    writer.writeMember("fieldWidth", fieldWidth);
+    if (gitBranch != "") {
+        writer.writeMember("gitBranch", gitBranch);
+    }
+    if (gitCommit != "") {
+        writer.writeMember("gitCommit", gitCommit);
+    }
+    writer.writeMember("isMapped", isMapped);
+    writer.writeMember("isSubcarrierLocked", isSubcarrierLocked);
+    writer.writeMember("isWidescreen", isWidescreen);
+    writer.writeMember("numberOfSequentialFields", numberOfSequentialFields);
+    writer.writeMember("sampleRate", sampleRate);
+    writer.writeMember("system", VIDEO_SYSTEM_DEFAULTS[system].name);
+    writer.writeMember("white16bIre", white16bIre);
+
+    writer.endObject();
+}
+
+// Read VitsMetrics from JSON
+void LdDecodeMetaData::VitsMetrics::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "bPSNR") reader.read(bPSNR);
+        else if (member == "wSNR") reader.read(wSNR);
+        else reader.discard();
+    }
+
+    reader.endObject();
+
+    inUse = true;
+}
+
+// Write VitsMetrics to JSON
+void LdDecodeMetaData::VitsMetrics::write(JsonWriter &writer) const
+{
+    assert(inUse);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("bPSNR", bPSNR);
+    writer.writeMember("wSNR", wSNR);
+
+    writer.endObject();
+}
+
+// Read Ntsc from JSON
+void LdDecodeMetaData::Ntsc::read(JsonReader &reader, ClosedCaption &closedCaption)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "isFmCodeDataValid") reader.read(isFmCodeDataValid);
+        else if (member == "fmCodeData") reader.read(fmCodeData);
+        else if (member == "fieldFlag") reader.read(fieldFlag);
+        else if (member == "whiteFlag") reader.read(whiteFlag);
+        else if (member == "ccData0") {
+            // rev7 and earlier put ccData0/1 here rather than in cc
+            reader.read(closedCaption.data0);
+            closedCaption.inUse = true;
+        } else if (member == "ccData1") {
+            reader.read(closedCaption.data1);
+            closedCaption.inUse = true;
+        } else {
+            reader.discard();
+        }
+    }
+
+    reader.endObject();
+
+    inUse = true;
+}
+
+// Write Ntsc to JSON
+void LdDecodeMetaData::Ntsc::write(JsonWriter &writer) const
+{
+    assert(inUse);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    if (isFmCodeDataValid) {
+        writer.writeMember("fieldFlag", fieldFlag);
+    }
+    if (isFmCodeDataValid) {
+        writer.writeMember("fmCodeData", fmCodeData);
+    }
+    writer.writeMember("isFmCodeDataValid", isFmCodeDataValid);
+    if (whiteFlag) {
+        writer.writeMember("whiteFlag", whiteFlag);
+    }
+
+    writer.endObject();
+}
+
+// Read Vitc from JSON
+void LdDecodeMetaData::Vitc::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "vitcData") {
+            reader.beginArray();
+
+            // There should be exactly 8 values, but handle more or less
+            unsigned int i = 0;
+            while (reader.readElement()) {
+                int value;
+                reader.read(value);
+
+                if (i < vitcData.size()) vitcData[i++] = value;
+            }
+            while (i < vitcData.size()) vitcData[i++] = 0;
+
+            reader.endArray();
+        } else {
+            reader.discard();
+        }
+    }
+
+    reader.endObject();
+
+    inUse = true;
+}
+
+// Write Vitc to JSON
+void LdDecodeMetaData::Vitc::write(JsonWriter &writer) const
+{
+    assert(inUse);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("vitcData");
+    writer.beginArray();
+    for (auto value : vitcData) {
+        writer.writeElement();
+        writer.write(value);
+    }
+    writer.endArray();
+
+    writer.endObject();
+}
+
+// Read ClosedCaption from JSON
+void LdDecodeMetaData::ClosedCaption::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "data0") reader.read(data0);
+        else if (member == "data1") reader.read(data1);
+        else reader.discard();
+    }
+
+    reader.endObject();
+
+    inUse = true;
+}
+
+// Write ClosedCaption to JSON
+void LdDecodeMetaData::ClosedCaption::write(JsonWriter &writer) const
+{
+    assert(inUse);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    if (data0 != -1) {
+        writer.writeMember("data0", data0);
+    }
+    if (data1 != -1) {
+        writer.writeMember("data1", data1);
+    }
+
+    writer.endObject();
+}
+
+// Read PcmAudioParameters from JSON
+void LdDecodeMetaData::PcmAudioParameters::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "bits") reader.read(bits);
+        else if (member == "isLittleEndian") reader.read(isLittleEndian);
+        else if (member == "isSigned") reader.read(isSigned);
+        else if (member == "sampleRate") reader.read(sampleRate);
+        else reader.discard();
+    }
+
+    reader.endObject();
+
+    isValid = true;
+}
+
+// Write PcmAudioParameters to JSON
+void LdDecodeMetaData::PcmAudioParameters::write(JsonWriter &writer) const
+{
+    assert(isValid);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("bits", bits);
+    writer.writeMember("isLittleEndian", isLittleEndian);
+    writer.writeMember("isSigned", isSigned);
+    writer.writeMember("sampleRate", sampleRate);
+
+    writer.endObject();
+}
+
+// Read Field from JSON
+void LdDecodeMetaData::Field::read(JsonReader &reader)
+{
+    reader.beginObject();
+
+    std::string member;
+    while (reader.readMember(member)) {
+        if (member == "audioSamples") reader.read(audioSamples);
+        else if (member == "cc") closedCaption.read(reader);
+        else if (member == "decodeFaults") reader.read(decodeFaults);
+        else if (member == "diskLoc") reader.read(diskLoc);
+        else if (member == "dropOuts") dropOuts.read(reader);
+        else if (member == "efmTValues") reader.read(efmTValues);
+        else if (member == "fieldPhaseID") reader.read(fieldPhaseID);
+        else if (member == "fileLoc") reader.read(fileLoc);
+        else if (member == "isFirstField") reader.read(isFirstField);
+        else if (member == "medianBurstIRE") reader.read(medianBurstIRE);
+        else if (member == "ntsc") ntsc.read(reader, closedCaption);
+        else if (member == "pad") reader.read(pad);
+        else if (member == "seqNo") reader.read(seqNo);
+        else if (member == "syncConf") reader.read(syncConf);
+        else if (member == "vbi") vbi.read(reader);
+        else if (member == "vitc") vitc.read(reader);
+        else if (member == "vitsMetrics") vitsMetrics.read(reader);
+        else reader.discard();
+    }
+
+    reader.endObject();
+}
+
+// Write Field to JSON
+void LdDecodeMetaData::Field::write(JsonWriter &writer) const
+{
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    if (audioSamples != -1) {
+        writer.writeMember("audioSamples", audioSamples);
+    }
+    if (closedCaption.inUse) {
+        writer.writeMember("cc");
+        closedCaption.write(writer);
+    }
+    if (decodeFaults != -1) {
+        writer.writeMember("decodeFaults", decodeFaults);
+    }
+    if (diskLoc != -1) {
+        writer.writeMember("diskLoc", diskLoc);
+    }
+    if (!dropOuts.empty()) {
+        writer.writeMember("dropOuts");
+        dropOuts.write(writer);
+    }
+    if (efmTValues != -1) {
+        writer.writeMember("efmTValues", efmTValues);
+    }
+    if (fieldPhaseID != -1) {
+        writer.writeMember("fieldPhaseID", fieldPhaseID);
+    }
+    if (fileLoc != -1) {
+        writer.writeMember("fileLoc", fileLoc);
+    }
+    writer.writeMember("isFirstField", isFirstField);
+    writer.writeMember("medianBurstIRE", medianBurstIRE);
+    if (ntsc.inUse) {
+        writer.writeMember("ntsc");
+        ntsc.write(writer);
+    }
+    writer.writeMember("pad", pad);
+    writer.writeMember("seqNo", seqNo);
+    writer.writeMember("syncConf", syncConf);
+    if (vbi.inUse) {
+        writer.writeMember("vbi");
+        vbi.write(writer);
+    }
+    if (vitc.inUse) {
+        writer.writeMember("vitc");
+        vitc.write(writer);
+    }
+    if (vitsMetrics.inUse) {
+        writer.writeMember("vitsMetrics");
+        vitsMetrics.write(writer);
+    }
+
+    writer.endObject();
+}
+
+LdDecodeMetaData::LdDecodeMetaData()
+{
+    clear();
+}
+
+// Reset the metadata to the defaults
+void LdDecodeMetaData::clear()
+{
+    // Default to the standard still-frame field order (of first field first)
+    isFirstFieldFirst = true;
+
+    // Reset the parameters to their defaults
+    videoParameters = VideoParameters();
+    pcmAudioParameters = PcmAudioParameters();
+
+    fields.clear();
+}
+
+// Read all metadata from a JSON file
 bool LdDecodeMetaData::read(QString fileName)
 {
-    // Open the JSON file
-    qDebug() << "LdDecodeMetaData::read(): Loading JSON file" << fileName;
-    if (!json.loadFile(fileName)) {
-        qCritical() << "JSON wax library error:" << json.errorMsg();
-        qCritical("Opening JSON file failed: JSON file cannot be opened/does not exist");
-
+    std::ifstream jsonFile(fileName.toStdString());
+    if (jsonFile.fail()) {
+        qCritical("Opening JSON input file failed: JSON file cannot be opened/does not exist");
         return false;
     }
 
-    // Default to the standard still-frame field order (of first field first)
-    isFirstFieldFirst = true;
+    clear();
+
+    JsonReader reader(jsonFile);
+
+    try {
+        reader.beginObject();
+
+        std::string member;
+        while (reader.readMember(member)) {
+            if (member == "fields") readFields(reader);
+            else if (member == "pcmAudioParameters") pcmAudioParameters.read(reader);
+            else if (member == "videoParameters") videoParameters.read(reader);
+            else reader.discard();
+        }
+
+        reader.endObject();
+    } catch (JsonReader::Error &error) {
+        qCritical() << "Parsing JSON file failed:" << error.what();
+        return false;
+    }
+
+    jsonFile.close();
+
+    // Check we saw VideoParameters - if not, we can't do anything useful!
+    if (!videoParameters.isValid) {
+        qCritical("JSON file invalid: videoParameters object is not defined");
+        return false;
+    }
+
+    // Check numberOfSequentialFields is consistent
+    if (videoParameters.numberOfSequentialFields != fields.size()) {
+        qCritical("JSON file invalid: numberOfSequentialFields does not match fields array");
+        return false;
+    }
+
+    // Now we know the video system, initialise the rest of VideoParameters
+    initialiseVideoSystemParameters();
 
     // Generate the PCM audio map based on the field metadata
     generatePcmAudioMap();
@@ -52,443 +590,367 @@ bool LdDecodeMetaData::read(QString fileName)
     return true;
 }
 
-// This method copies the metadata structure into a JSON metadata file
-bool LdDecodeMetaData::write(QString fileName)
+// Write all metadata out to a JSON file
+bool LdDecodeMetaData::write(QString fileName) const
 {
-    // Write the JSON object
-    qDebug() << "LdDecodeMetaData::write(): Writing JSON metadata to:" << fileName;
-    if (!json.saveAs(fileName, JsonWax::Compact)) {
-        qCritical("Writing JSON metadata file failed!");
+    std::ofstream jsonFile(fileName.toStdString());
+    if (jsonFile.fail()) {
+        qCritical("Opening JSON output file failed");
         return false;
     }
+
+    JsonWriter writer(jsonFile);
+
+    writer.beginObject();
+
+    // Keep members in alphabetical order
+    writer.writeMember("fields");
+    writeFields(writer);
+    if (pcmAudioParameters.isValid) {
+        writer.writeMember("pcmAudioParameters");
+        pcmAudioParameters.write(writer);
+    }
+    writer.writeMember("videoParameters");
+    videoParameters.write(writer);
+
+    writer.endObject();
+
+    jsonFile.close();
 
     return true;
 }
 
-// This method returns the videoParameters metadata
-LdDecodeMetaData::VideoParameters LdDecodeMetaData::getVideoParameters()
+// Read array of Fields from JSON
+void LdDecodeMetaData::readFields(JsonReader &reader)
 {
-    VideoParameters videoParameters;
+    reader.beginArray();
 
-    // Read the video paramters
-    if (json.size({"videoParameters"}) > 0) {
-        videoParameters.numberOfSequentialFields = json.value({"videoParameters", "numberOfSequentialFields"}).toInt();
-        videoParameters.isSourcePal = json.value({"videoParameters", "isSourcePal"}).toBool();
-        videoParameters.isSubcarrierLocked = json.value({"videoParameters", "isSubcarrierLocked"}).toBool();
-        videoParameters.isWidescreen = json.value({"videoParameters", "isWidescreen"}).toBool();
-
-        videoParameters.colourBurstStart = json.value({"videoParameters", "colourBurstStart"}).toInt();
-        videoParameters.colourBurstEnd = json.value({"videoParameters", "colourBurstEnd"}).toInt();
-        videoParameters.activeVideoStart = json.value({"videoParameters", "activeVideoStart"}).toInt();
-        videoParameters.activeVideoEnd = json.value({"videoParameters", "activeVideoEnd"}).toInt();
-
-        videoParameters.white16bIre = json.value({"videoParameters", "white16bIre"}).toInt();
-        videoParameters.black16bIre = json.value({"videoParameters", "black16bIre"}).toInt();
-
-        videoParameters.fieldWidth = json.value({"videoParameters", "fieldWidth"}).toInt();
-        videoParameters.fieldHeight = json.value({"videoParameters", "fieldHeight"}).toInt();
-        videoParameters.sampleRate = json.value({"videoParameters", "sampleRate"}).toInt();
-        videoParameters.fsc = json.value({"videoParameters", "fsc"}).toInt();
-
-        videoParameters.isMapped = json.value({"videoParameters", "isMapped"}).toBool();
-    } else {
-        qCritical("JSON file invalid: videoParameters object is not defined");
-        return videoParameters;
+    while (reader.readElement()) {
+        Field field;
+        field.read(reader);
+        fields.push_back(field);
     }
 
-    // Add in the active field line range psuedo-metadata
-    if (videoParameters.fieldHeight == 313) {
-        // PAL
-        videoParameters.firstActiveFieldLine = 22;
-        videoParameters.lastActiveFieldLine = 308;
+    reader.endArray();
+}
 
-        // Interlaced line 44 is PAL line 23 (the first active half-line)
-        videoParameters.firstActiveFrameLine = 44;
-        // Interlaced line 619 is PAL line 623 (the last active half-line)
-        videoParameters.lastActiveFrameLine = 620;
-    } else if (videoParameters.fieldHeight == 263) {
-        // NTSC
-        videoParameters.firstActiveFieldLine = 20;
-        videoParameters.lastActiveFieldLine = 259;
+// Write array of Fields to JSON
+void LdDecodeMetaData::writeFields(JsonWriter &writer) const
+{
+    writer.beginArray();
 
-        // Interlaced line 40 is NTSC line 21 (the closed-caption line before the first active half-line)
-        videoParameters.firstActiveFrameLine = 40;
-        // Interlaced line 524 is NTSC line 263 (the last active half-line).
-        videoParameters.lastActiveFrameLine = 525;
-    } else {
-        // Unknown video system, guessing some stuff for now instead of risking going out of bounds.
-        qCritical("Unknown video system! Output may not be correct!");
-
-        videoParameters.firstActiveFieldLine = 20;
-        videoParameters.lastActiveFieldLine = videoParameters.fieldHeight - 5;
-
-        videoParameters.firstActiveFrameLine = videoParameters.firstActiveFieldLine * 2;
-        videoParameters.lastActiveFrameLine = videoParameters.lastActiveFieldLine * 2;
+    for (const Field &field : fields) {
+        writer.writeElement();
+        field.write(writer);
     }
 
+    writer.endArray();
+}
+
+// This method returns the videoParameters metadata
+const LdDecodeMetaData::VideoParameters &LdDecodeMetaData::getVideoParameters()
+{
+    assert(videoParameters.isValid);
     return videoParameters;
 }
 
 // This method sets the videoParameters metadata
-void LdDecodeMetaData::setVideoParameters (LdDecodeMetaData::VideoParameters _videoParameters)
+void LdDecodeMetaData::setVideoParameters(const LdDecodeMetaData::VideoParameters &_videoParameters)
 {
-    // Write the video parameters
-    json.setValue({"videoParameters", "numberOfSequentialFields"}, getNumberOfFields());
-    json.setValue({"videoParameters", "isSourcePal"}, _videoParameters.isSourcePal);
-    json.setValue({"videoParameters", "isSubcarrierLocked"}, _videoParameters.isSubcarrierLocked);
-    json.setValue({"videoParameters", "isWidescreen"}, _videoParameters.isWidescreen);
-
-    json.setValue({"videoParameters", "colourBurstStart"}, _videoParameters.colourBurstStart);
-    json.setValue({"videoParameters", "colourBurstEnd"}, _videoParameters.colourBurstEnd);
-    json.setValue({"videoParameters", "activeVideoStart"}, _videoParameters.activeVideoStart);
-    json.setValue({"videoParameters", "activeVideoEnd"}, _videoParameters.activeVideoEnd);
-
-    json.setValue({"videoParameters", "white16bIre"}, _videoParameters.white16bIre);
-    json.setValue({"videoParameters", "black16bIre"}, _videoParameters.black16bIre);
-
-    json.setValue({"videoParameters", "fieldWidth"}, _videoParameters.fieldWidth);
-    json.setValue({"videoParameters", "fieldHeight"}, _videoParameters.fieldHeight);
-    json.setValue({"videoParameters", "sampleRate"}, _videoParameters.sampleRate);
-    json.setValue({"videoParameters", "fsc"}, _videoParameters.fsc);
-
-    json.setValue({"videoParameters", "isMapped"}, _videoParameters.isMapped);
+    videoParameters = _videoParameters;
+    videoParameters.isValid = true;
 }
 
 // This method returns the pcmAudioParameters metadata
-LdDecodeMetaData::PcmAudioParameters LdDecodeMetaData::getPcmAudioParameters()
+const LdDecodeMetaData::PcmAudioParameters &LdDecodeMetaData::getPcmAudioParameters()
 {
-    PcmAudioParameters pcmAudioParameters;
-
-    if (json.size({"pcmAudioParameters"}) > 0) {
-        // Read the PCM audio data
-        pcmAudioParameters.sampleRate = json.value({"pcmAudioParameters", "sampleRate"}).toInt();
-        pcmAudioParameters.isLittleEndian = json.value({"pcmAudioParameters", "isLittleEndian"}).toBool();
-        pcmAudioParameters.isSigned = json.value({"pcmAudioParameters", "isSigned"}).toBool();
-        pcmAudioParameters.bits = json.value({"pcmAudioParameters", "bits"}).toInt();
-    } else {
-        qCritical("JSON file invalid: pcmAudioParameters is not defined");
-        return pcmAudioParameters;
-    }
-
+    assert(pcmAudioParameters.isValid);
     return pcmAudioParameters;
 }
 
 // This method sets the pcmAudioParameters metadata
-void LdDecodeMetaData::setPcmAudioParameters(LdDecodeMetaData::PcmAudioParameters _pcmAudioParam)
+void LdDecodeMetaData::setPcmAudioParameters(const LdDecodeMetaData::PcmAudioParameters &_pcmAudioParameters)
 {
-    json.setValue({"pcmAudioParameters", "sampleRate"}, _pcmAudioParam.sampleRate);
-    json.setValue({"pcmAudioParameters", "isLittleEndian"}, _pcmAudioParam.isLittleEndian);
-    json.setValue({"pcmAudioParameters", "isSigned"}, _pcmAudioParam.isSigned);
-    json.setValue({"pcmAudioParameters", "bits"}, _pcmAudioParam.bits);
+    pcmAudioParameters = _pcmAudioParameters;
+    pcmAudioParameters.isValid = true;
+}
+
+// Based on the video system selected, set default values for the members of
+// VideoParameters that aren't obtained from the JSON.
+void LdDecodeMetaData::initialiseVideoSystemParameters()
+{
+    const VideoSystemDefaults &defaults = getSystemDefaults(videoParameters);
+    videoParameters.fSC = defaults.fSC;
+
+    // Set default LineParameters
+    LdDecodeMetaData::LineParameters lineParameters;
+    processLineParameters(lineParameters);
+}
+
+// Validate LineParameters and apply them to the VideoParameters
+void LdDecodeMetaData::processLineParameters(LdDecodeMetaData::LineParameters &lineParameters)
+{
+    lineParameters.applyTo(videoParameters);
+}
+
+// Validate and apply to a set of VideoParameters
+void LdDecodeMetaData::LineParameters::applyTo(LdDecodeMetaData::VideoParameters &videoParameters)
+{
+    const bool firstFieldLineExists = firstActiveFieldLine != -1;
+    const bool lastFieldLineExists = lastActiveFieldLine != -1;
+    const bool firstFrameLineExists = firstActiveFrameLine != -1;
+    const bool lastFrameLineExists = lastActiveFrameLine != -1;
+
+    const VideoSystemDefaults &defaults = getSystemDefaults(videoParameters);
+    const qint32 minFirstFrameLine = defaults.minActiveFrameLine;
+    const qint32 defaultFirstFieldLine = defaults.firstActiveFieldLine;
+    const qint32 defaultLastFieldLine = defaults.lastActiveFieldLine;
+    const qint32 defaultFirstFrameLine = defaults.firstActiveFrameLine;
+    const qint32 defaultLastFrameLine = defaults.lastActiveFrameLine;
+
+    // Validate and potentially fix the first active field line.
+    if (firstActiveFieldLine < 1 || firstActiveFieldLine > defaultLastFieldLine) {
+        if (firstFieldLineExists) {
+            qInfo().nospace() << "Specified first active field line " << firstActiveFieldLine << " out of bounds (1 to "
+                              << defaultLastFieldLine << "), resetting to default (" << defaultFirstFieldLine << ").";
+        }
+        firstActiveFieldLine = defaultFirstFieldLine;
+    }
+
+    // Validate and potentially fix the last active field line.
+    if (lastActiveFieldLine < 1 || lastActiveFieldLine > defaultLastFieldLine) {
+        if (lastFieldLineExists) {
+            qInfo().nospace() << "Specified last active field line " << lastActiveFieldLine << " out of bounds (1 to "
+                              << defaultLastFieldLine << "), resetting to default (" << defaultLastFieldLine << ").";
+        }
+        lastActiveFieldLine = defaultLastFieldLine;
+    }
+
+    // Range-check the first and last active field lines.
+    if (firstActiveFieldLine > lastActiveFieldLine) {
+       qInfo().nospace() << "Specified last active field line " << lastActiveFieldLine << " is before specified first active field line"
+                         << firstActiveFieldLine << ", resetting to defaults (" << defaultFirstFieldLine << "-" << defaultLastFieldLine << ").";
+        firstActiveFieldLine = defaultFirstFieldLine;
+        lastActiveFieldLine = defaultLastFieldLine;
+    }
+
+    // Validate and potentially fix the first active frame line.
+    if (firstActiveFrameLine < minFirstFrameLine || firstActiveFrameLine > defaultLastFrameLine) {
+        if (firstFrameLineExists) {
+            qInfo().nospace() << "Specified first active frame line " << firstActiveFrameLine << " out of bounds (" << minFirstFrameLine << " to "
+                              << defaultLastFrameLine << "), resetting to default (" << defaultFirstFrameLine << ").";
+        }
+        firstActiveFrameLine = defaultFirstFrameLine;
+    }
+
+    // Validate and potentially fix the last active frame line.
+    if (lastActiveFrameLine < minFirstFrameLine || lastActiveFrameLine > defaultLastFrameLine) {
+        if (lastFrameLineExists) {
+            qInfo().nospace() << "Specified last active frame line " << lastActiveFrameLine << " out of bounds (" << minFirstFrameLine << " to "
+                              << defaultLastFrameLine << "), resetting to default (" << defaultLastFrameLine << ").";
+        }
+        lastActiveFrameLine = defaultLastFrameLine;
+    }
+
+    // Range-check the first and last active frame lines.
+    if (firstActiveFrameLine > lastActiveFrameLine) {
+        qInfo().nospace() << "Specified last active frame line " << lastActiveFrameLine << " is before specified first active frame line"
+                          << firstActiveFrameLine << ", resetting to defaults (" << defaultFirstFrameLine << "-" << defaultLastFrameLine << ").";
+        firstActiveFrameLine = defaultFirstFrameLine;
+        lastActiveFrameLine = defaultLastFrameLine;
+    }
+
+    // Store the new values back into videoParameters
+    videoParameters.firstActiveFieldLine = firstActiveFieldLine;
+    videoParameters.lastActiveFieldLine = lastActiveFieldLine;
+    videoParameters.firstActiveFrameLine = firstActiveFrameLine;
+    videoParameters.lastActiveFrameLine = lastActiveFrameLine;
 }
 
 // This method gets the metadata for the specified sequential field number (indexed from 1 (not 0!))
-LdDecodeMetaData::Field LdDecodeMetaData::getField(qint32 sequentialFieldNumber)
+const LdDecodeMetaData::Field &LdDecodeMetaData::getField(qint32 sequentialFieldNumber)
 {
-    Field field;
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::getField(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    // Primary field values
-    field.seqNo = json.value({"fields", fieldNumber, "seqNo"}).toInt();
-    field.isFirstField = json.value({"fields", fieldNumber, "isFirstField"}).toBool();
-    field.syncConf = json.value({"fields", fieldNumber, "syncConf"}).toInt();
-    field.medianBurstIRE = json.value({"fields", fieldNumber, "medianBurstIRE"}).toDouble();
-    field.fieldPhaseID = json.value({"fields", fieldNumber, "fieldPhaseID"}).toInt();
-    field.audioSamples = json.value({"fields", fieldNumber, "audioSamples"}).toInt();
-
-    // VITS metrics values
-    field.vitsMetrics = getFieldVitsMetrics(sequentialFieldNumber);
-
-    // VBI values
-    field.vbi = getFieldVbi(sequentialFieldNumber);
-
-    // NTSC values
-    field.ntsc = getFieldNtsc(sequentialFieldNumber);
-
-    // dropOuts values
-    field.dropOuts = getFieldDropOuts(sequentialFieldNumber);
-
-    // Padding flag
-    field.pad = json.value({"fields", fieldNumber, "pad"}).toBool();
-
-    return field;
+    return fields[fieldNumber];
 }
 
 // This method gets the VITS metrics metadata for the specified sequential field number
-LdDecodeMetaData::VitsMetrics LdDecodeMetaData::getFieldVitsMetrics(qint32 sequentialFieldNumber)
+const LdDecodeMetaData::VitsMetrics &LdDecodeMetaData::getFieldVitsMetrics(qint32 sequentialFieldNumber)
 {
-    VitsMetrics vitsMetrics;
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::getFieldVitsMetrics(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (json.size({"fields", fieldNumber, "vitsMetrics"}) > 0) {
-        vitsMetrics.inUse = true;
-        vitsMetrics.wSNR = json.value({"fields", fieldNumber, "vitsMetrics", "wSNR"}).toReal();
-        vitsMetrics.bPSNR = json.value({"fields", fieldNumber, "vitsMetrics", "bPSNR"}).toReal();
-    } else {
-        // Mark VITS metrics as undefined
-        vitsMetrics.inUse = false;
-    }
-
-    return vitsMetrics;
+    return fields[fieldNumber].vitsMetrics;
 }
 
 // This method gets the VBI metadata for the specified sequential field number
-LdDecodeMetaData::Vbi LdDecodeMetaData::getFieldVbi(qint32 sequentialFieldNumber)
+const LdDecodeMetaData::Vbi &LdDecodeMetaData::getFieldVbi(qint32 sequentialFieldNumber)
 {
-    Vbi vbi;
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::getFieldVbi(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (json.size({"fields", fieldNumber, "vbi"}) > 0) {
-        // Mark VBI as in use
-        vbi.inUse = true;
-
-        vbi.vbiData.append(json.value({"fields", fieldNumber, "vbi", "vbiData", 0}).toInt()); // Line 16
-        vbi.vbiData.append(json.value({"fields", fieldNumber, "vbi", "vbiData", 1}).toInt()); // Line 17
-        vbi.vbiData.append(json.value({"fields", fieldNumber, "vbi", "vbiData", 2}).toInt()); // Line 18
-    } else {
-        // Mark VBI as undefined
-        vbi.inUse = false;
-
-        // Resize the VBI data fields to prevent assert issues downstream
-        vbi.vbiData.resize(3);
-    }
-
-    return vbi;
+    return fields[fieldNumber].vbi;
 }
 
 // This method gets the NTSC metadata for the specified sequential field number
-LdDecodeMetaData::Ntsc LdDecodeMetaData::getFieldNtsc(qint32 sequentialFieldNumber)
+const LdDecodeMetaData::Ntsc &LdDecodeMetaData::getFieldNtsc(qint32 sequentialFieldNumber)
 {
-    Ntsc ntsc;
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::getFieldNtsc(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (json.size({"fields", fieldNumber, "ntsc"}) > 0) {
-        // Mark as in use
-        ntsc.inUse = true;
+    return fields[fieldNumber].ntsc;
+}
 
-        ntsc.isFmCodeDataValid = json.value({"fields", fieldNumber, "ntsc", "isFmCodeDataValid"}).toBool();
-        ntsc.fmCodeData = json.value({"fields", fieldNumber, "ntsc", "fmCodeData"}).toInt();
-        ntsc.fieldFlag = json.value({"fields", fieldNumber, "ntsc", "fieldFlag"}).toBool();
-        ntsc.whiteFlag = json.value({"fields", fieldNumber, "ntsc", "whiteFlag"}).toBool();
-        ntsc.ccData0 = json.value({"fields", fieldNumber, "ntsc", "ccData0"}).toInt();
-        ntsc.ccData1 = json.value({"fields", fieldNumber, "ntsc", "ccData1"}).toInt();
-    } else {
-        // Mark ntscSpecific as undefined
-        ntsc.inUse = false;
+// This method gets the VITC metadata for the specified sequential field number
+const LdDecodeMetaData::Vitc &LdDecodeMetaData::getFieldVitc(qint32 sequentialFieldNumber)
+{
+    qint32 fieldNumber = sequentialFieldNumber - 1;
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
+        qCritical() << "LdDecodeMetaData::getFieldVitc(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    return ntsc;
+    return fields[fieldNumber].vitc;
+}
+
+// This method gets the Closed Caption metadata for the specified sequential field number
+const LdDecodeMetaData::ClosedCaption &LdDecodeMetaData::getFieldClosedCaption(qint32 sequentialFieldNumber)
+{
+    qint32 fieldNumber = sequentialFieldNumber - 1;
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
+        qCritical() << "LdDecodeMetaData::getFieldClosedCaption(): Requested field number" << sequentialFieldNumber << "out of bounds!";
+    }
+
+    return fields[fieldNumber].closedCaption;
 }
 
 // This method gets the drop-out metadata for the specified sequential field number
-DropOuts LdDecodeMetaData::getFieldDropOuts(qint32 sequentialFieldNumber)
+const DropOuts &LdDecodeMetaData::getFieldDropOuts(qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::getFieldDropOuts(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    // Get the JSON array sizes
-    qint32 startxSize = json.size({"fields", fieldNumber, "dropOuts", "startx"});
-    qint32 endxSize = json.size({"fields", fieldNumber, "dropOuts", "endx"});
-    qint32 fieldLinesSize = json.size({"fields", fieldNumber, "dropOuts", "fieldLines"});
-
-    // Ensure that all three objects are the same size
-    if (startxSize != endxSize && startxSize != fieldLinesSize) {
-        qCritical("JSON file is invalid: Dropouts object is illegal");
-    }
-
-    // Reserve space for the dropouts we have to avoid reallocation.
-    DropOuts dropOuts(startxSize);
-
-    if (startxSize > 0) {
-        // Pre-create the lists used for lookup so we don't have to reallocate
-        // them for every line.
-        QVariantList startx = {"fields", fieldNumber, "dropOuts", "startx", 0};
-        QVariantList endx = {"fields", fieldNumber, "dropOuts", "endx", 0};
-        QVariantList fieldLine = {"fields", fieldNumber, "dropOuts", "fieldLine", 0};
-        for (qint32 doCounter = 0; doCounter < startxSize; doCounter++) {
-            startx.last().setValue(doCounter);
-            endx.last().setValue(doCounter);
-            fieldLine.last().setValue(doCounter);
-            dropOuts.append(json.value(startx).toInt(),
-                            json.value(endx).toInt(),
-                            json.value(fieldLine).toInt());
-        }
-    } else {
-        dropOuts.clear();
-    }
-
-    return dropOuts;
+    return fields[fieldNumber].dropOuts;
 }
 
 // This method sets the field metadata for a field
-void LdDecodeMetaData::updateField(LdDecodeMetaData::Field _field, qint32 sequentialFieldNumber)
+void LdDecodeMetaData::updateField(const LdDecodeMetaData::Field &field, qint32 sequentialFieldNumber)
 {
-    if (sequentialFieldNumber < 1) {
+    qint32 fieldNumber = sequentialFieldNumber - 1;
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::updateFieldVitsMetrics(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    // Write the field data
-    json.setValue({"fields", fieldNumber, "seqNo"}, sequentialFieldNumber);
-    json.setValue({"fields", fieldNumber, "isFirstField"}, _field.isFirstField);
-    json.setValue({"fields", fieldNumber, "syncConf"}, _field.syncConf);
-    json.setValue({"fields", fieldNumber, "medianBurstIRE"}, _field.medianBurstIRE);
-    json.setValue({"fields", fieldNumber, "fieldPhaseID"}, _field.fieldPhaseID);
-    json.setValue({"fields", fieldNumber, "audioSamples"}, _field.audioSamples);
-
-    // Write the VITS metrics data if in use
-    updateFieldVitsMetrics(_field.vitsMetrics, sequentialFieldNumber);
-
-    // Write the VBI data if in use
-    updateFieldVbi(_field.vbi, sequentialFieldNumber);
-
-    // Write the NTSC specific record if in use
-    updateFieldNtsc(_field.ntsc, sequentialFieldNumber);
-
-    // Write the drop-out records
-    updateFieldDropOuts(_field.dropOuts, sequentialFieldNumber);
-
-    // Padding flag
-    json.setValue({"fields", fieldNumber, "pad"}, _field.pad);
+    fields[fieldNumber] = field;
 }
 
 // This method sets the field VBI metadata for a field
-void LdDecodeMetaData::updateFieldVitsMetrics(LdDecodeMetaData::VitsMetrics _vitsMetrics, qint32 sequentialFieldNumber)
+void LdDecodeMetaData::updateFieldVitsMetrics(const LdDecodeMetaData::VitsMetrics &vitsMetrics, qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() + 1 || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::updateFieldVitsMetrics(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (_vitsMetrics.inUse) {
-        json.setValue({"fields", fieldNumber, "vitsMetrics", "wSNR"}, _vitsMetrics.wSNR);
-        json.setValue({"fields", fieldNumber, "vitsMetrics", "bPSNR"}, _vitsMetrics.bPSNR);
-    }
+    fields[fieldNumber].vitsMetrics = vitsMetrics;
 }
 
 // This method sets the field VBI metadata for a field
-void LdDecodeMetaData::updateFieldVbi(LdDecodeMetaData::Vbi _vbi, qint32 sequentialFieldNumber)
+void LdDecodeMetaData::updateFieldVbi(const LdDecodeMetaData::Vbi &vbi, qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() + 1 || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::updateFieldVbi(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (_vbi.inUse) {
-        // Validate the VBI data array
-        if (_vbi.vbiData.size() != 3) {
-            qDebug() << "LdDecodeMetaData::write(): Invalid vbiData array!  Setting to -1";
-            _vbi.vbiData.resize(3);
-            _vbi.vbiData[0] = -1;
-            _vbi.vbiData[1] = -1;
-            _vbi.vbiData[2] = -1;
-        }
-
-        json.setValue({"fields", fieldNumber, "vbi", "vbiData", 0}, _vbi.vbiData[0]);
-        json.setValue({"fields", fieldNumber, "vbi", "vbiData", 1}, _vbi.vbiData[1]);
-        json.setValue({"fields", fieldNumber, "vbi", "vbiData", 2}, _vbi.vbiData[2]);
-    }
+    fields[fieldNumber].vbi = vbi;
 }
 
 // This method sets the field NTSC metadata for a field
-void LdDecodeMetaData::updateFieldNtsc(LdDecodeMetaData::Ntsc _ntsc, qint32 sequentialFieldNumber)
+void LdDecodeMetaData::updateFieldNtsc(const LdDecodeMetaData::Ntsc &ntsc, qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() + 1 || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::updateFieldNtsc(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (_ntsc.inUse) {
-        json.setValue({"fields", fieldNumber, "ntsc", "isFmCodeDataValid"}, _ntsc.isFmCodeDataValid);
-        if (_ntsc.isFmCodeDataValid)
-            json.setValue({"fields", fieldNumber, "ntsc", "fmCodeData"}, _ntsc.fmCodeData);
-        else json.setValue({"fields", fieldNumber, "ntsc", "fmCodeData"}, -1);
-        json.setValue({"fields", fieldNumber, "ntsc", "fieldFlag"}, _ntsc.fieldFlag);
-        json.setValue({"fields", fieldNumber, "ntsc", "whiteFlag"}, _ntsc.whiteFlag);
-        json.setValue({"fields", fieldNumber, "ntsc", "ccData0"}, _ntsc.ccData0);
-        json.setValue({"fields", fieldNumber, "ntsc", "ccData1"}, _ntsc.ccData1);
+    fields[fieldNumber].ntsc = ntsc;
+}
+
+// This method sets the VITC metadata for a field
+void LdDecodeMetaData::updateFieldVitc(const LdDecodeMetaData::Vitc &vitc, qint32 sequentialFieldNumber)
+{
+    qint32 fieldNumber = sequentialFieldNumber - 1;
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
+        qCritical() << "LdDecodeMetaData::updateFieldVitc(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
+
+    fields[fieldNumber].vitc = vitc;
+}
+
+// This method sets the Closed Caption metadata for a field
+void LdDecodeMetaData::updateFieldClosedCaption(const LdDecodeMetaData::ClosedCaption &closedCaption, qint32 sequentialFieldNumber)
+{
+    qint32 fieldNumber = sequentialFieldNumber - 1;
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
+        qCritical() << "LdDecodeMetaData::updateFieldClosedCaption(): Requested field number" << sequentialFieldNumber << "out of bounds!";
+    }
+
+    fields[fieldNumber].closedCaption = closedCaption;
 }
 
 // This method sets the field dropout metadata for a field
-void LdDecodeMetaData::updateFieldDropOuts(DropOuts _dropOuts, qint32 sequentialFieldNumber)
+void LdDecodeMetaData::updateFieldDropOuts(const DropOuts &dropOuts, qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() + 1 || fieldNumber < 0) {
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
         qCritical() << "LdDecodeMetaData::updateFieldDropOuts(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    if (_dropOuts.size() != 0) {
-        // Populate the arrays with the drop out metadata
-        for (qint32 doCounter = 0; doCounter < _dropOuts.size(); doCounter++) {
-            json.setValue({"fields", fieldNumber, "dropOuts", "startx", doCounter}, _dropOuts.startx(doCounter));
-            json.setValue({"fields", fieldNumber, "dropOuts", "endx", doCounter}, _dropOuts.endx(doCounter));
-            json.setValue({"fields", fieldNumber, "dropOuts", "fieldLine", doCounter}, _dropOuts.fieldLine(doCounter));
-        }
-    } else {
-        // If updated dropouts is empty, clear the field's dropouts
-        clearFieldDropOuts(sequentialFieldNumber);
-    }
+    fields[fieldNumber].dropOuts = dropOuts;
 }
 
 // This method clears the field dropout metadata for a field
 void LdDecodeMetaData::clearFieldDropOuts(qint32 sequentialFieldNumber)
 {
     qint32 fieldNumber = sequentialFieldNumber - 1;
-
-    if (fieldNumber >= getNumberOfFields() + 1 || fieldNumber < 0) {
-        qCritical() << "LdDecodeMetaData::updateFieldDropOuts(): Requested field number" << sequentialFieldNumber << "out of bounds!";
+    if (fieldNumber < 0 || fieldNumber >= getNumberOfFields()) {
+        qCritical() << "LdDecodeMetaData::clearFieldDropOuts(): Requested field number" << sequentialFieldNumber << "out of bounds!";
     }
 
-    json.remove({"fields", fieldNumber, "dropOuts", "startx"});
-    json.remove({"fields", fieldNumber, "dropOuts", "endx"});
-    json.remove({"fields", fieldNumber, "dropOuts", "fieldLine"});
+    fields[fieldNumber].dropOuts.clear();
 }
 
 // This method appends a new field to the existing metadata
-void LdDecodeMetaData::appendField(LdDecodeMetaData::Field _field)
+void LdDecodeMetaData::appendField(const LdDecodeMetaData::Field &field)
 {
-    // Get the field number (and adjust to 0 if there are no fields in the JSON)
-    qint32 fieldNumber = getNumberOfFields();
-    if (fieldNumber < 0) fieldNumber = 0;
+    fields.append(field);
 
-    updateField(_field, fieldNumber + 1);
+    videoParameters.numberOfSequentialFields = fields.size();
 }
 
 // Method to get the available number of fields (according to the metadata)
 qint32 LdDecodeMetaData::getNumberOfFields()
 {
-    return json.size({"fields"});
+    return fields.size();
 }
 
 // Method to set the available number of fields
+// XXX This is unnecessary given appendField
 void LdDecodeMetaData::setNumberOfFields(qint32 numberOfFields)
 {
-    json.setValue({"videoParameters", "numberOfSequentialFields"}, numberOfFields);
+    videoParameters.numberOfSequentialFields = numberOfFields;
 }
 
 // A note about fields, frames and still-frames:
@@ -669,17 +1131,17 @@ qint32 LdDecodeMetaData::convertClvTimecodeToFrameNumber(LdDecodeMetaData::ClvTi
     }
 
     if (clvTimeCode.hours != -1) {
-        if (videoParameters.isSourcePal) frameNumber += clvTimeCode.hours * 3600 * 25;
+        if (videoParameters.system == PAL) frameNumber += clvTimeCode.hours * 3600 * 25;
         else frameNumber += clvTimeCode.hours * 3600 * 30;
     }
 
     if (clvTimeCode.minutes != -1) {
-        if (videoParameters.isSourcePal) frameNumber += clvTimeCode.minutes * 60 * 25;
+        if (videoParameters.system == PAL) frameNumber += clvTimeCode.minutes * 60 * 25;
         else frameNumber += clvTimeCode.minutes * 60 * 30;
     }
 
     if (clvTimeCode.seconds != -1) {
-        if (videoParameters.isSourcePal) frameNumber += clvTimeCode.seconds * 25;
+        if (videoParameters.system == PAL) frameNumber += clvTimeCode.seconds * 25;
         else frameNumber += clvTimeCode.seconds * 30;
     }
 
@@ -700,7 +1162,7 @@ LdDecodeMetaData::ClvTimecode LdDecodeMetaData::convertFrameNumberToClvTimecode(
     clvTimecode.seconds = 0;
     clvTimecode.pictureNumber = 0;
 
-    if (getVideoParameters().isSourcePal) {
+    if (getVideoParameters().system == PAL) {
         clvTimecode.hours = frameNumber / (3600 * 25);
         frameNumber -= clvTimecode.hours * (3600 * 25);
 
@@ -727,6 +1189,12 @@ LdDecodeMetaData::ClvTimecode LdDecodeMetaData::convertFrameNumberToClvTimecode(
     return clvTimecode;
 }
 
+// Method to return a description string for the current video format
+QString LdDecodeMetaData::getVideoSystemDescription() const
+{
+    return getSystemDefaults(videoParameters).name;
+}
+
 // Private method to generate a map of the PCM audio data (used by the sourceAudio library)
 // Note: That the map unit is "stereo sample pairs"; so each unit represents 2 16-bit samples
 // for a total of 4 bytes per unit.
@@ -751,7 +1219,7 @@ void LdDecodeMetaData::generatePcmAudioMap()
             pcmAudioFieldStartSampleMap[fieldNo] = 0;
         } else {
             // Every following field's start position is the start+length of the previous
-            pcmAudioFieldStartSampleMap[fieldNo] = pcmAudioFieldStartSampleMap[fieldNo - 1] + pcmAudioFieldLengthMap[fieldNo];
+            pcmAudioFieldStartSampleMap[fieldNo] = pcmAudioFieldStartSampleMap[fieldNo - 1] + pcmAudioFieldLengthMap[fieldNo - 1];
         }
     }
 }
@@ -760,12 +1228,14 @@ void LdDecodeMetaData::generatePcmAudioMap()
 qint32 LdDecodeMetaData::getFieldPcmAudioStart(qint32 sequentialFieldNumber)
 {
     if (pcmAudioFieldStartSampleMap.size() < sequentialFieldNumber) return -1;
-    return pcmAudioFieldStartSampleMap[sequentialFieldNumber];
+    // Field numbers are 1 indexed, but our map is 0 indexed
+    return pcmAudioFieldStartSampleMap[sequentialFieldNumber - 1];
 }
 
 // Method to get the sample length of the specified sequential field number
 qint32 LdDecodeMetaData::getFieldPcmAudioLength(qint32 sequentialFieldNumber)
 {
     if (pcmAudioFieldLengthMap.size() < sequentialFieldNumber) return -1;
-    return pcmAudioFieldLengthMap[sequentialFieldNumber];
+    // Field numbers are 1 indexed, but our map is 0 indexed
+    return pcmAudioFieldLengthMap[sequentialFieldNumber - 1];
 }

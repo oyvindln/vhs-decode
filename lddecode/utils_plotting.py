@@ -30,9 +30,10 @@ def todb(y, zero=False):
     else:
         return db
 
+
 def print_crossings(db, w):
     above_m3 = None
-    for i in range(1, len(w)//2):
+    for i in range(1, len(w) // 2):
         if (db[i] >= -10) and (db[i - 1] < -10):
             print(">-10db crossing at ", w[i])
         if (db[i] >= -3) and (db[i - 1] < -3):
@@ -82,6 +83,7 @@ def plotfilter(B, A, dfreq=None, freq=40, zero_base=False):
 
     return plotfilter_wh(w[1:keep], h[1:keep], freq, zero_base)
 
+
 def plotfilter2(F1, F2, dfreq=None, freq=40, zero_base=False):
     if dfreq is None:
         dfreq = freq / 2
@@ -114,6 +116,7 @@ def plotfilter2(F1, F2, dfreq=None, freq=40, zero_base=False):
     plt.show()
 
     return None
+
 
 pi = np.pi
 tau = np.pi * 2

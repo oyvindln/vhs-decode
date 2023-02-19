@@ -3,7 +3,7 @@
     main.cpp
 
     ld-disc-stacker - Disc stacking for ld-decode
-    Copyright (C) 2020 Simon Inns
+    Copyright (C) 2020-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
     parser.setApplicationDescription(
                 "ld-disc-stacker - Disc stacking for ld-decode\n"
                 "\n"
-                "(c)2020 Simon Inns\n"
+                "(c)2020-2022 Simon Inns\n"
                 "GPLv3 Open-Source - github: https://github.com/happycube/ld-decode");
     parser.addHelpOption();
     parser.addVersionOption();
@@ -295,8 +295,10 @@ int main(int argc, char *argv[])
         }
 
         // Ensure that the video source standard matches the primary source
-        if (ldDecodeMetaData[0]->getVideoParameters().isSourcePal != videoParameters.isSourcePal) {
-            qInfo() << "All additional input sources must have the same video format (PAL/NTSC) as the initial source!";
+        if (ldDecodeMetaData[0]->getVideoParameters().system != videoParameters.system) {
+            qInfo() << "All additional input sources must have the same video system as the initial source!";
+            qInfo() << "Initial source is" << ldDecodeMetaData[0]->getVideoSystemDescription() << " and current source is" <<
+                       ldDecodeMetaData[i]->getVideoSystemDescription();
             return 1;
         }
 

@@ -1,4 +1,5 @@
 import math
+from collections import namedtuple
 import numpy as np
 import lddecode.utils as lddu
 import lddecode.core as ldd
@@ -6,20 +7,32 @@ from vhsdecode.utils import get_line
 import vhsdecode.utils as utils
 import scipy.signal as sps
 
+
 from numba import njit
 
 
+@njit(cache=True)
+def needs_recheck(sum_0: float, sum_1: float):
+    """Check if the magnitude difference between the sums is larger than the set threshold
+    If it's small, we want to make sure we re-check on the next field.
+    """
+    # Trigger a re-check on next field if the magnitude difference is smaller than this value.
+    RECHECK_THRESHOLD = 1.2
+    return True if max(sum_0, sum_1) / min(sum_0, sum_1) < RECHECK_THRESHOLD else False
+
+
+@njit(cache=True)
 def chroma_to_u16(chroma):
     """Scale the chroma output array to a 16-bit value for output."""
     S16_ABS_MAX = 32767
 
-    if np.max(chroma) > S16_ABS_MAX:
-        ldd.logger.warning("Chroma signal clipping.")
-    return np.uint16(chroma + S16_ABS_MAX)
+    # Disabled for now as it's misleading.
+    # if np.max(chroma) > S16_ABS_MAX:
+    #     ldd.logger.warning("Chroma signal clipping.")
+    return (chroma + S16_ABS_MAX).astype(np.uint16)
 
 
-# Using parallel here makes this waaaay slower for some reason.
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     """Scale chroma according to the level of the color burst on each line."""
 
@@ -48,7 +61,7 @@ def acc_line(chroma, burst_abs_ref, burststart, burstend):
     return output
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def comb_c_pal(data, line_len):
     """Very basic comb filter, adds the signal together with a signal delayed by 2H,
     and one advanced by 2H
@@ -56,6 +69,7 @@ def comb_c_pal(data, line_len):
     Helps chroma stability on LP tapes in particular.
     """
 
+    # TODO: Compensate for PAL quarter cycle offset
     data2 = data.copy()
     numlines = len(data) // line_len
     for line_num in range(16, numlines - 2):
@@ -89,7 +103,7 @@ def comb_c_ntsc(data, line_len):
     return data
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def upconvert_chroma(
     chroma,
     lineoffset,
@@ -109,9 +123,7 @@ def upconvert_chroma(
         # Mixing the chroma signal with a signal at the frequency of colour under + fsc gives us
         # a signal with frequencies at the difference and sum, the difference is what we want as
         # it's at the right frequency.
-        mixed = heterodyne * c
-
-        uphet[start:end] = mixed
+        uphet[start:end] = heterodyne * c
 
     else:
         #        rotation = [(0,0),(90,-270),(180,-180),(270,-90)]
@@ -159,7 +171,7 @@ def demod_chroma_filt(data, filter, blocklen, notch, do_notch=None, move=10):
     # TODO: Not sure if we need this after hilbert filter change, needs check.
     out_chroma = np.roll(out_chroma, move)
     # crude DC offset removal
-    out_chroma = out_chroma - np.mean(out_chroma)
+    out_chroma -= np.mean(out_chroma)
     return out_chroma
 
 
@@ -179,11 +191,11 @@ def process_chroma(
         field.rf.chroma_last_field = field.rf.field_number
 
         # If chroma AFC is enabled
-        if field.rf.cafc:
+        if field.rf.do_cafc:
             # it does the chroma filtering AFTER the TBC
             chroma = demod_chroma_filt(
                 chroma,
-                field.rf.chromaAFC.get_chroma_bandpass(field.rf.cafc),
+                field.rf.chroma_afc.get_chroma_bandpass(),
                 len(chroma),
                 field.rf.Filters["FVideoNotch"],
                 field.rf.notch,
@@ -191,7 +203,7 @@ def process_chroma(
             )
 
             if not disable_tracking_cafc:
-                spec, meas, offset, cphase = field.rf.chromaAFC.freqOffset(chroma)
+                spec, meas, offset, cphase = field.rf.chroma_afc.freqOffset(chroma)
                 ldd.logger.debug(
                     "Chroma under AFC: %.02f kHz, Offset (long term): %.02f Hz, Phase: %.02f deg"
                     % (meas / 1e3, offset, cphase * 360 / (2 * np.pi))
@@ -242,8 +254,8 @@ def process_chroma(
         lineoffset,
         linesout,
         outwidth,
-        field.rf.chromaAFC.getChromaHet()
-        if (field.rf.cafc and not disable_tracking_cafc)
+        field.rf.chroma_afc.getChromaHet()
+        if (field.rf.do_cafc and not disable_tracking_cafc)
         else field.rf.chroma_heterodyne,
         phase_rotation,
         starting_phase,
@@ -291,7 +303,7 @@ def check_increment_field_no(rf):
     return raw_loc
 
 
-def decode_chroma_vhs(field):
+def decode_chroma_vhs(field, rotation=True):
     """Do track detection if needed and upconvert the chroma signal"""
     rf = field.rf
 
@@ -300,20 +312,20 @@ def decode_chroma_vhs(field):
     # make sure we re-check the phase occasionally.
     raw_loc = check_increment_field_no(rf)
 
-    # If we moved significantly more than the length of one field, re-check phase
-    # as we may have skipped fields.
-    if raw_loc - rf.last_raw_loc > 1.3:
-        if rf.detect_track:
-            ldd.logger.info("Possibly skipped a track, re-checking phase..")
-            rf.needs_detect = True
+    if rotation:
+        # If we moved significantly more than the length of one field, re-check phase
+        # as we may have skipped fields.
+        if raw_loc - rf.last_raw_loc > 1.3:
+            if rf.detect_track:
+                ldd.logger.info("Possibly skipped a track, re-checking phase..")
+                rf.needs_detect = True
 
-    if rf.detect_track and rf.needs_detect or rf.recheck_phase:
-        rf.track_phase = field.try_detect_track()
-        rf.needs_detect = False
+        if rf.detect_track and rf.needs_detect or rf.recheck_phase:
+            rf.track_phase, rf.needs_detect = field.try_detect_track()
 
     uphet = process_chroma(
         field,
-        rf.track_phase,
+        rf.track_phase if rotation else None,
         disable_comb=rf.options.disable_comb,
         disable_tracking_cafc=False,
     )
@@ -339,31 +351,77 @@ def decode_chroma_umatic(field):
     return chroma_to_u16(uphet)
 
 
+def decode_chroma_betamax(field):
+    """Do track detection if needed and upconvert the chroma signal"""
+    rf = field.rf
+
+    # Use field number based on raw data position
+    # This may not be 100% accurate, so we may want to add some more logic to
+    # make sure we re-check the phase occasionally.
+    raw_loc = check_increment_field_no(rf)
+
+    # If we moved significantly more than the length of one field, re-check phase
+    # as we may have skipped fields.
+    if raw_loc - rf.last_raw_loc > 1.3:
+        if rf.detect_track:
+            ldd.logger.info("Possibly skipped a track, re-checking phase..")
+            rf.needs_detect = True
+
+    if rf.detect_track and rf.needs_detect or rf.recheck_phase:
+        rf.track_phase, rf.needs_detect = field.try_detect_track()
+
+    uphet = process_chroma(
+        field,
+        None,
+        disable_comb=rf.options.disable_comb,
+        disable_tracking_cafc=False,
+    )
+    field.uphet_temp = uphet
+    # Store previous raw location so we can detect if we moved in the next call.
+    rf.last_raw_loc = raw_loc
+    return chroma_to_u16(uphet)
+
+
+def decode_chroma_video8(field):
+    """Do track detection if needed and upconvert the chroma signal"""
+    rf = field.rf
+
+    ldd.logger.info(
+        "Track detection and phase inversion not implemented for video8 yet!"
+    )
+
+    # Use field number based on raw data position
+    # This may not be 100% accurate, so we may want to add some more logic to
+    # make sure we re-check the phase occasionally.
+    raw_loc = check_increment_field_no(rf)
+
+    # If we moved significantly more than the length of one field, re-check phase
+    # as we may have skipped fields.
+    if raw_loc - rf.last_raw_loc > 1.3:
+        if rf.detect_track:
+            ldd.logger.info("Possibly skipped a track, re-checking phase..")
+            rf.needs_detect = True
+
+    if rf.detect_track and rf.needs_detect or rf.recheck_phase:
+        rf.track_phase, rf.needs_detect = field.try_detect_track()
+
+    uphet = process_chroma(
+        field,
+        None,
+        disable_comb=rf.options.disable_comb,
+        disable_tracking_cafc=False,
+    )
+    field.uphet_temp = uphet
+    # Store previous raw location so we can detect if we moved in the next call.
+    rf.last_raw_loc = raw_loc
+    return chroma_to_u16(uphet)
+
+
 def get_burst_area(field):
     return (
         math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0])),
         math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])),
     )
-
-
-class LineInfo:
-    """Helper class to store line burst info for PAL."""
-
-    def __init__(self, num):
-        self.linenum = num
-        self.bp = 0
-        self.bq = 0
-        self.vsw = -1
-        self.burst_norm = 0
-
-    def __str__(self):
-        return "<num: %s, bp: %s, bq: %s, vsw: %s, burst_norm: %s>" % (
-            self.linenum,
-            self.bp,
-            self.bq,
-            self.vsw,
-            self.burst_norm,
-        )
 
 
 def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
@@ -392,6 +450,7 @@ def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
     return mean_burst_sum
 
 
+@njit(cache=True, nogil=True)
 def detect_burst_pal(
     chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
 ):
@@ -417,6 +476,10 @@ def detect_burst_pal(
     return line_data, burst_mean
 
 
+LineInfo = namedtuple("LineInfo", "linenum, bp, bq, vsw, burst_norm")
+
+
+@njit(cache=True, nogil=True)
 def detect_burst_pal_line(
     chroma_data, sine, cosine, burst_area, line_length, line_number
 ):
@@ -479,29 +542,34 @@ def detect_burst_pal_line(
     # vector magnitude /difference/ between the phases of the burst on the
     # present line and previous line to the magnitude of the burst. This
     # may effectively be a dot-product operation...
-    line = LineInfo(line_number)
+
+    line_bp = 0
+    line_bq = 0
+    line_vsw = -1
+    line_burst_norm = 0
+
     if ((bp - bpo) * (bp - bpo) + (bq - bqo) * (bq - bqo)) < (bp * bp + bq * bq) * 2:
-        line.vsw = 1
+        line_vsw = 1
 
     # (Comment from palcolor.cpp)
     # Average the burst phase to get -U (reference) phase out -- burst
     # phase is (-U +/-V). bp and bq will be of the order of 1000.
-    line.bp = (bp - bqo) / 2
-    line.bq = (bq + bpo) / 2
+    line_bp = (bp - bqo) / 2
+    line_bq = (bq + bpo) / 2
 
     # (Comment from palcolor.cpp)
     # Normalise the magnitude of the bp/bq vector to 1.
     # Kill colour if burst too weak.
     # XXX magic number 130000 !!! check!
-    burst_norm = max(math.sqrt(line.bp * line.bp + line.bq * line.bq), 10000.0 / 128)
-    line.burst_norm = burst_norm
-    line.bp /= burst_norm
-    line.bq /= burst_norm
+    burst_norm = max(math.sqrt(line_bp * line_bp + line_bq * line_bq), 10000.0 / 128)
+    line_burst_norm = burst_norm
+    line_bp /= burst_norm
+    line_bq /= burst_norm
 
-    return line
+    return LineInfo(line_number, line_bp, line_bq, line_vsw, line_burst_norm)
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def detect_burst_ntsc(
     chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
 ):
@@ -651,7 +719,7 @@ def try_detect_track_vhs_pal(field):
 
     log_track_phase(field.rf.track_phase, phase0_mean, phase1_mean, assumed_phase)
 
-    return assumed_phase
+    return assumed_phase, needs_recheck(phase0_mean, phase1_mean)
 
 
 def try_detect_track_vhs_ntsc(field):
@@ -689,4 +757,4 @@ def try_detect_track_vhs_ntsc(field):
         field.rf.track_phase, burst_mean_sum_0, burst_mean_sum_1, assumed_phase
     )
 
-    return assumed_phase
+    return assumed_phase, needs_recheck(burst_mean_sum_0, burst_mean_sum_1)

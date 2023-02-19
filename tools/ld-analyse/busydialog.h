@@ -3,7 +3,7 @@
     busydialog.h
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 

@@ -1,31 +1,24 @@
 import math
+import traceback
 import numpy as np
 import scipy.signal as sps
-import copy
 
+from collections import namedtuple
 import itertools
 
 import lddecode.core as ldd
 import lddecode.utils as lddu
 from lddecode.utils import inrange
-from vhsdecode.utils import get_line
 
 import vhsdecode.formats as vhs_formats
+import vhsdecode.sync as sync
 from vhsdecode.addons.chromasep import ChromaSepClass
+from vhsdecode.process import parent_system
 
 # from vhsdecode.process import getpulses_override as vhs_getpulses_override
 # from vhsdecode.addons.vsyncserration import VsyncSerration
 
-# Use PyFFTW's faster FFT implementation if available
-try:
-    import pyfftw.interfaces.numpy_fft as npfft
-    import pyfftw.interfaces
-
-    pyfftw.interfaces.cache.enable()
-    pyfftw.interfaces.cache.set_keepalive_time(10)
-except ImportError:
-    import numpy.fft as npfft
-
+from lddecode.core import npfft
 
 def chroma_to_u16(chroma):
     """Scale the chroma output array to a 16-bit value for output."""
@@ -36,14 +29,22 @@ def chroma_to_u16(chroma):
     return np.uint16(chroma + S16_ABS_MAX)
 
 
+def generate_f05_filter(filters, freq_half, blocklen):
+    F0_5 = sps.firwin(65, [0.5 / freq_half], pass_zero=True)
+    F0_5_fft = lddu.filtfft((F0_5, [1.0]), blocklen)
+    filters["F05_offset"] = 32
+    filters["F05"] = F0_5_fft
+    # filters["FVideo05"] = filters["Fvideo_lpf"] * filters["F05"]
+
+
 def find_sync_levels(field):
     """Very crude sync level detection"""
     # Skip a few samples to avoid any possible edge distortion.
     data = field.data["video"]["demod_05"][10:]
 
     # Start with finding the minimum value of the input.
-    sync_min = min(data)
-    max_val = max(data)
+    sync_min = np.amin(data)
+    max_val = np.amax(data)
 
     # Use the max for a temporary reference point which may be max ire or not.
     difference = max_val - sync_min
@@ -118,8 +119,8 @@ def getpulses_override(field):
         sync_level, blank_level = find_sync_levels(field)
 
         if sync_level is not None and blank_level is not None:
-            field.rf.SysParams["ire0"] = blank_level
-            field.rf.SysParams["hz_ire"] = (blank_level - sync_level) / (
+            field.rf.DecoderParams["ire0"] = blank_level
+            field.rf.DecoderParams["hz_ire"] = (blank_level - sync_level) / (
                 -field.rf.SysParams["vsync_ire"]
             )
 
@@ -226,180 +227,6 @@ def getpulses_override(field):
     return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
 
 
-def get_burst_area(field):
-    return (
-        math.floor(field.usectooutpx(field.rf.SysParams["colorBurstUS"][0])),
-        math.ceil(field.usectooutpx(field.rf.SysParams["colorBurstUS"][1])),
-    )
-
-
-class LineInfo:
-    """Helper class to store line burst info for PAL."""
-
-    def __init__(self, num):
-        self.linenum = num
-        self.bp = 0
-        self.bq = 0
-        self.vsw = -1
-        self.burst_norm = 0
-
-    def __str__(self):
-        return "<num: %s, bp: %s, bq: %s, vsw: %s, burst_norm: %s>" % (
-            self.linenum,
-            self.bp,
-            self.bq,
-            self.vsw,
-            self.burst_norm,
-        )
-
-
-def mean_of_burst_sums(chroma_data, line_length, lines, burst_start, burst_end):
-    """Sum the burst areas of two and two lines together, and return the mean of these sums."""
-    IGNORED_LINES = 16
-
-    burst_sums = []
-
-    # We ignore the top and bottom 16 lines. The top will typically not have a color burst, and
-    # the bottom 16 may be after or at the head switch where the phase rotation will be different.
-    start_line = IGNORED_LINES
-    end_line = lines - IGNORED_LINES
-
-    for line_number in range(start_line, end_line, 2):
-        burst_a = get_line(chroma_data, line_length, line_number)[burst_start:burst_end]
-        burst_b = get_line(chroma_data, line_length, line_number + 1)[
-            burst_start:burst_end
-        ]
-
-        # Use the absolute of the sums to differences cancelling out.
-        mean_dev = np.mean(abs(burst_a + burst_b))
-
-        burst_sums.append(mean_dev)
-
-    mean_burst_sum = np.nanmean(burst_sums)
-    return mean_burst_sum
-
-
-def detect_burst_pal(
-    chroma_data, sine_wave, cosine_wave, burst_area, line_length, lines
-):
-    """Decode the burst of most lines to see if we have a valid PAL color burst."""
-
-    # Ignore the first and last 16 lines of the field.
-    # first ones contain sync and often doesn't have color burst,
-    # while the last lines of the field will contain the head switch and may be distorted.
-    IGNORED_LINES = 16
-    line_data = []
-    burst_norm = np.full(lines, np.nan)
-    # Decode the burst vectors on each line and try to get an average of the burst amplitude.
-    for linenumber in range(IGNORED_LINES, lines - IGNORED_LINES):
-        info = detect_burst_pal_line(
-            chroma_data, sine_wave, cosine_wave, burst_area, line_length, linenumber
-        )
-        line_data.append(info)
-        burst_norm[linenumber] = info.burst_norm
-
-    burst_mean = np.nanmean(burst_norm[IGNORED_LINES : lines - IGNORED_LINES])
-
-    return line_data, burst_mean
-
-
-def detect_burst_pal_line(
-    chroma_data, sine, cosine, burst_area, line_length, line_number
-):
-    """Detect burst function ported from the C++ chroma decoder (palcolour.cpp)
-
-    Tries to decode the PAL chroma vectors from the line's color burst
-    """
-    empty_line = np.zeros_like(chroma_data[0:line_length])
-    num_lines = chroma_data.size / line_length
-
-    # Use an empty line if we try to access outside the field.
-    def line_or_empty(line):
-        return (
-            get_line(chroma_data, line_length, line)
-            if line >= 0 and line < num_lines
-            else empty_line
-        )
-
-    in0 = line_or_empty(line_number)
-    in1 = line_or_empty(line_number - 1)
-    in2 = line_or_empty(line_number + 1)
-    in3 = line_or_empty(line_number - 2)
-    in4 = line_or_empty(line_number + 2)
-    bp = 0
-    bq = 0
-    bpo = 0
-    bqo = 0
-
-    # (Comment from palcolor.cpp)
-    # Find absolute burst phase relative to the reference carrier by
-    # product detection.
-    #
-    # To avoid hue-shifts on alternate lines, the phase is determined by
-    # averaging the phase on the current-line with the average of two
-    # other lines, one above and one below the current line.
-    #
-    # For PAL we use the next-but-one line above and below (in the field),
-    # which will have the same V-switch phase as the current-line (and 180
-    # degree change of phase), and we also analyse the average (bpo/bqo
-    # 'old') of the line immediately above and below, which have the
-    # opposite V-switch phase (and a 90 degree subcarrier phase shift).
-    for i in range(burst_area[0], burst_area[1]):
-        bp += ((in0[i] - ((in3[i] + in4[i]) / 2.0)) / 2.0) * sine[i]
-        bq += ((in0[i] - ((in3[i] + in4[i]) / 2.0)) / 2.0) * cosine[i]
-        bpo += ((in2[i] - in1[i]) / 2.0) * sine[i]
-        bqo += ((in2[i] - in1[i]) / 2.0) * cosine[i]
-
-    # (Comment from palcolor.cpp)
-    # Normalise the sums above
-    burst_length = burst_area[1] - burst_area[0]
-
-    bp /= burst_length
-    bq /= burst_length
-    bpo /= burst_length
-    bqo /= burst_length
-
-    # (Comment from palcolor.cpp)
-    # Detect the V-switch state on this line.
-    # I forget exactly why this works, but it's essentially comparing the
-    # vector magnitude /difference/ between the phases of the burst on the
-    # present line and previous line to the magnitude of the burst. This
-    # may effectively be a dot-product operation...
-    line = LineInfo(line_number)
-    if ((bp - bpo) * (bp - bpo) + (bq - bqo) * (bq - bqo)) < (bp * bp + bq * bq) * 2:
-        line.vsw = 1
-
-    # (Comment from palcolor.cpp)
-    # Average the burst phase to get -U (reference) phase out -- burst
-    # phase is (-U +/-V). bp and bq will be of the order of 1000.
-    line.bp = (bp - bqo) / 2
-    line.bq = (bq + bpo) / 2
-
-    # (Comment from palcolor.cpp)
-    # Normalise the magnitude of the bp/bq vector to 1.
-    # Kill colour if burst too weak.
-    # XXX magic number 130000 !!! check!
-    burst_norm = max(math.sqrt(line.bp * line.bp + line.bq * line.bq), 130000.0 / 128)
-    line.burst_norm = burst_norm
-    line.bp /= burst_norm
-    line.bq /= burst_norm
-
-    return line
-
-
-def check_increment_field_no(rf):
-    """Increment field number if the raw data location moved significantly since the last call"""
-    raw_loc = rf.decoder.readloc / rf.decoder.bytes_per_field
-
-    if rf.last_raw_loc is None:
-        rf.last_raw_loc = raw_loc
-
-    if raw_loc > rf.last_raw_loc:
-        rf.field_number += 1
-    else:
-        ldd.logger.info("Raw data loc didn't advance.")
-
-
 class FieldPALCVBS(ldd.FieldPAL):
     def __init__(self, *args, **kwargs):
         super(FieldPALCVBS, self).__init__(*args, **kwargs)
@@ -412,6 +239,9 @@ class FieldPALCVBS(ldd.FieldPAL):
             linelocs = linelocs.copy()
 
         return linelocs
+
+    def refine_linelocs_hsync(self):
+        return sync.refine_linelocs_hsync(self, self.linebad)
 
     def _determine_field_number(self):
         """Using LD code as it should work on stable sources, but may not work on stuff like vhs."""
@@ -466,6 +296,22 @@ class FieldNTSCCVBS(ldd.FieldNTSC):
         return baserr
 
 
+class FieldMPALCVBS(FieldNTSCCVBS):
+    def __init__(self, *args, **kwargs):
+        super(FieldMPALCVBS, self).__init__(*args, **kwargs)
+
+    def refine_linelocs_burst(self, linelocs=None):
+        """Not used for PALM.
+        """
+        if linelocs is None:
+            linelocs = self.linelocs2
+        else:
+            linelocs = linelocs.copy()
+
+        self.fieldPhaseID = 0
+
+        return linelocs
+
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
 # We do this simply by using inheritance and overriding functions. This results in some redundant
@@ -491,7 +337,7 @@ class CVBSDecode(ldd.LDdecode):
             freader,
             logger,
             analog_audio=False,
-            system=system,
+            system=parent_system(system),
             doDOD=False,
             threads=threads,
             extra_options=extra_options,
@@ -499,7 +345,7 @@ class CVBSDecode(ldd.LDdecode):
         # Adjustment for output to avoid clipping.
         self.level_adjust = level_adjust
         # Overwrite the rf decoder with the VHS-altered one
-        self.rf = VHSDecodeInner(
+        self.rf = CVBSDecodeInner(
             system=system,
             tape_format="UMATIC",
             inputfreq=inputfreq,
@@ -513,6 +359,8 @@ class CVBSDecode(ldd.LDdecode):
             self.FieldClass = FieldPALCVBS
         elif system == "NTSC":
             self.FieldClass = FieldNTSCCVBS
+        elif system == "MPAL":
+            self.FieldClass = FieldMPALCVBS
         else:
             raise Exception("Unknown video system!", system)
 
@@ -564,16 +412,42 @@ class CVBSDecode(ldd.LDdecode):
     def computeMetricsNTSC(self, metrics, f, fp=None):
         return None
 
+    def build_json(self, f):
+        # TODO: Make some shared function/class for stuff that is the same in cvbs and vhs-decode
+        try:
+            if not f:
+                # Make sure we don't fail if the last attempted field failed to decode
+                # Might be better to fix this elsewhere.
+                f = self.prevfield
+            jout = super(CVBSDecode, self).build_json(f)
 
-class VHSDecodeInner(ldd.RFDecode):
+            if self.rf.color_system == "MPAL":
+                #jout["videoParameters"]["isSourcePal"] = True
+                #jout["videoParameters"]["isSourcePalM"] = True
+                jout["videoParameters"]["system"] = "PAL-M"
+
+            return jout
+        except TypeError as e:
+            traceback.print_exc()
+            print("Cannot build json: %s" % e)
+            return None
+
+
+class CVBSDecodeInner(ldd.RFDecode):
     def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
 
+        # Make sure delays are populated with something
+        # TODO: Fix this properly.
+        self.computedelays()
+
         # First init the rf decoder normally.
-        super(VHSDecodeInner, self).__init__(
-            inputfreq, system, decode_analog_audio=False, has_analog_audio=False
+        super(CVBSDecodeInner, self).__init__(
+            inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
         )
 
-        self.chroma_trap = rf_options.get("chroma_trap", False)
+        self._color_system = system
+
+        self._chroma_trap = rf_options.get("chroma_trap", False)
         self.notch = rf_options.get("notch", None)
         self.notch_q = rf_options.get("notch_q", 10.0)
         self.auto_sync = rf_options.get("auto_sync", False)
@@ -583,25 +457,25 @@ class VHSDecodeInner(ldd.RFDecode):
         self.field_number = 0
         self.last_raw_loc = None
 
-        # Then we override the laserdisc parameters with VHS ones.
-        if system == "PAL":
-            self.SysParams = copy.deepcopy(vhs_formats.SysParams_PAL_UMATIC)
-            self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_PAL_UMATIC)
-        elif system == "NTSC":
-            self.SysParams = copy.deepcopy(vhs_formats.SysParams_NTSC_UMATIC)
-            self.DecoderParams = copy.deepcopy(vhs_formats.RFParams_NTSC_UMATIC)
-        else:
-            raise Exception("Unknown video system! ", system)
+        # Then we override the laserdisc parameters.
+        self.SysParams, self.DecoderParams = vhs_formats.get_format_params(
+            system, "UMATIC", ldd.logger
+        )
+
+        # Make (intentionally) mutable copies of HZ<->IRE levels
+        # (NOTE: used by upstream functions, we use a namedtuple to keep const values already)
+        self.DecoderParams['ire0']  = self.SysParams['ire0']
+        self.DecoderParams['hz_ire'] = self.SysParams['hz_ire']
+        self.DecoderParams['vsync_ire'] = self.SysParams['vsync_ire']
 
         # TEMP just set this high so it doesn't mess with anything.
-        self.DecoderParams["video_lpf_freq"] = 6800000
+        self.DecoderParams["video_lpf_freq"] = 6400000
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
 
         self.Filters["FVideo"] = self.Filters["Fvideo_lpf"]
-        SF = self.Filters
-        SF["FVideo05"] = SF["Fvideo_lpf"] * SF["F05"]
+        generate_f05_filter(self.Filters, self.freq_half, self.blocklen)
 
         # Filter to pick out color-under chroma component.
         # filter at about twice the carrier. (This seems to be similar to what VCRs do)
@@ -649,7 +523,22 @@ class VHSDecodeInner(ldd.RFDecode):
         self.blockcut_end = 1024
         self.demods = 0
 
-        self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        if self._chroma_trap:
+            self._chroma_sep_class = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+        self._options = namedtuple(
+            "Options",
+            [
+                "disable_right_hsync",
+            ],
+        )(not rf_options.get("rhs_hsync", False))
+
+    @property
+    def options(self):
+        return self._options
+
+    @property
+    def color_system(self):
+        return self._color_system
 
     def computedelays(self, mtf_level=0):
         """Override computedelays
@@ -663,14 +552,16 @@ class VHSDecodeInner(ldd.RFDecode):
         self.delays["video_white"] = 0
 
     def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
-        data = npfft.ifft(fftdata).real
+        datalen = len(fftdata)
+        # We don't need the complex side here, should see if we could avoid even calculating it later.
+        data = npfft.irfft(fftdata[: datalen + 1], datalen).real
 
         rv = {}
 
         # applies the Subcarrier trap
         # (this will remove most chroma info)
-        if self.chroma_trap:
-            luma = self.chromaTrap.work(data)
+        if self._chroma_trap:
+            luma = self._chroma_sep_class.work(data)
         else:
             luma = data
 
@@ -696,7 +587,7 @@ class VHSDecodeInner(ldd.RFDecode):
         luma05 = np.roll(luma05, -self.Filters["F05_offset"])
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
-        )
+        ).astype(np.float32)
 
         if False:
             import matplotlib.pyplot as plt
@@ -712,8 +603,8 @@ class VHSDecodeInner(ldd.RFDecode):
             # print("Vsync IRE", self.SysParams["vsync_ire"])
             #            ax2 = ax1.twinx()
             #            ax3 = ax1.twinx()
-            ax1.plot(luma[:2048])
-            ax2.plot(luma05[:2048])
+            ax1.plot(luma)
+            ax2.plot(luma05)
             #            ax4.plot(env, color="#00FF00")
             #            ax3.plot(np.angle(hilbert))
             #            ax4.plot(hilbert.imag)
@@ -723,8 +614,8 @@ class VHSDecodeInner(ldd.RFDecode):
         #            exit(0)
 
         video_out = np.rec.array(
-            [luma, luma05, videoburst, data],
-            names=["demod", "demod_05", "demod_burst", "raw"],
+            [luma, luma05, videoburst],
+            names=["demod", "demod_05", "demod_burst"],
         )
 
         rv["video"] = (

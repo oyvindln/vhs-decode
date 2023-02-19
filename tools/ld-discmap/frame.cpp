@@ -3,7 +3,7 @@
     frame.cpp
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -24,11 +24,11 @@
 
 #include "frame.h"
 
-Frame::Frame(const qint32 &seqFrameNumber, const qint32 &vbiFrameNumber, const bool &isPictureStop,
-             const bool &isPullDown, const bool &isLeadInOrOut, const bool &isMarkedForDeletion,
-             const qreal &frameQuality, const bool &isPadded, const bool &isClvOffset,
-             const qint32 &firstField, const qint32 &secondField,
-             const qint32 &firstFieldPhase, const qint32 &secondFieldPhase)
+Frame::Frame(const qint32 seqFrameNumber, const qint32 vbiFrameNumber, const bool isPictureStop,
+             const bool isPullDown, const bool isLeadInOrOut, const bool isMarkedForDeletion,
+             const double frameQuality, const bool isPadded, const bool isClvOffset,
+             const qint32 firstField, const qint32 secondField,
+             const qint32 firstFieldPhase, const qint32 secondFieldPhase)
            : m_seqFrameNumber(seqFrameNumber),  m_vbiFrameNumber(vbiFrameNumber), m_isPictureStop(isPictureStop),
              m_isPullDown(isPullDown), m_isLeadInOrOut(isLeadInOrOut), m_isMarkedForDeletion(isMarkedForDeletion),
              m_frameQuality(frameQuality), m_isPadded(isPadded), m_isClvOffset(isClvOffset),
@@ -90,7 +90,7 @@ bool Frame::isMarkedForDeletion() const
     return m_isMarkedForDeletion;
 }
 
-qreal Frame::frameQuality() const
+double Frame::frameQuality() const
 {
     return m_frameQuality;
 }
@@ -157,7 +157,7 @@ void Frame::isMarkedForDeletion(bool value)
     m_isMarkedForDeletion = value;
 }
 
-void Frame::frameQuality(qreal value)
+void Frame::frameQuality(double value)
 {
     m_frameQuality = value;
 }

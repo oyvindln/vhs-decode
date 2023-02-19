@@ -3,7 +3,7 @@
     c2deinterleave.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 class C2Deinterleave
 {
@@ -42,11 +43,11 @@ public:
 
     void reset();
     void resetStatistics();
-    Statistics getStatistics();
-    void reportStatistics();
-    void pushC2(uchar* dataSymbols, uchar* errorSymbols);
-    uchar* getDataSymbols();
-    uchar* getErrorSymbols();
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
+    void pushC2(const uchar *dataSymbols, const uchar *errorSymbols);
+    const uchar *getDataSymbols() const;
+    const uchar *getErrorSymbols() const;
     void flush();
 
 private:
@@ -54,7 +55,7 @@ private:
         uchar c2Data[28];
         uchar c2Error[28];
     };
-    QVector<C2Element> c2DelayBuffer;
+    std::vector<C2Element> c2DelayBuffer;
 
     uchar outputC2Data[24];
     uchar outputC2Errors[24];

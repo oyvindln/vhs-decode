@@ -7,9 +7,10 @@ scipy
 
 # Python build results
 /MANIFEST
-__pycache__
 /build
 /dist
+/python-build
+__pycache__
 
 # Prerequisites
 *.d
@@ -19,52 +20,65 @@ __pycache__
 *.s
 
 # Compiled Object files
-*.slo
 *.lo
 *.o
 *.obj
+*.slo
 
 # Precompiled Headers
 *.gch
 *.pch
 
 # Compiled Dynamic libraries
-*.so
-*.dylib
 *.dll
+*.dylib
+*.so
 
 # Fortran module files
 *.mod
 *.smod
 
 # Compiled Static libraries
-*.lai
-*.la
 *.a
+*.la
+*.lai
 *.lib
 
 # Executables
+*.app
 *.exe
 *.out
-*.app
 
 # ld-decode data files
 *.tbc
 *.tbc.json
-*.tbcc
-*.tbcc.json
+testdata
 testout
 
 # Profiling results
-perf.data*
 Benchfile*
+perf.data*
 
-# Video data files
-/*.rgb
-/*.avi
-/*.avs
-/*.png
-/*.ffindex
-
-# Other
-/*.log
+# CMake related things
+*-qt/
+*.depends
+*.ninja
+*_autogen/
+.ninja_*
+.qt/
+CMakeCache.txt
+CMakeFiles/
+CMakeLists.txt.user
+CTestTestfile.cmake
+DartConfiguration.tcl
+Makefile
+Testing/
+build-*/
+build/
+dist/
+cmake_install.cmake
+install_manifest.txt
+moc_*.cpp
+moc_*.cpp_parameters
+ui_*.h
+.log

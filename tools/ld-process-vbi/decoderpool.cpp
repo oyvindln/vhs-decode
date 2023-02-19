@@ -81,7 +81,7 @@ bool DecoderPool::process()
     }
 
     // Show the processing speed to the user
-    qreal totalSecs = (static_cast<qreal>(totalTimer.elapsed()) / 1000.0);
+    double totalSecs = (static_cast<double>(totalTimer.elapsed()) / 1000.0);
     qInfo() << "VBI Processing complete -" << lastFieldNumber << "fields in" << totalSecs << "seconds (" <<
                lastFieldNumber / totalSecs << "FPS )";
 
@@ -127,13 +127,15 @@ bool DecoderPool::getInputField(qint32 &fieldNumber, SourceVideo::Data &fieldVid
 // Put a decoded frame into the output stream.
 //
 // Returns true on success, false on failure.
-bool DecoderPool::setOutputField(qint32 fieldNumber, LdDecodeMetaData::Field fieldMetadata)
+bool DecoderPool::setOutputField(qint32 fieldNumber, const LdDecodeMetaData::Field& fieldMetadata)
 {
     QMutexLocker locker(&outputMutex);
 
-    // Save the field data to the metadata (only VBI and NTSC metadata is affected)
+    // Save the field data to the metadata (only some metadata is affected)
     ldDecodeMetaData.updateFieldVbi(fieldMetadata.vbi, fieldNumber);
     ldDecodeMetaData.updateFieldNtsc(fieldMetadata.ntsc, fieldNumber);
+    ldDecodeMetaData.updateFieldVitc(fieldMetadata.vitc, fieldNumber);
+    ldDecodeMetaData.updateFieldClosedCaption(fieldMetadata.closedCaption, fieldNumber);
 
     return true;
 }

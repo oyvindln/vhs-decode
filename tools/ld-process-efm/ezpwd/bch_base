@@ -149,7 +149,7 @@ namespace ezpwd {
      */
 
     extern "C" {
-	#include "../../djelic_bch.h"
+	#include "bch_include/linux/bch.h"
     }
 
     // 

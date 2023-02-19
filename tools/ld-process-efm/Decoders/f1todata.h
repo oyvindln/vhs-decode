@@ -3,7 +3,7 @@
     f1todata.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 #include "Datatypes/f1frame.h"
 #include "Datatypes/sector.h"
@@ -47,10 +48,10 @@ public:
         TrackTime currentAddress;
     };
 
-    QByteArray process(QVector<F1Frame> f1FramesIn, bool debugState);
+    QByteArray process(const std::vector<F1Frame> &f1FramesIn, bool debugState);
 
-    Statistics getStatistics();
-    void reportStatistics();
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
     void reset();
     void clearStatistics();
 

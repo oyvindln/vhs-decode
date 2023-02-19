@@ -3,7 +3,7 @@
     f1toaudio.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 #include "Datatypes/f1frame.h"
 #include "Datatypes/audio.h"
@@ -61,10 +62,10 @@ public:
         TrackTime duration;
     };
 
-    QByteArray process(QVector<F1Frame> f1FramesIn, bool _padInitialDiscTime,
+    QByteArray process(const std::vector<F1Frame> &f1FramesIn, bool _padInitialDiscTime,
                        ErrorTreatment _errorTreatment, ConcealType _concealType, bool debugState);
-    Statistics getStatistics();
-    void reportStatistics();
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
     void reset();
     void clearStatistics();
 
@@ -83,7 +84,7 @@ private:
     StateMachine currentState;
     StateMachine nextState;
     QByteArray pcmOutputBuffer;
-    QVector<F1Frame> f1FrameBuffer;
+    std::vector<F1Frame> f1FrameBuffer;
     bool waitingForData;
     ErrorTreatment errorTreatment;
     ConcealType concealType;

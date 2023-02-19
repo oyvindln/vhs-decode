@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
-from distutils.core import setup
+from setuptools import setup
+from Cython.Build import cythonize
+import numpy
 
 setup(
     name='ld-decode',
@@ -17,8 +19,8 @@ setup(
         'Programming Language :: Python :: 3',
         'Topic :: Multimedia :: Video :: Capture',
     ],
-
-    packages=['lddecode', 'vhsdecode', 'vhsdecode/addons', 'cvbsdecode'],
+    setup_requires=['cython'],
+    packages=['lddecode', 'vhsdecode', 'vhsdecode/addons', 'vhsdecode/format_defs', 'cvbsdecode'],
     scripts=[
         'cx-expander',
         'ld-cut',
@@ -26,10 +28,11 @@ setup(
         'scripts/ld-compress',
         'vhs-decode',
         'cvbs-decode',
-        'gen_chroma_vid_pal.sh',
-        'gen_chroma_vid_palm.sh',
-        'gen_chroma_vid_ntsc.sh'
     ],
+
+    ext_modules=cythonize(['vhsdecode/*.pyx'], language_level=3),
+    # Needed for using numpy in cython.
+    include_dirs=[numpy.get_include()],
 
     # These are just the minimal runtime dependencies for the Python scripts --
     # see the documentation for the full list of dependencies.
@@ -39,5 +42,6 @@ setup(
         'numba',
         'numpy',
         'scipy',
+        'Cython'
     ],
 )

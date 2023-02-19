@@ -2,12 +2,12 @@
 
     palencoder.h
 
-    ld-chroma-encoder - PAL encoder for testing
-    Copyright (C) 2019 Adam Sampson
+    ld-chroma-encoder - Composite video encoder
+    Copyright (C) 2019-2022 Adam Sampson
 
     This file is part of ld-decode-tools.
 
-    ld-chroma-decoder is free software: you can redistribute it and/or
+    ld-chroma-encoder is free software: you can redistribute it and/or
     modify it under the terms of the GNU General Public License as
     published by the Free Software Foundation, either version 3 of the
     License, or (at your option) any later version.
@@ -25,43 +25,29 @@
 #ifndef PALENCODER_H
 #define PALENCODER_H
 
-#include <QByteArray>
 #include <QFile>
-#include <QVector>
+#include <vector>
 
 #include "lddecodemetadata.h"
 
-class PALEncoder
+#include "encoder.h"
+
+class PALEncoder : public Encoder
 {
 public:
-    PALEncoder(QFile &rgbFile, QFile &tbcFile, LdDecodeMetaData &metaData, bool scLocked);
-
-    // Encode RGB stream to PAL.
-    // Returns true on success; on failure, prints an error and returns false.
-    bool encode();
+    PALEncoder(QFile &inputFile, QFile &tbcFile, QFile &chromaFile, LdDecodeMetaData &metaData,
+               int fieldOffset, bool isComponent, bool scLocked);
 
 private:
-    qint32 encodeFrame(qint32 frameNo);
-    bool encodeField(qint32 fieldNo);
-    void encodeLine(qint32 fieldNo, qint32 frameLine, const quint16 *rgbData, QVector<quint16> &outputLine);
+    virtual void getFieldMetadata(qint32 fieldNo, LdDecodeMetaData::Field &fieldData);
+    virtual void encodeLine(qint32 fieldNo, qint32 frameLine, const quint16 *inputData,
+                            std::vector<double> &outputC, std::vector<double> &outputVBS);
 
-    QFile &rgbFile;
-    QFile &tbcFile;
-    LdDecodeMetaData &metaData;
     bool scLocked;
 
-    LdDecodeMetaData::VideoParameters videoParameters;
-    double fSC;
-    double sampleRate;
-    qint32 activeWidth;
-    qint32 activeHeight;
-    qint32 activeLeft;
-    qint32 activeTop;
-
-    QByteArray rgbFrame;
-    QVector<double> Y;
-    QVector<double> U;
-    QVector<double> V;
+    std::vector<double> Y;
+    std::vector<double> U;
+    std::vector<double> V;
 };
 
 #endif

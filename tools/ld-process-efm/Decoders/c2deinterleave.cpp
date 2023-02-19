@@ -3,7 +3,7 @@
     c2deinterleave.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -44,13 +44,13 @@ void C2Deinterleave::resetStatistics()
     statistics.c2flushed = 0;
 }
 
-C2Deinterleave::Statistics C2Deinterleave::getStatistics()
+const C2Deinterleave::Statistics &C2Deinterleave::getStatistics() const
 {
     return statistics;
 }
 
 // Method to write statistics information to qInfo
-void C2Deinterleave::reportStatistics()
+void C2Deinterleave::reportStatistics() const
 {
     qInfo() << "";
     qInfo() << "F3 to F2 frame C2 Deinterleave:";
@@ -60,7 +60,7 @@ void C2Deinterleave::reportStatistics()
     qInfo() << " Delay buffer flushes:" << statistics.c2flushed;
 }
 
-void C2Deinterleave::pushC2(uchar *dataSymbols, uchar *errorSymbols)
+void C2Deinterleave::pushC2(const uchar *dataSymbols, const uchar *errorSymbols)
 {
     // Create a new C2 element and append it to the C2 delay buffer
     C2Element newC2Element;
@@ -69,11 +69,11 @@ void C2Deinterleave::pushC2(uchar *dataSymbols, uchar *errorSymbols)
         newC2Element.c2Error[i] = errorSymbols[i];
     }
 
-    c2DelayBuffer.append(newC2Element);
+    c2DelayBuffer.push_back(newC2Element);
 
     if (c2DelayBuffer.size() >= 3) {
         // Maintain the C2 delay buffer at 3 elements maximum
-        if (c2DelayBuffer.size() > 3) c2DelayBuffer.removeFirst();
+        if (c2DelayBuffer.size() > 3) c2DelayBuffer.erase(c2DelayBuffer.begin());
 
         // Deinterleave the C2 data
         deinterleave();
@@ -81,14 +81,14 @@ void C2Deinterleave::pushC2(uchar *dataSymbols, uchar *errorSymbols)
 }
 
 // Return the deinterleaved C2 data symbols if available
-uchar* C2Deinterleave::getDataSymbols()
+const uchar *C2Deinterleave::getDataSymbols() const
 {
     if (c2DelayBuffer.size() >= 3) return outputC2Data;
     return nullptr;
 }
 
 // Return the deinterleaved C2 error symbols if available
-uchar* C2Deinterleave::getErrorSymbols()
+const uchar *C2Deinterleave::getErrorSymbols() const
 {
     if (c2DelayBuffer.size() >= 3) return outputC2Errors;
     return nullptr;

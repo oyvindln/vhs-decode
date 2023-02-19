@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+
+# This is a half hour early morning hack to dump the VITS lines of an NTSC disk
+# so one can check for ringing at the decode level.  Therefore it doesn't look
+# at the JSON data to figure out what the .tbc file actually has or anything
+# like that.
+
+import argparse
+import os
+import sys
+
+import numpy as np
+from PIL import Image
+
+parser = argparse.ArgumentParser(description="Quick hack to extract VITS")
+
+parser.add_argument("infile", metavar="infile", type=str, help="source file")
+parser.add_argument("outfile", metavar="outfile", default="output", help="base output file name")
+
+parser.add_argument('--PAL', '-P', dest="pal", action="store_true", help="PAL format .tbc")
+parser.add_argument('-l', dest="line", type=int, default=38, help="Line to pull from")
+parser.add_argument('-c', dest="numpics", type=int, default=1, help="Pictures to output")
+parser.add_argument('-s', dest="start", type=int, default=0, help="Starting frame")
+
+args = parser.parse_args()
+
+fd = open(args.infile, 'rb')
+
+height = 480
+line = args.line # frame line
+
+field_num = line % 2
+field_line = line // 2
+
+if args.pal:
+    fieldwidth = 1135
+    fieldheight = 313
+else:
+    fieldwidth = 910
+    fieldheight = 263
+
+pic = np.zeros((height, fieldwidth), dtype=np.uint16)
+
+for i in range(args.numpics):
+    firstframe = (args.start + i) * height
+    for l, frame in enumerate(range(firstframe, firstframe + height)):
+        imgloc = ((frame * 2) + field_num) * (fieldwidth * fieldheight)
+        imgloc += (field_line * fieldwidth)
+        #print(imgloc)
+
+        fd.seek(imgloc * 2)
+
+        data = fd.read(fieldwidth * 2)
+        pic[l] = np.frombuffer(data, dtype=np.uint16)
+
+    img = Image.frombuffer('I;16', (910, 480), pic, "raw", 'I;16', 0, 0)
+
+    img.save(f"{args.outfile}-{i}.png")

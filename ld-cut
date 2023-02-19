@@ -102,6 +102,8 @@ logger = init_logging(None)
 ldd = LDdecode(filename, None, loader, system=system, doDOD=False, _logger=logger)
 signal.signal(signal.SIGINT, original_sigint_handler)
 
+# note that endloc and startloc are in field #'s
+
 if args.seek != -1:
     startloc = ldd.seek(args.seek if args.start == 0 else args.start, args.seek)
     if startloc is None:
@@ -118,7 +120,7 @@ if args.end != -1:
         print("ERROR: Seeking failed")
         exit(1)
 elif args.length != -1:
-    endloc = startloc + (args.length * 2)
+    endloc = startloc + (args.length * 2) + 2
 else:
     # Set end location to well after any reasonable length so EOF is reached
     endloc = startloc + (2 ** 40)

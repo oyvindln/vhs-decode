@@ -1,0 +1,35 @@
+# known to work with 22.10, other versions may have incompatibilities
+FROM ubuntu:22.10 as builder
+
+RUN apt-get update
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt -y -qq upgrade && \
+apt -y -qq install --no-install-recommends make cmake python3 git qt6-base-dev libfftw3-dev openssl pv pkg-config python3-setuptools libqt5core5a ca-certificates python3-pip wget xz-utils python3-dev build-essential && apt-get clean
+
+# clone and build the latest master
+RUN git clone --depth 2 https://github.com/oyvindln/vhs-decode.git
+
+RUN cd vhs-decode && mkdir build2 && cd build2 && cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_QWT=OFF -DBUILD_PYTHON=OFF -DBUILD_LDF_READER=OFF && make && make install
+WORKDIR /vhs-decode
+# Installing python deps via pip seemed to take up less space (though may have to be vary of versioning)
+RUN pip install --user numpy scipy numba cython && \
+pip install --user . && \
+pip cache purge
+
+# Install ffmpeg static to avoid draggin in tons of deps
+RUN wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O - | tar Jxvf - --wildcards --strip-components=1 ffmpeg-*-amd64-static/ffmpeg && cp ffmpeg /usr/local/bin/
+
+FROM ubuntu:22.10
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get -qq update && \
+apt -y -qq upgrade && \ 
+apt -y -qq install --no-install-recommends --autoremove libqt6core6 libfftw3-3 python3 && \
+apt-get clean && \
+rm -rf /var/lib/apt/lists/*
+# Copy binaries and python bits from build image
+COPY --from=0 /usr/local/bin/* /usr/local/bin/
+COPY --from=0 /root/.local /root/.local/
+ENV PATH=/root/.local/bin:$PATH
+CMD ["/bin/bash"]

@@ -3,7 +3,7 @@
     blacksnranalysisdialog.h
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -54,7 +54,7 @@ public:
     ~BlackSnrAnalysisDialog();
 
     void startUpdate(qint32 _numberOfFrames);
-    void addDataPoint(qint32 frameNumber, qreal blackSnr);
+    void addDataPoint(qint32 frameNumber, double blackSnr);
     void finishUpdate(qint32 _currentFrameNumber);
     void updateFrameMarker(qint32 _currentFrameNumber);
 

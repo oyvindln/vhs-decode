@@ -40,11 +40,9 @@ TransformPal::~TransformPal()
 }
 
 void TransformPal::updateConfiguration(const LdDecodeMetaData::VideoParameters &_videoParameters,
-                                       TransformPal::TransformMode _mode, double threshold,
-                                       const QVector<double> &_thresholds)
+                                       double threshold, const QVector<double> &_thresholds)
 {
     videoParameters = _videoParameters;
-    mode = _mode;
 
     // Resize thresholds to match the number of FFT bins we will consider in
     // applyFilter. The x loop there doesn't need to look at every bin.

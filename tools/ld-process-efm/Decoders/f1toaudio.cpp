@@ -3,7 +3,7 @@
     f1toaudio.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -33,7 +33,7 @@ F1ToAudio::F1ToAudio()
 // Public methods -----------------------------------------------------------------------------------------------------
 
 // Method to feed the audio processing state-machine with F1 frames
-QByteArray F1ToAudio::process(QVector<F1Frame> f1FramesIn, bool _padInitialDiscTime,
+QByteArray F1ToAudio::process(const std::vector<F1Frame> &f1FramesIn, bool _padInitialDiscTime,
                               ErrorTreatment _errorTreatment, ConcealType _concealType,
                               bool debugState)
 {
@@ -45,10 +45,10 @@ QByteArray F1ToAudio::process(QVector<F1Frame> f1FramesIn, bool _padInitialDiscT
     // Clear the output buffer
     pcmOutputBuffer.clear();
 
-    if (f1FramesIn.isEmpty()) return pcmOutputBuffer;
+    if (f1FramesIn.empty()) return pcmOutputBuffer;
 
     // Append input data to the processing buffer
-    f1FrameBuffer.append(f1FramesIn);
+    f1FrameBuffer.insert(f1FrameBuffer.end(), f1FramesIn.begin(), f1FramesIn.end());
 
     waitingForData = false;
     while (!waitingForData) {
@@ -71,13 +71,13 @@ QByteArray F1ToAudio::process(QVector<F1Frame> f1FramesIn, bool _padInitialDiscT
 }
 
 // Get method - retrieve statistics
-F1ToAudio::Statistics F1ToAudio::getStatistics()
+const F1ToAudio::Statistics &F1ToAudio::getStatistics() const
 {
     return statistics;
 }
 
 // Method to report decoding statistics to qInfo
-void F1ToAudio::reportStatistics()
+void F1ToAudio::reportStatistics() const
 {
     qInfo()           << "";
     qInfo()           << "F1 Frames to Audio:";
@@ -143,15 +143,15 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_processFrame()
 {
     // If error treatment is silence or pass-though, use a fast, simple method
     if (errorTreatment == ErrorTreatment::silence || errorTreatment == ErrorTreatment::passThrough) {
-        for (qint32 bufferPosition = 0; bufferPosition < f1FrameBuffer.size(); bufferPosition++) {
+        for (const F1Frame &f1Frame: f1FrameBuffer) {
             uchar f1FrameData[24];
 
             // If error correction is silence, set corrupt samples to silence
-            if (f1FrameBuffer[bufferPosition].isCorrupt() || f1FrameBuffer[bufferPosition].isMissing()) {
+            if (f1Frame.isCorrupt() || f1Frame.isMissing()) {
                 // Frame is corrupt, use zeroed data
                 for (qint32 j = 0; j < 24; j++) f1FrameData[j] = 0;
-                if (f1FrameBuffer[bufferPosition].isCorrupt()) statistics.corruptSamples += 6;
-                if (f1FrameBuffer[bufferPosition].isMissing()) {
+                if (f1Frame.isCorrupt()) statistics.corruptSamples += 6;
+                if (f1Frame.isMissing()) {
                     if (!padInitialDiscTime) {
                         // Only count as a missing sample after the first good sample is seen
                         if (gotFirstSample) statistics.missingSamples += 6;
@@ -159,11 +159,11 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_processFrame()
                 }
             } else {
                 // Frame is good - Get the frame data
-                for (qint32 j = 0; j < 24; j++) f1FrameData[j] = f1FrameBuffer[bufferPosition].getDataSymbols()[j];
+                for (qint32 j = 0; j < 24; j++) f1FrameData[j] = f1Frame.getDataSymbols()[j];
                 statistics.audioSamples += 6;
                 gotFirstSample = true;
                 if (!initialDiscTimeSet) {
-                    statistics.startTime = f1FrameBuffer[bufferPosition].getDiscTime();
+                    statistics.startTime = f1Frame.getDiscTime();
                     initialDiscTimeSet = true;
                 }
             }
@@ -181,7 +181,7 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_processFrame()
                 }
             }
 
-            statistics.currentTime = f1FrameBuffer[bufferPosition].getDiscTime();
+            statistics.currentTime = f1Frame.getDiscTime();
             statistics.duration.setTime(0, 0, 0);
             statistics.duration.addFrames(statistics.currentTime.getDifference(statistics.startTime.getTime()));
         }
@@ -196,7 +196,7 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_processFrame()
     // Error treatment is conceal
     qint32 bufferPosition = 0;
     uchar f1FrameData[24];
-    while (bufferPosition < f1FrameBuffer.size()) {
+    while (bufferPosition < static_cast<qint32>(f1FrameBuffer.size())) {
         if (!f1FrameBuffer[bufferPosition].isCorrupt()) {
             if (!f1FrameBuffer[bufferPosition].isMissing()) {
                 // Frame is not corrupt and not missing... good Frame
@@ -258,7 +258,7 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_findEndOfError()
 {
     qint32 bufferPosition = errorStartPosition;
     errorStopPosition = -1;
-    while (bufferPosition < f1FrameBuffer.size() && errorStopPosition == -1) {
+    while (bufferPosition < static_cast<qint32>(f1FrameBuffer.size()) && errorStopPosition == -1) {
         if (!f1FrameBuffer[bufferPosition].isCorrupt()) {
             errorStopPosition = bufferPosition - 1; // Last corrupt frame
         }
@@ -294,7 +294,7 @@ F1ToAudio::StateMachine F1ToAudio::sm_state_findEndOfError()
     }
 
     // Remove the contents of the input buffer (up to the error start)
-    f1FrameBuffer.remove(0, errorStopPosition + 1);
+    f1FrameBuffer.erase(f1FrameBuffer.begin(), f1FrameBuffer.begin() + errorStopPosition + 1);
 
     // Make sure the buffer isn't completely empty
     if (f1FrameBuffer.size() == 0) waitingForData = true;
@@ -318,19 +318,17 @@ void F1ToAudio::linearInterpolationConceal()
     qint32 samplesToGenerate = framesToGenerate * 6; // Per stereo channel
 
     // Create some temporary buffers
-    QVector<qint16> leftSamples;
-    QVector<qint16> rightSamples;
-    leftSamples.resize(samplesToGenerate);
-    rightSamples.resize(samplesToGenerate);
+    std::vector<qint16> leftSamples(samplesToGenerate);
+    std::vector<qint16> rightSamples(samplesToGenerate);
 
     // Calculate sample step values and initial values
-    qreal leftStep = (static_cast<qreal>(leftChannelEndValue) -
-                      static_cast<qreal>(leftChannelStartValue)) / static_cast<qreal>(samplesToGenerate);
-    qreal leftValue = static_cast<qreal>(leftChannelStartValue);
+    double leftStep = (static_cast<double>(leftChannelEndValue) -
+                       static_cast<double>(leftChannelStartValue)) / static_cast<double>(samplesToGenerate);
+    double leftValue = static_cast<double>(leftChannelStartValue);
 
-    qreal rightStep = (static_cast<qreal>(rightChannelEndValue) -
-                       static_cast<qreal>(rightChannelStartValue)) / static_cast<qreal>(samplesToGenerate);
-    qreal rightValue = static_cast<qreal>(rightChannelStartValue);
+    double rightStep = (static_cast<double>(rightChannelEndValue) -
+                        static_cast<double>(rightChannelStartValue)) / static_cast<double>(samplesToGenerate);
+    double rightValue = static_cast<double>(rightChannelStartValue);
 
     // Generate the interpolated samples
     for (qint32 i = 0; i < samplesToGenerate; i++) {
@@ -352,7 +350,7 @@ void F1ToAudio::linearInterpolationConceal()
             samplePointer++;
         }
         outputSample.setSampleValues(sampleValues);
-        pcmOutputBuffer.append(QByteArray(reinterpret_cast<char*>(outputSample.getSampleFrame()), 24));
+        pcmOutputBuffer.append(QByteArray(reinterpret_cast<const char *>(outputSample.getSampleFrame()), 24));
         statistics.concealedSamples += 6;
         statistics.totalSamples += 6;
     }
@@ -378,19 +376,17 @@ void F1ToAudio::predictiveInterpolationConceal()
     qint32 samplesToGenerate = framesToGenerate * 6; // Per stereo channel
 
     // Create some temporary buffers
-    QVector<qint16> leftSamples;
-    QVector<qint16> rightSamples;
-    leftSamples.resize(samplesToGenerate);
-    rightSamples.resize(samplesToGenerate);
+    std::vector<qint16> leftSamples(samplesToGenerate);
+    std::vector<qint16> rightSamples(samplesToGenerate);
 
     // Calculate sample step values and initial values
-    qreal leftStep = (static_cast<qreal>(leftChannelEndValue) -
-                      static_cast<qreal>(leftChannelStartValue)) / static_cast<qreal>(samplesToGenerate);
-    qreal leftValue = static_cast<qreal>(leftChannelStartValue);
+    double leftStep = (static_cast<double>(leftChannelEndValue) -
+                       static_cast<double>(leftChannelStartValue)) / static_cast<double>(samplesToGenerate);
+    double leftValue = static_cast<double>(leftChannelStartValue);
 
-    qreal rightStep = (static_cast<qreal>(rightChannelEndValue) -
-                       static_cast<qreal>(rightChannelStartValue)) / static_cast<qreal>(samplesToGenerate);
-    qreal rightValue = static_cast<qreal>(rightChannelStartValue);
+    double rightStep = (static_cast<double>(rightChannelEndValue) -
+                        static_cast<double>(rightChannelStartValue)) / static_cast<double>(samplesToGenerate);
+    double rightValue = static_cast<double>(rightChannelStartValue);
 
     // Generate the interpolated samples
     for (qint32 i = 0; i < samplesToGenerate; i++) {
@@ -421,7 +417,7 @@ void F1ToAudio::predictiveInterpolationConceal()
             samplePointer++;
         }
         outputSample.setSampleValues(sampleValues);
-        pcmOutputBuffer.append(QByteArray(reinterpret_cast<char*>(outputSample.getSampleFrame()), 24));
+        pcmOutputBuffer.append(QByteArray(reinterpret_cast<const char *>(outputSample.getSampleFrame()), 24));
         statistics.concealedSamples += 6;
         statistics.totalSamples += 6;
     }

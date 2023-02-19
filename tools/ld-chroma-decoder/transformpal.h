@@ -44,25 +44,13 @@ public:
     TransformPal(qint32 xComplex, qint32 yComplex, qint32 zComplex);
     virtual ~TransformPal();
 
-    // Specify what the frequency-domain filter should do to each pair of
-    // bins that should be symmetrical around the carriers.
-    enum TransformMode {
-        // Adjust the amplitudes of the two bins to be equal
-        levelMode = 0,
-        // If the amplitudes aren't within a threshold of each other, zero both bins
-        thresholdMode
-    };
-
     // Configure TransformPal.
     //
-    // mode selects an operation mode for the filter.
-    //
-    // threshold is the similarity threshold for the filter in thresholdMode.
-    // Values from 0-1 are meaningful, with higher values requiring signals to
-    // be more similar to be considered chroma. 0.6 is pyctools-pal's default.
+    // threshold is the similarity threshold for the filter. Values from 0-1
+    // are meaningful, with higher values requiring signals to be more similar
+    // to be considered chroma.
     void updateConfiguration(const LdDecodeMetaData::VideoParameters &videoParameters,
-                             TransformMode mode, double threshold,
-                             const QVector<double> &thresholds);
+                             double threshold, const QVector<double> &thresholds);
 
     // Filter input fields.
     //
@@ -100,7 +88,6 @@ protected:
     bool configurationSet;
     LdDecodeMetaData::VideoParameters videoParameters;
     QVector<double> thresholds;
-    TransformMode mode;
 };
 
 #endif

@@ -3,7 +3,7 @@
     configuration.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -72,10 +72,13 @@ void Configuration::writeConfiguration(void)
     configuration->setValue("mainWindowScaleFactor", settings.windows.mainWindowScaleFactor);
     configuration->setValue("vbiDialogGeometry", settings.windows.vbiDialogGeometry);
     configuration->setValue("oscilloscopeDialogGeometry", settings.windows.oscilloscopeDialogGeometry);
+    configuration->setValue("vectorscopeDialogGeometry", settings.windows.vectorscopeDialogGeometry);
     configuration->setValue("dropoutAnalysisDialogGeometry", settings.windows.dropoutAnalysisDialogGeometry);
+    configuration->setValue("visibleDropoutAnalysisDialogGeometry", settings.windows.visibleDropoutAnalysisDialogGeometry);
     configuration->setValue("blackSnrAnalysisDialogGeometry", settings.windows.blackSnrAnalysisDialogGeometry);
     configuration->setValue("whiteSnrAnalysisDialogGeometry", settings.windows.whiteSnrAnalysisDialogGeometry);
     configuration->setValue("closedCaptionDialogGeometry", settings.windows.closedCaptionDialogGeometry);
+    configuration->setValue("videoParametersDialogGeometry", settings.windows.videoParametersDialogGeometry);
     configuration->setValue("chromaDecoderConfigDialogGeometry", settings.windows.chromaDecoderConfigDialogGeometry);
     configuration->endGroup();
 
@@ -103,10 +106,13 @@ void Configuration::readConfiguration(void)
     settings.windows.mainWindowScaleFactor = configuration->value("mainWindowScaleFactor").toReal();
     settings.windows.vbiDialogGeometry = configuration->value("vbiDialogGeometry").toByteArray();
     settings.windows.oscilloscopeDialogGeometry = configuration->value("oscilloscopeDialogGeometry").toByteArray();
+    settings.windows.vectorscopeDialogGeometry = configuration->value("vectorscopeDialogGeometry").toByteArray();
     settings.windows.dropoutAnalysisDialogGeometry = configuration->value("dropoutAnalysisDialogGeometry").toByteArray();
+    settings.windows.visibleDropoutAnalysisDialogGeometry = configuration->value("visibleDropoutAnalysisDialogGeometry").toByteArray();
     settings.windows.blackSnrAnalysisDialogGeometry = configuration->value("blackSnrAnalysisDialogGeometry").toByteArray();
     settings.windows.whiteSnrAnalysisDialogGeometry = configuration->value("whiteSnrAnalysisDialogGeometry").toByteArray();
     settings.windows.closedCaptionDialogGeometry = configuration->value("closedCaptionDialogGeometry").toByteArray();
+    settings.windows.videoParametersDialogGeometry = configuration->value("videoParametersDialogGeometry").toByteArray();
     settings.windows.chromaDecoderConfigDialogGeometry = configuration->value("chromaDecoderConfigDialogGeometry").toByteArray();
     configuration->endGroup();
 }
@@ -125,10 +131,13 @@ void Configuration::setDefault(void)
     settings.windows.mainWindowScaleFactor = 1.0;
     settings.windows.vbiDialogGeometry = QByteArray();
     settings.windows.oscilloscopeDialogGeometry = QByteArray();
+    settings.windows.vectorscopeDialogGeometry = QByteArray();
     settings.windows.dropoutAnalysisDialogGeometry = QByteArray();
+    settings.windows.visibleDropoutAnalysisDialogGeometry = QByteArray();
     settings.windows.blackSnrAnalysisDialogGeometry = QByteArray();
     settings.windows.whiteSnrAnalysisDialogGeometry = QByteArray();
     settings.windows.closedCaptionDialogGeometry = QByteArray();
+    settings.windows.videoParametersDialogGeometry = QByteArray();
     settings.windows.chromaDecoderConfigDialogGeometry = QByteArray();
 
     // Write the configuration
@@ -169,12 +178,12 @@ QByteArray Configuration::getMainWindowGeometry(void)
     return settings.windows.mainWindowGeometry;
 }
 
-void Configuration::setMainWindowScaleFactor(qreal mainWindowScaleFactor)
+void Configuration::setMainWindowScaleFactor(double mainWindowScaleFactor)
 {
     settings.windows.mainWindowScaleFactor = mainWindowScaleFactor;
 }
 
-qreal Configuration::getMainWindowScaleFactor(void)
+double Configuration::getMainWindowScaleFactor(void)
 {
     return settings.windows.mainWindowScaleFactor;
 }
@@ -199,6 +208,16 @@ QByteArray Configuration::getOscilloscopeDialogGeometry(void)
     return settings.windows.oscilloscopeDialogGeometry;
 }
 
+void Configuration::setVectorscopeDialogGeometry(QByteArray vectorscopeDialogGeometry)
+{
+    settings.windows.vectorscopeDialogGeometry = vectorscopeDialogGeometry;
+}
+
+QByteArray Configuration::getVectorscopeDialogGeometry(void)
+{
+    return settings.windows.vectorscopeDialogGeometry;
+}
+
 void Configuration::setDropoutAnalysisDialogGeometry(QByteArray dropoutAnalysisDialogGeometry)
 {
     settings.windows.dropoutAnalysisDialogGeometry = dropoutAnalysisDialogGeometry;
@@ -207,6 +226,16 @@ void Configuration::setDropoutAnalysisDialogGeometry(QByteArray dropoutAnalysisD
 QByteArray Configuration::getDropoutAnalysisDialogGeometry(void)
 {
     return settings.windows.dropoutAnalysisDialogGeometry;
+}
+
+void Configuration::setVisibleDropoutAnalysisDialogGeometry(QByteArray visibleDropoutAnalysisDialogGeometry)
+{
+    settings.windows.visibleDropoutAnalysisDialogGeometry = visibleDropoutAnalysisDialogGeometry;
+}
+
+QByteArray Configuration::getVisibleDropoutAnalysisDialogGeometry(void)
+{
+    return settings.windows.visibleDropoutAnalysisDialogGeometry;
 }
 
 void Configuration::setBlackSnrAnalysisDialogGeometry(QByteArray blackSnrAnalysisDialogGeometry)
@@ -237,6 +266,16 @@ void Configuration::setClosedCaptionDialogGeometry(QByteArray closedCaptionDialo
 QByteArray Configuration::getClosedCaptionDialogGeometry(void)
 {
     return settings.windows.closedCaptionDialogGeometry;
+}
+
+void Configuration::setVideoParametersDialogGeometry(QByteArray videoParametersDialogGeometry)
+{
+    settings.windows.videoParametersDialogGeometry = videoParametersDialogGeometry;
+}
+
+QByteArray Configuration::getVideoParametersDialogGeometry(void)
+{
+    return settings.windows.videoParametersDialogGeometry;
 }
 
 void Configuration::setChromaDecoderConfigDialogGeometry(QByteArray chromaDecoderConfigDialogGeometry)

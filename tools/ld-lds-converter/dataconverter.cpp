@@ -24,12 +24,13 @@
 
 #include "dataconverter.h"
 
-DataConverter::DataConverter(QString inputFileNameParam, QString outputFileNameParam, bool isPackingParam, QObject *parent) : QObject(parent)
+DataConverter::DataConverter(QString inputFileNameParam, QString outputFileNameParam, bool isPackingParam, bool isRIFFParam, QObject *parent) : QObject(parent)
 {
     // Store the configuration parameters
     inputFileName = inputFileNameParam;
     outputFileName = outputFileNameParam;
     isPacking = isPackingParam;
+    isRIFF = isRIFFParam;
 }
 
 // Method to process the conversion of the file
@@ -117,9 +118,11 @@ bool DataConverter::openOutputFile(void)
             return false;
         }
         qDebug() << "Writing output data to stdout";
+
     } else {
         // Open the output file for writing
         outputFileHandle = new QFile(outputFileName);
+
         if (!outputFileHandle->open(QIODevice::WriteOnly)) {
             // Failed to open output file
             qDebug() << "DataConverter::openOutputFile(): Could not open" << outputFileName << "as output file";
@@ -224,6 +227,15 @@ void DataConverter::unpackFile(void)
     QByteArray inputBuffer;
     QByteArray outputBuffer;
     bool isComplete = false;
+
+    // Are we writing a RIFF header?
+    if (isRIFF) {
+            // Writes a WAV RIFF header, 40k, mono, 16-bit signed
+            QString riffHex = "52494646FFFFFFFF57415645666D74201000000001000100409C000088580100020010004C4953541A000000494E464F495346540E0000004C61766635382E32392E3130300064617461FFFFFFFF";
+            QByteArray riffArray = QByteArray::fromHex(riffHex.toLatin1());
+            outputFileHandle->write(riffArray);
+        }
+        
 
     while(!isComplete) {
         // Input buffer must be divisible by 5 bytes due to 10-bit data format

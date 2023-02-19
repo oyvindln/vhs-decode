@@ -3,7 +3,7 @@
     oscilloscopedialog.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -34,14 +34,17 @@ OscilloscopeDialog::OscilloscopeDialog(QWidget *parent) :
     ui->setupUi(this);
     setWindowFlags(Qt::Window);
 
-    maximumScanLines = 625;
-    lastScopeLine = 0;
-    lastScopeDot = 0;
+    maximumX = 1135;
+    maximumY = 625;
+    lastScopeX = 0;
+    lastScopeY = 0;
     scopeWidth = 0;
 
     // Configure the GUI
-    ui->scanLineSpinBox->setMinimum(1);
-    ui->scanLineSpinBox->setMaximum(625);
+    ui->xCoordSpinBox->setMinimum(0);
+    ui->xCoordSpinBox->setMaximum(maximumX - 1);
+    ui->yCoordSpinBox->setMinimum(0);
+    ui->yCoordSpinBox->setMaximum(maximumY - 1);
 
     ui->previousPushButton->setAutoRepeat(true);
     ui->previousPushButton->setAutoRepeatInterval(50);
@@ -58,19 +61,18 @@ OscilloscopeDialog::~OscilloscopeDialog()
     delete ui;
 }
 
-void OscilloscopeDialog::showTraceImage(TbcSource::ScanLineData scanLineData, qint32 scanLine, qint32 pictureDot, qint32 frameHeight)
+void OscilloscopeDialog::showTraceImage(TbcSource::ScanLineData scanLineData, qint32 xCoord, qint32 yCoord, qint32 frameWidth, qint32 frameHeight)
 {
-    qDebug() << "OscilloscopeDialog::showTraceImage(): Called for scan-line" << scanLine << "with picture dot" << pictureDot;
+    qDebug() << "OscilloscopeDialog::showTraceImage(): Called with xCoord =" << xCoord << "and yCoord =" << yCoord;
 
-    // Set the dialogue title based on the scan-line
-    this->setWindowTitle("Oscilloscope trace for scan-line #" + QString::number(scanLine));
+    // Store coordinates
+    maximumX = frameWidth;
+    maximumY = frameHeight;
+    lastScopeX = xCoord;
+    lastScopeY = yCoord;
 
     // Get the raw field data for the selected line
-    QImage traceImage;
-    lastScopeLine = scanLine;
-    lastScopeDot = pictureDot;
-
-    traceImage = getFieldLineTraceImage(scanLineData, pictureDot);
+    QImage traceImage = getFieldLineTraceImage(scanLineData, lastScopeX);
 
     // Add the QImage to the QLabel in the dialogue
     ui->scopeLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -78,12 +80,22 @@ void OscilloscopeDialog::showTraceImage(TbcSource::ScanLineData scanLineData, qi
     ui->scopeLabel->setScaledContents(true);
     ui->scopeLabel->setPixmap(QPixmap::fromImage(traceImage));
 
-    // Update the scan-line spinbox
-    ui->scanLineSpinBox->setMaximum(frameHeight);
-    ui->scanLineSpinBox->setValue(scanLine);
+    // Update the X coordinate spinbox
+    ui->xCoordSpinBox->setMaximum(maximumX - 1);
+    ui->xCoordSpinBox->setValue(lastScopeX);
 
-    // Update the maximum scan-lines limit
-    maximumScanLines = frameHeight;
+    // Update the Y coordinate spinbox
+    ui->yCoordSpinBox->setMaximum(maximumY - 1);
+    ui->yCoordSpinBox->setValue(lastScopeY);
+
+    // Update the line number displays
+    ui->standardLineLabel->setText(QString("%1 line %2")
+                                   .arg(scanLineData.systemDescription)
+                                   .arg(scanLineData.lineNumber.standard()));
+    ui->fieldLineLabel->setText(QString("Field %1 line %2")
+                                        .arg(scanLineData.lineNumber.isFirstField() ? "1" : "2")
+                                        .arg(scanLineData.lineNumber.field1()));
+
     // QT Bug workaround for some macOS versions
     #if defined(Q_OS_MACOS)
     	repaint();
@@ -233,43 +245,50 @@ QImage OscilloscopeDialog::getFieldLineTraceImage(TbcSource::ScanLineData scanLi
 
 void OscilloscopeDialog::on_previousPushButton_clicked()
 {
-    if (ui->scanLineSpinBox->value() != 1) {
-        emit scanLineChanged(ui->scanLineSpinBox->value() - 1, lastScopeDot);
+    if (ui->yCoordSpinBox->value() != 0) {
+        emit scopeCoordsChanged(lastScopeX, ui->yCoordSpinBox->value() - 1);
     }
 }
 
 void OscilloscopeDialog::on_nextPushButton_clicked()
 {
-    if (ui->scanLineSpinBox->value() < maximumScanLines) {
-        emit scanLineChanged(ui->scanLineSpinBox->value() + 1, lastScopeDot);
+    if (ui->yCoordSpinBox->value() < maximumY - 1) {
+        emit scopeCoordsChanged(lastScopeX, ui->yCoordSpinBox->value() + 1);
     }
 }
 
-void OscilloscopeDialog::on_scanLineSpinBox_valueChanged(int arg1)
+void OscilloscopeDialog::on_xCoordSpinBox_valueChanged(int arg1)
 {
     (void)arg1;
-    if (ui->scanLineSpinBox->value() != lastScopeLine)
-        emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    if (ui->xCoordSpinBox->value() != lastScopeX)
+        emit scopeCoordsChanged(ui->xCoordSpinBox->value(), lastScopeY);
+}
+
+void OscilloscopeDialog::on_yCoordSpinBox_valueChanged(int arg1)
+{
+    (void)arg1;
+    if (ui->yCoordSpinBox->value() != lastScopeY)
+        emit scopeCoordsChanged(lastScopeX, ui->yCoordSpinBox->value() );
 }
 
 void OscilloscopeDialog::on_YCcheckBox_clicked()
 {
-    emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    emit scopeCoordsChanged(lastScopeX, lastScopeY);
 }
 
 void OscilloscopeDialog::on_YcheckBox_clicked()
 {
-    emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    emit scopeCoordsChanged(lastScopeX, lastScopeY);
 }
 
 void OscilloscopeDialog::on_CcheckBox_clicked()
 {
-    emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    emit scopeCoordsChanged(lastScopeX, lastScopeY);
 }
 
 void OscilloscopeDialog::on_dropoutsCheckBox_clicked()
 {
-    emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    emit scopeCoordsChanged(lastScopeX, lastScopeY);
 }
 
 // Mouse press event handler
@@ -287,7 +306,12 @@ void OscilloscopeDialog::mousePressEvent(QMouseEvent *event)
             oX + 1 <= ui->scopeLabel->width() &&
             oY <= ui->scopeLabel->height()) {
 
-        mousePictureDotSelect(oX);
+        // Is shift held down?
+        if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+            mouseLevelSelect(oY);
+        } else {
+            mousePictureDotSelect(oX);
+        }
         event->accept();
     }
 }
@@ -295,34 +319,31 @@ void OscilloscopeDialog::mousePressEvent(QMouseEvent *event)
 // Mouse drag event handler
 void OscilloscopeDialog::mouseMoveEvent(QMouseEvent *event)
 {
-    // Get the mouse position relative to our scene
-    QPoint origin = ui->scopeLabel->mapFromGlobal(QCursor::pos());
-
-    // Check that the mouse click is within bounds of the current picture
-    qint32 oX = origin.x();
-    qint32 oY = origin.y();
-
-    if (oX + 1 >= 0 &&
-            oY >= 0 &&
-            oX + 1 <= ui->scopeLabel->width() &&
-            oY <= ui->scopeLabel->height()) {
-
-        mousePictureDotSelect(oX);
-        event->accept();
-    }
+    // Handle this the same way as a click
+    mousePressEvent(event);
 }
 
+// Handle a click on the scope with shift held down, to select a level
+void OscilloscopeDialog::mouseLevelSelect(qint32 oY)
+{
+    double unscaledYR = (65536.0 / static_cast<double>(ui->scopeLabel->height())) * static_cast<double>(oY);
+
+    qint32 level = qBound(0, 65535 - static_cast<qint32>(unscaledYR), 65535);
+    emit scopeLevelSelect(level);
+}
+
+// Handle a click on the scope without shift held down, to select a sample
 void OscilloscopeDialog::mousePictureDotSelect(qint32 oX)
 {
-    qreal unscaledXR = (static_cast<qreal>(scopeWidth) /
-                        static_cast<qreal>(ui->scopeLabel->width())) * static_cast<qreal>(oX);
+    double unscaledXR = (static_cast<double>(scopeWidth) /
+                         static_cast<double>(ui->scopeLabel->width())) * static_cast<double>(oX);
 
     qint32 unscaledX = static_cast<qint32>(unscaledXR);
     if (unscaledX > scopeWidth - 1) unscaledX = scopeWidth - 1;
     if (unscaledX < 0) unscaledX = 0;
 
     // Remember the last dot selected
-    lastScopeDot = unscaledX;
+    lastScopeX = unscaledX;
 
-    emit scanLineChanged(ui->scanLineSpinBox->value(), lastScopeDot);
+    emit scopeCoordsChanged(lastScopeX, lastScopeY);
 }

@@ -1,8 +1,16 @@
+from dataclasses import dataclass
 import numpy as np
 from numba import njit
 
 from lddecode.utils import inrange
 import vhsdecode.formats as vhs_formats
+
+
+@dataclass
+class DodOptions:
+    dod_threshold_p: float
+    dod_threshold_a: float
+    dod_hysteresis: float
 
 
 @njit(cache=True)
@@ -73,15 +81,15 @@ def combine_to_dropouts(crossings_down, crossings_up, merge_threshold):
     return used
 
 
-def detect_dropouts_rf(field):
+def detect_dropouts_rf(field, dod_options):
     """Look for dropouts in the input data, based on rf envelope amplitude.
     Uses either an percentage of the frame average rf level, or an absolute value.
     TODO: A more advanced algorithm with hysteresis etc.
     """
     env = field.data["video"]["envelope"]
-    threshold_p = field.rf.dod_threshold_p
-    threshold_abs = field.rf.dod_threshold_a
-    hysteresis = field.rf.dod_hysteresis
+    threshold_p = dod_options.dod_threshold_p
+    threshold_abs = dod_options.dod_threshold_a
+    hysteresis = dod_options.dod_hysteresis
 
     threshold = 0.0
     if threshold_abs is not None:

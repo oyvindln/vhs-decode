@@ -3,7 +3,7 @@
     chromadecoderconfigdialog.h
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2019-2021 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -44,7 +44,7 @@ public:
     explicit ChromaDecoderConfigDialog(QWidget *parent = nullptr);
     ~ChromaDecoderConfigDialog();
 
-    void setConfiguration(bool isSourcePal, const PalColour::Configuration &palConfiguration,
+    void setConfiguration(VideoSystem system, const PalColour::Configuration &palConfiguration,
                           const Comb::Configuration &ntscConfiguration,
                           const OutputWriter::Configuration &outputConfiguration);
     const PalColour::Configuration &getPalConfiguration();
@@ -59,7 +59,6 @@ private slots:
     void on_chromaPhaseHorizontalSlider_valueChanged(int value);
 
     void on_palFilterButtonGroup_buttonClicked(QAbstractButton *button);
-    void on_thresholdModeCheckBox_clicked();
     void on_thresholdHorizontalSlider_valueChanged(int value);
     void on_showFFTsCheckBox_clicked();
     void on_simplePALCheckBox_clicked();
@@ -68,14 +67,12 @@ private slots:
     void on_phaseCompCheckBox_clicked();
     void on_adaptiveCheckBox_clicked();
     void on_showMapCheckBox_clicked();
-    void on_colorLpfCheckBox_clicked();
-    void on_colorLpfHqCheckBox_clicked();
     void on_cNRHorizontalSlider_valueChanged(int value);
     void on_yNRHorizontalSlider_valueChanged(int value);
 
 private:
     Ui::ChromaDecoderConfigDialog *ui;
-    bool isSourcePal;
+    VideoSystem system;
     PalColour::Configuration palConfiguration;
     Comb::Configuration ntscConfiguration;
     OutputWriter::Configuration outputConfiguration;

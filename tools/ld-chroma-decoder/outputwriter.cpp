@@ -62,12 +62,14 @@ void OutputWriter::updateConfiguration(LdDecodeMetaData::VideoParameters &_video
     activeHeight = videoParameters.lastActiveFrameLine - videoParameters.firstActiveFrameLine;
     outputHeight = activeHeight;
 
-    if (config.usePadding) {
-        // Both width and height should be divisible by 8, as video codecs expect this.
-        // Expand horizontal active region so the width is divisible by 8.
+    if (config.paddingAmount > 1) {
+        // Some video codecs require the width and height of a video to be divisible by
+        // a given number of samples on each axis.
+        
+        // Expand horizontal active region so the width is divisible by the specified padding factor.
         while (true) {
             activeWidth = videoParameters.activeVideoEnd - videoParameters.activeVideoStart;
-            if ((activeWidth % 8) == 0) {
+            if ((activeWidth % config.paddingAmount) == 0) {
                 break;
             }
 
@@ -79,10 +81,10 @@ void OutputWriter::updateConfiguration(LdDecodeMetaData::VideoParameters &_video
             }
         }
 
-        // Insert empty padding lines so the height is divisible by 8
+        // Insert empty padding lines so the height is divisible by by the specified padding factor.
         while (true) {
             outputHeight = topPadLines + activeHeight + bottomPadLines;
-            if ((outputHeight % 8) == 0) {
+            if ((outputHeight % config.paddingAmount) == 0) {
                 break;
             }
 
@@ -139,7 +141,7 @@ QByteArray OutputWriter::getStreamHeader() const
     str << " H" << outputHeight;
 
     // Frame rate
-    if (videoParameters.isSourcePal) {
+    if (videoParameters.system == PAL) {
         str << " F25:1";
     } else {
         str << " F30000:1001";
@@ -150,7 +152,7 @@ QByteArray OutputWriter::getStreamHeader() const
 
     // Pixel aspect ratio
     // XXX Can this be computed, in case the width has been adjusted?
-    if (videoParameters.isSourcePal) {
+    if (videoParameters.system == PAL) {
         if (videoParameters.isWidescreen) {
             str << " A512:461"; // (16 / 9) * (576 / 922)
         } else {

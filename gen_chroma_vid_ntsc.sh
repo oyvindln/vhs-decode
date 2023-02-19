@@ -1,44 +1,41 @@
 #!/bin/bash
 
 CHROMA_DECODER="ntsc2d"
-CHROMA_GAIN=2
+CHROMA_GAIN=1
 FILTER_COMPLEX="[1:v]format=yuv422p10le[chroma];[0:v][chroma]mergeplanes=0x001112:yuv422p10le[output]"
 
 # Append audio track captured over line input or with external sound recorder, skip if absent:
 if [ -f "$1.wav" ] ; then
-  ffmpeg -hide_banner -thread_queue_size 1024 -f rawvideo \
-    -r 30000/1001 -pixel_format gray16le -s 760x488 \
+  ffmpeg -hide_banner -thread_queue_size 1024 \
     -color_range tv \
     -i <( \
-      ld-dropout-correct -i $1.tbc --output-json /dev/null - | \
-      ld-chroma-decoder --chroma-gain 0 -f mono -p yuv --input-json $1.tbc.json - - \
+      ld-dropout-correct -i "$1.tbc" --output-json /dev/null - | \
+      ld-chroma-decoder --chroma-gain 0 -f mono -p y4m --input-json "$1.tbc.json" - - \
     ) \
-    -f rawvideo -r 30000/1001 -pixel_format yuv444p16le -s 760x488 \
     -i <( \
-      ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | \
-      ld-chroma-decoder -f $CHROMA_DECODER --luma-nr 0 --ntsc-phase-comp --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - -\
+      ld-dropout-correct -i "$1_chroma.tbc" --input-json "$1.tbc.json" --output-json /dev/null - | \
+      ld-chroma-decoder -f "$CHROMA_DECODER" --luma-nr 0 --ntsc-phase-comp --chroma-gain "$CHROMA_GAIN" -p y4m --input-json "$1.tbc.json" - -\
     ) \
-    -itsoffset -00:00:00.000 -i $1.wav \
-    -filter_complex $FILTER_COMPLEX \
+    -itsoffset -00:00:00.000 -i "$1.wav" \
+    -filter_complex "$FILTER_COMPLEX" \
     -map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 30 -level 3 -slices 16 -slicecrc 1 -top 1 \
     -pixel_format yuv422p10le -color_range tv -color_primaries smpte170m -color_trc smpte170m \
-    -colorspace smpte170m -aspect 4:3 -c:a flac -compression_level 12 -map 2:a? -shortest -y $1.mkv
+    -colorspace smpte170m -c:a flac -compression_level 12 -map 2:a? -shortest -y "$1.mkv"
 else
-  ffmpeg -hide_banner -thread_queue_size 1024 -f rawvideo -r 30000/1001 -pixel_format gray16le -s 760x488 \
+  ffmpeg -hide_banner -thread_queue_size 1024  \
   -color_range tv \
   -i <(\
-    ld-dropout-correct -i $1.tbc --output-json /dev/null - | \
-    ld-chroma-decoder --chroma-gain 0 -f mono -p yuv --input-json $1.tbc.json - - \
+    ld-dropout-correct -i "$1.tbc" --output-json /dev/null - | \
+    ld-chroma-decoder --chroma-gain 0 -f mono -p y4m --input-json "$1.tbc.json" - - \
   ) \
-  -f rawvideo -r 30000/1001 -pixel_format yuv444p16le -s 760x488 \
   -i <(\
-    ld-dropout-correct -i $1_chroma.tbc --input-json $1.tbc.json --output-json /dev/null - | \
-    ld-chroma-decoder -f $CHROMA_DECODER --luma-nr 0 --ntsc-phase-comp --chroma-gain $CHROMA_GAIN -p yuv --input-json $1.tbc.json - - \
+    ld-dropout-correct -i "$1_chroma.tbc" --input-json "$1.tbc.json" --output-json /dev/null - | \
+    ld-chroma-decoder -f "$CHROMA_DECODER" --luma-nr 0 --ntsc-phase-comp --chroma-gain "$CHROMA_GAIN" -p y4m --input-json "$1.tbc.json" - - \
   ) \
-  -filter_complex $FILTER_COMPLEX \
+  -filter_complex "$FILTER_COMPLEX" \
   -map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 30 -level 3 -slices 16 -slicecrc 1 -top 1 \
   -pixel_format yuv422p10le -color_range tv -color_primaries smpte170m \
-  -color_trc smpte170m -colorspace smpte170m -aspect 4:3 -shortest -y $1.mkv
+  -color_trc smpte170m -colorspace smpte170m -shortest -y "$1.mkv"
 fi
 
 # Encode internet-friendly clip of previous lossless result:

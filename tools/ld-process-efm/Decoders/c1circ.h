@@ -3,7 +3,7 @@
     c1circ.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -33,7 +33,8 @@
 
 // CD-ROM specific CIRC configuration for Reed-Solomon forward error correction
 template < size_t SYMBOLS, size_t PAYLOAD > struct C1RS;
-template < size_t PAYLOAD > struct C1RS<255, PAYLOAD> : public __RS(C1RS, uint8_t, 255, PAYLOAD, 0x11d, 0,  1);
+template < size_t PAYLOAD > struct C1RS<255, PAYLOAD>
+    : public __RS(C1RS, uint8_t, 255, PAYLOAD, 0x11d, 0, 1, false);
 
 #include "Datatypes/f3frame.h"
 
@@ -52,11 +53,11 @@ public:
 
     void reset();
     void resetStatistics();
-    Statistics getStatistics();
-    void reportStatistics();
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
     void pushF3Frame(F3Frame f3Frame);
-    uchar* getDataSymbols();
-    uchar* getErrorSymbols();
+    const uchar *getDataSymbols() const;
+    const uchar *getErrorSymbols() const;
     void flush();
 
 private:

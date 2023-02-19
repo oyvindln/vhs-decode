@@ -3,7 +3,7 @@
     c1circ.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -45,13 +45,13 @@ void C1Circ::resetStatistics()
     statistics.c1flushed = 0;
 }
 
-C1Circ::Statistics C1Circ::getStatistics()
+const C1Circ::Statistics &C1Circ::getStatistics() const
 {
     return statistics;
 }
 
 // Method to write statistics information to qInfo
-void C1Circ::reportStatistics()
+void C1Circ::reportStatistics() const
 {
     qInfo() << "";
     qInfo() << "F3 to F2 frame C1 Error correction:";
@@ -61,9 +61,9 @@ void C1Circ::reportStatistics()
     qInfo() << "        C1s corrected:" << statistics.c1Corrected;
     qInfo() << " Delay buffer flushes:" << statistics.c1flushed;
 
-    qreal c1ErrorRate = static_cast<qreal>(statistics.c1Passed) +
-            static_cast<qreal>(statistics.c1Failed) +
-            static_cast<qreal>(statistics.c1Corrected);
+    double c1ErrorRate = static_cast<double>(statistics.c1Passed) +
+            static_cast<double>(statistics.c1Failed) +
+            static_cast<double>(statistics.c1Corrected);
 
     c1ErrorRate = (100 / c1ErrorRate) * (statistics.c1Failed + statistics.c1Corrected);
     qInfo().nospace() << "        C1 Error rate: " << c1ErrorRate << "%";
@@ -90,14 +90,14 @@ void C1Circ::pushF3Frame(F3Frame f3Frame)
 }
 
 // Return the C1 data symbols if available
-uchar* C1Circ::getDataSymbols()
+const uchar *C1Circ::getDataSymbols() const
 {
     if (c1BufferLevel > 1) return outputC1Data;
     return nullptr;
 }
 
 // Return the C1 error symbols if available
-uchar* C1Circ::getErrorSymbols()
+const uchar *C1Circ::getErrorSymbols() const
 {
     if (c1BufferLevel > 1) return outputC1Errors;
     return nullptr;

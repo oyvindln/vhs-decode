@@ -81,7 +81,7 @@ bool ProcessingPool::process()
     }
 
     // Show the processing speed to the user
-    qreal totalSecs = (static_cast<qreal>(totalTimer.elapsed()) / 1000.0);
+    double totalSecs = (static_cast<double>(totalTimer.elapsed()) / 1000.0);
     qInfo() << "VITS Processing complete -" << lastFieldNumber << "fields in" << totalSecs << "seconds (" <<
                lastFieldNumber / totalSecs << "FPS )";
 

@@ -3,7 +3,7 @@
     f1frame.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -36,7 +36,7 @@ F1Frame::F1Frame()
     trackNumber = 0;
 }
 
-void F1Frame::setData(uchar *dataParam, bool _isCorrupt, bool _isEncoderOn, bool _isMissing,
+void F1Frame::setData(const uchar *dataParam, bool _isCorrupt, bool _isEncoderOn, bool _isMissing,
                       TrackTime _discTime, TrackTime _trackTime, qint32 _trackNumber)
 {
     // Add the F1 frame data to the F1 data buffer and swap the byte
@@ -60,37 +60,37 @@ void F1Frame::setData(uchar *dataParam, bool _isCorrupt, bool _isEncoderOn, bool
     // to perform the swapping twice (in the audio and data processing)
 }
 
-uchar* F1Frame::getDataSymbols()
+const uchar *F1Frame::getDataSymbols() const
 {
     return dataSymbols;
 }
 
-bool F1Frame::isCorrupt()
+bool F1Frame::isCorrupt() const
 {
     return isCorruptFlag;
 }
 
-bool F1Frame::isEncoderOn()
+bool F1Frame::isEncoderOn() const
 {
     return isEncoderOnFlag;
 }
 
-bool F1Frame::isMissing()
+bool F1Frame::isMissing() const
 {
     return isMissingFlag;
 }
 
-TrackTime F1Frame::getDiscTime()
+TrackTime F1Frame::getDiscTime() const
 {
     return discTime;
 }
 
-TrackTime F1Frame::getTrackTime()
+TrackTime F1Frame::getTrackTime() const
 {
     return trackTime;
 }
 
-qint32 F1Frame::getTrackNumber()
+qint32 F1Frame::getTrackNumber() const
 {
     return trackNumber;
 }

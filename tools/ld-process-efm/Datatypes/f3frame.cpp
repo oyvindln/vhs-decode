@@ -3,7 +3,8 @@
     f3frame.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
+    Copyright (C) 2022 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -47,7 +48,7 @@ F3Frame::F3Frame()
     }
 }
 
-F3Frame::F3Frame(uchar *tValuesIn, qint32 tLength)
+F3Frame::F3Frame(const uchar *tValuesIn, qint32 tLength, bool audioIsDts)
 {
     validEfmSymbols = 0;
     invalidEfmSymbols = 0;
@@ -57,11 +58,11 @@ F3Frame::F3Frame(uchar *tValuesIn, qint32 tLength)
     isSync1 = false;
     subcodeSymbol = 0;
 
-    setTValues(tValuesIn, tLength);
+    setTValues(tValuesIn, tLength, audioIsDts);
 }
 
 // This method sets the T-values for the F3 Frame
-void F3Frame::setTValues(uchar* tValuesIn, qint32 tLength)
+void F3Frame::setTValues(const uchar *tValuesIn, qint32 tLength, bool audioIsDts)
 {
     // Does tValuesIn contain values?
     if (tLength == 0) {
@@ -69,73 +70,53 @@ void F3Frame::setTValues(uchar* tValuesIn, qint32 tLength)
         return;
     }
 
-    // Now perform the conversion
     // Step 1:
 
-    // Convert the T values into a bit stream
-    // Should produce 588 channel bits which is 73.5 bytes of data
-    uchar rawFrameData[75];
-    qint32 bitPosition = 7;
-    qint32 bytePosition = 0;
-    uchar byteData = 0;
-
-    bool finished = false;
-    for (qint32 tPosition = 0; tPosition < tLength; tPosition++) {
-        uchar tValuesIn_tPosition = tValuesIn[tPosition];
-        for (qint32 bitCount = 0; bitCount < tValuesIn_tPosition; bitCount++) {
-            if (bitCount == 0) byteData |= (1 << bitPosition);
-            bitPosition--;
-
-            if (bitPosition < 0) {
-                rawFrameData[bytePosition] = byteData;
-                byteData = 0;
-                bitPosition = 7;
-                bytePosition++;
-
-                // Check for overflow (due to errors in the T values) and stop processing to prevent crashes
-                if (bytePosition > 73) {
-                    finished = true;
-                    break;
-                }
-            }
-
-            if (finished) break;
-        }
-
-        if (finished) break;
-    }
-
-    // Add in the last nybble to get from 73.5 to 74 bytes
-    if (bytePosition < 74) rawFrameData[bytePosition] = byteData;
-
-    // Step 2:
-
-    // Take the bit stream and extract just the EFM values it contains
+    // Convert the T-values, which represent the spacing between 1 bits, into
+    // EFM values.
+    //
     // There are 33 EFM values per F3 frame (1 Subcode symbol and 32 data symbols)
-
+    //
     // Composition of an EFM packet is as follows:
     //
     //  1 * (24 + 3) bits sync pattern         =  27
     //  1 * (14 + 3) bits control and display  =  17
     // 32 * (14 + 3) data+parity               = 544
     //                                   total = 588 bits
+    //
+    // We don't bother storing the sync pattern, or the 3 merging bits after
+    // each EFM code.
 
+    // Clear the EFM buffer
     qint16 efmValues[33];
-    qint16 currentBit = 0;
+    for (qint32 i = 0; i < 33; i++) efmValues[i] = 0;
 
-    // Ignore the sync pattern (which is 24 bits plus 3 merging bits)
-    currentBit += 24 + 3;
+    // Iterate through the T-values, keeping track of the bit position within the frame.
+    // The loop executes an extra time at the end to write the final 1 bit.
+    qint32 frameBits = 0;
+    for (qint32 tPosition = 0; tPosition < tLength + 1; tPosition++) {
+        const uchar tValue = (tPosition == tLength) ? 0 : tValuesIn[tPosition];
 
-    // Get the 33 x 14-bit sync/EFM values
-    for (qint32 counter = 0; counter < 33; counter++) {
-        efmValues[counter] = getBits(rawFrameData, currentBit, 14);
-        currentBit += 14 + 3; // the value plus 3 merging bits
+        // If we're inside an EFM value (not the sync pattern, or the merging
+        // bits, or past the end of the buffer), write a 1 bit in the
+        // appropriate place
+        const qint32 efmBits = frameBits - (24 + 3);
+        if (efmBits >= 0) {
+            const qint32 efmIndex = efmBits / (14 + 3);
+            const qint32 efmBit = efmBits % (14 + 3);
+            if (efmIndex < 33 && efmBit < 14) {
+                efmValues[efmIndex] |= (1 << (13 - efmBit));
+            }
+        }
+
+        frameBits += tValue;
     }
 
-    // Step 3:
+    // Step 2:
 
-    // Decode the subcode symbol
-    if (efmValues[0] == 0x801) {
+    // Decode the subcode symbol.
+    // Some (but not all) DTS LaserDiscs use a non-standard Sync 0 value.
+    if (efmValues[0] == 0x801 || (audioIsDts && efmValues[0] == 0x812)) {
         // Sync 0
         subcodeSymbol = 0;
         isSync0 = true;
@@ -148,7 +129,7 @@ void F3Frame::setTValues(uchar* tValuesIn, qint32 tLength)
         subcodeSymbol = static_cast<uchar>(translateEfm(efmValues[0]));
     }
 
-    // Step 4:
+    // Step 3:
 
     // Decode the data symbols
     for (qint32 i = 0; i < 32; i++) {
@@ -166,110 +147,120 @@ void F3Frame::setTValues(uchar* tValuesIn, qint32 tLength)
 }
 
 // Return the number of valid EFM symbols in the frame
-qint64 F3Frame::getNumberOfValidEfmSymbols()
+qint64 F3Frame::getNumberOfValidEfmSymbols() const
 {
     return validEfmSymbols;
 }
 
 // Return the number of invalid EFM symbols in the frame
-qint64 F3Frame::getNumberOfInvalidEfmSymbols()
+qint64 F3Frame::getNumberOfInvalidEfmSymbols() const
 {
     return invalidEfmSymbols;
 }
 
 // Return the number of corrected EFM symbols in the frame
-qint64 F3Frame::getNumberOfCorrectedEfmSymbols()
+qint64 F3Frame::getNumberOfCorrectedEfmSymbols() const
 {
     return correctedEfmSymbols;
 }
 
 // This method returns the 32 data symbols for the F3 Frame
-uchar *F3Frame::getDataSymbols()
+const uchar *F3Frame::getDataSymbols() const
 {
     return dataSymbols;
 }
 
 // This method returns the 32 error symbols for the F3 Frame
-uchar *F3Frame::getErrorSymbols()
+const uchar *F3Frame::getErrorSymbols() const
 {
     return errorSymbols;
 }
 
 // This method returns the subcode symbol for the F3 frame
-uchar F3Frame::getSubcodeSymbol()
+uchar F3Frame::getSubcodeSymbol() const
 {
     return subcodeSymbol;
 }
 
 // This method returns true if the subcode symbol is a SYNC0 pattern
-bool F3Frame::isSubcodeSync0()
+bool F3Frame::isSubcodeSync0() const
 {
     return isSync0;
 }
 
 // This method returns true if the subcode symbol is a SYNC1 pattern
-bool F3Frame::isSubcodeSync1()
+bool F3Frame::isSubcodeSync1() const
 {
     return isSync1;
 }
 
 // Private methods ----------------------------------------------------------------------------------------------------
 
+// Custom hash table mapping EFM symbols to their values.
+//
+// This uses 2 KiB of storage, so it will fit comfortably within L1 cache
+// even on low-end machines. It does at most two lookups for each symbol,
+// with each lookup needing a single 32-bit memory read.
+class EfmHashTable
+{
+public:
+    EfmHashTable() {
+        // Zero out the table (since 0 is not a valid EFM symbol)
+        for (qint32 i = 0; i < 512; i++) buckets[i] = 0;
+
+        // Put the EFM codes into the table
+        for (qint32 value = 0; value < 256; value++) {
+            const qint16 symbol = efm2numberLUT[value];
+            qint32 bucket = getHash(symbol) * 2;
+
+            // If this bucket is already occupied, use the next one
+            if (buckets[bucket] != 0) bucket++;
+
+            // Store the value in the top half of the bucket
+            buckets[bucket] = (value << 16) | symbol;
+        }
+    }
+
+    // Look up the value of an EFM symbol, returning -1 if not found
+    qint16 getValue(qint16 symbol) const {
+        const qint32 bucket = getHash(symbol) * 2;
+
+        // If present, the symbol must be in this bucket or the next one
+        const quint32 thisBucket = buckets[bucket];
+        if ((thisBucket & 0xFFFF) == static_cast<quint32>(symbol)) return thisBucket >> 16;
+        const quint32 nextBucket = buckets[bucket + 1];
+        if ((nextBucket & 0xFFFF) == static_cast<quint32>(symbol)) return nextBucket >> 16;
+
+        // Not found
+        return -1;
+    }
+
+private:
+    // Hash an EFM value into an 8-bit result. This function was selected so
+    // that at most two valid EFM codes give the same hash value.
+    static qint32 getHash(qint16 symbol) {
+        return (symbol ^ (symbol >> 1) ^ (symbol >> 3) ^ (symbol >> 7)) & 0xFF;
+    }
+
+    quint32 buckets[512];
+};
+static EfmHashTable efmHashTable;
+
 // Method to translate 14-bit EFM value into 8-bit byte
-// Returns -1 if the EFM value is could not be converted
+// Returns -1 if the EFM value could not be converted (which never happens,
+// since we always correct to the most likely value)
 qint16 F3Frame::translateEfm(qint16 efmValue)
 {
-    qint16 result = -1;
-    qint16 lutPos = 0;
-    while (result == -1 && lutPos < 256) {
-        if (efm2numberLUT[lutPos] == efmValue) result = lutPos;
-        lutPos++;
-    }
-
-    // Was 14-bit EFM symbol invalid?
-    if (result == -1) {
-        // Symbol was invalid
-        invalidEfmSymbols++;
-
-        // Attempt to recover symbol using cosine similarity lookup
-        result = -1;
-        lutPos = 0;
-        while (result == -1 && lutPos < 16384) {
-            if (efmerr2positionLUT[lutPos] == efmValue) result = lutPos;
-            lutPos++;
-        }
-
-        // Was lookup successful?
-        if (result != -1) {
-            // Get the translated value from the second LUT
-            result = efmerr2valueLUT[result];
-            correctedEfmSymbols++;
-        }
-    } else {
+    // Look up the symbol in the hash table
+    qint16 value = efmHashTable.getValue(efmValue);
+    if (value != -1) {
         // Symbol was valid
         validEfmSymbols++;
+        return value;
     }
 
-    return result;
+    // Symbol was invalid. Correct it using cosine similarity lookup.
+    invalidEfmSymbols++;
+    correctedEfmSymbols++;
+    return efmerr2valueLUT[efmValue & 0x3fff];
 }
-
-// Method to get 'width' bits (max 15) from a byte array starting from bit 'bitIndex'
-inline qint16 F3Frame::getBits(uchar *rawData, qint16 bitIndex, qint16 width)
-{
-    qint16 byteIndex = bitIndex / 8;
-    qint16 bitInByteIndex = 7 - (bitIndex % 8);
-
-    qint16 result = 0;
-    for (qint16 nBits = width - 1; nBits > -1; nBits--) {
-        if (rawData[byteIndex] & (1 << bitInByteIndex)) result += (1 << nBits);
-
-        bitInByteIndex--;
-        if (bitInByteIndex < 0) {
-            bitInByteIndex = 7;
-            byteIndex++;
-        }
-    }
-
-    return result;
-}
-

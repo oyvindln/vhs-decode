@@ -35,7 +35,8 @@ except ImportError:
     # Prior to numba 0.49
     from numba import jitclass
 
-def computeefmfilter(freq_hz = 40000000, blocklen = 65536):
+
+def computeefmfilter(freq_hz=40000000, blocklen=65536):
     """Frequency-domain equalisation filter for the LaserDisc EFM signal.
     This was inspired by the input signal equaliser in WSJT-X, described in
     Steven J. Franke and Joseph H. Taylor, "The MSK144 Protocol for
@@ -49,11 +50,11 @@ def computeefmfilter(freq_hz = 40000000, blocklen = 65536):
     freq_per_bin = freq_hz / blocklen
     # Amplitude and phase adjustments for each band.
     # These values were adjusted empirically based on a selection of NTSC and PAL samples.
-    amp = np.array([0.0, 0.2, 0.41, 0.73, 0.98, 1.03, 0.99, 0.81, 0.59, 0.42, 0.0])
+    amp = np.array([0.0, 0.215, 0.41, 0.73, 0.98, 1.03, 0.99, 0.81, 0.59, 0.42, 0.0])
     phase = np.array(
-        [0.0, -0.95, -1.05, -1.05, -1.2, -1.2, -1.2, -1.2, -1.2, -1.2, -1.2]
+        [0.0, -0.92, -1.03, -1.11, -1.2, -1.2, -1.2, -1.2, -1.05, -0.95, -0.8]
     )
-    coeffs = None
+    phase = [p * 1.25 for p in phase]
 
     """Compute filter coefficients for the given FFTFilter."""
     # Anything above the highest frequency is left as zero.
@@ -75,6 +76,7 @@ def computeefmfilter(freq_hz = 40000000, blocklen = 65536):
     )
 
     return coeffs * 8
+
 
 # Attribute types of EFM_PLL for numba.
 EFM_PLL_spec = [
@@ -134,7 +136,7 @@ class EFM_PLL:
         inputBuffer is a numpy.ndarray of np.int16 samples.
         Returns a view into a numpy.ndarray of np.int8 times."""
 
-        #print(len(inputBuffer), min(inputBuffer), max(inputBuffer))
+        # print(len(inputBuffer), min(inputBuffer), max(inputBuffer))
 
         # Ensure the PLL result buffer is big enough, and clear it
         if len(self.pllResult) < len(inputBuffer):

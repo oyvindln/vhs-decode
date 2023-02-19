@@ -3,7 +3,7 @@
     syncf3frames.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 #include "Datatypes/f3frame.h"
 
@@ -42,16 +43,16 @@ public:
         qint32 totalSections;
     };
 
-    QVector<F3Frame> process(QVector<F3Frame> f3FramesIn, bool debugState);
-    Statistics getStatistics();
-    void reportStatistics();
+    const std::vector<F3Frame> &process(const std::vector<F3Frame> &f3FramesIn, bool debugState);
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
     void reset();
 
 private:
     bool debugOn;
     Statistics statistics;
-    QVector<F3Frame> f3FrameBuffer;
-    QVector<F3Frame> f3FramesOut;
+    std::vector<F3Frame> f3FrameBuffer;
+    std::vector<F3Frame> f3FramesOut;
     bool waitingForData;
     qint32 syncRecoveryAttempts;
 

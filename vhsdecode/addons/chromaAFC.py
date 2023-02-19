@@ -4,6 +4,7 @@ import scipy.signal as sps
 from scipy.fftpack import fft, fftfreq
 import lddecode.core as ldd
 from scipy.signal import argrelextrema
+from vhsdecode.linear_filter import FiltersClass
 
 twopi = 2 * np.pi
 
@@ -20,11 +21,11 @@ class ChromaAFC:
         linearize=False,
         plot=False,
         tape_format="VHS",
+        do_cafc=False,
     ):
-        self.SysParams = sys_params
         self.tape_format = tape_format
-        self.fv = self.SysParams["FPS"] * 2
-        self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
+        self.fv = sys_params["FPS"] * 2
+        self.fh = sys_params["FPS"] * sys_params["frame_lines"]
         self.color_under = color_under_carrier_f
         self.cc_phase = 0
         self.power_threshold = 1 / 3
@@ -33,14 +34,12 @@ class ChromaAFC:
         self.max_f_dev_percents = percent, percent  # max percent down, max percent up
         self.fft_plot = False
         self.demod_rate = demod_rate
-        self.fsc_mhz = self.SysParams["fsc_mhz"]
+        self.fsc_mhz = sys_params["fsc_mhz"]
         self.out_sample_rate_mhz = self.fsc_mhz * 4
         self.samp_rate = self.out_sample_rate_mhz * 1e6
         self.bpf_under_ratio = under_ratio
         self.out_frequency_half = self.out_sample_rate_mhz / 2
-        self.fieldlen = self.SysParams["outlinelen"] * max(
-            self.SysParams["field_lines"]
-        )
+        self.fieldlen = sys_params["outlinelen"] * max(sys_params["field_lines"])
         self.samples = np.arange(self.fieldlen)
 
         # Standard frequency color carrier wave.
@@ -51,23 +50,29 @@ class ChromaAFC:
             self.fsc_mhz, self.out_sample_rate_mhz, self.fieldlen, np.cos
         )
 
-        self.narrowband = self.get_narrowband_bandpass()
         self.cc_freq_mhz = 0
         self.chroma_heterodyne = np.array([])
-        self.corrector = [1, 0]
-        self.on_linearization = linearize
-        if linearize:
-            self.fit()
-            ldd.logger.info(
-                "freq(x) = %.02f x + %.02f" % (self.corrector[0], self.corrector[1])
+
+        if do_cafc:
+            self.narrowband = self.get_narrowband_bandpass()
+            self.meas_stack = utils.StackableMA(min_watermark=0, window_average=8192)
+            self.chroma_log_drift = utils.StackableMA(
+                min_watermark=0, window_average=8192
             )
-            self.on_linearization = False
+            self.chroma_bias_drift = utils.StackableMA(
+                min_watermark=0, window_average=6
+            )
+
+            self.corrector = [1, 0]
+            self.on_linearization = linearize
+            if linearize:
+                self.fit()
+                ldd.logger.info(
+                    "freq(x) = %.02f x + %.02f" % (self.corrector[0], self.corrector[1])
+                )
+                self.on_linearization = False
 
         self.setCC(color_under_carrier_f)
-
-        self.meas_stack = utils.StackableMA(min_watermark=0, window_average=8192)
-        self.chroma_log_drift = utils.StackableMA(min_watermark=0, window_average=8192)
-        self.chroma_bias_drift = utils.StackableMA(min_watermark=0, window_average=6)
 
         self.fft_plot = plot
         self.cc_wave = np.array([])
@@ -264,6 +269,7 @@ class ChromaAFC:
         # Plot the FFT power
         if self.fft_plot:
             from matplotlib import pyplot as plt
+
             plt.figure(figsize=(6, 5))
             plt.plot(sample_freq, power)
             plt.xlim(
@@ -311,6 +317,7 @@ class ChromaAFC:
         # An inner plot to show the peak frequency
         if self.fft_plot:
             from matplotlib import pyplot as plt
+
             print(self.cc_phase)
             # print("Phase %.02f degrees" % (360 * self.cc_phase / twopi))
             yvert_range = 2 * power[power[pos_mask].argmax()]
@@ -446,8 +453,8 @@ class ChromaAFC:
         )
 
         return {
-            utils.FiltersClass(iir_narrow_lo[0], iir_narrow_lo[1], self.samp_rate),
-            utils.FiltersClass(iir_narrow_hi[0], iir_narrow_hi[1], self.samp_rate),
+            FiltersClass(iir_narrow_lo[0], iir_narrow_lo[1], self.samp_rate),
+            FiltersClass(iir_narrow_hi[0], iir_narrow_hi[1], self.samp_rate),
         }
 
     def get_band_tolerance(self):

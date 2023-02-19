@@ -1,33 +1,23 @@
-# C++ objects and libs
-*.slo
-*.lo
-*.o
-*.a
-*.la
-*.lai
-*.so
-*.dll
-*.dylib
-
 # Qt-es
-object_script.*.Release
-object_script.*.Debug
-*_plugin_import.cpp
-/.qmake.cache
-/.qmake.stash
+*.jsc
+*.moc
 *.pro.user
 *.pro.user.*
 *.qbs.user
 *.qbs.user.*
-*.moc
+*.qmlc
+*/.qtc_clangd
+*_plugin_import.cpp
+*build-*
+/.qmake.cache
+/.qmake.stash
+Makefile*
 moc_*.cpp
 moc_*.h
+object_script.*.Debug
+object_script.*.Release
 qrc_*.cpp
 ui_*.h
-*.qmlc
-*.jsc
-Makefile*
-*build-*
 
 # Qt unit tests
 target_wrapper.*
@@ -41,17 +31,23 @@ target_wrapper.*
 
 # QtCreator CMake
 CMakeLists.txt.user*
+
+# Tool binaries
 /ld-analyse/ld-analyse
 /ld-chroma-decoder/encoder/ld-chroma-encoder
 /ld-chroma-decoder/ld-chroma-decoder
+/ld-disc-stacker/ld-disc-stacker
+/ld-discmap/ld-discmap
 /ld-dropout-correct/ld-dropout-correct
 /ld-export-metadata/ld-export-metadata
-/ld-process-vbi/ld-process-vbi
-/ld-process-efm/ld-process-efm
 /ld-lds-converter/ld-lds-converter
-/ld-discmap/ld-discmap
-/ld-disc-stacker/ld-disc-stacker
+/ld-process-ac3/decode/ld-ac3-decode
+/ld-process-ac3/demodulate/ld-ac3-demodulate
+/ld-process-efm/ld-process-efm
+/ld-process-vbi/ld-process-vbi
 /ld-process-vits/ld-process-vits
 /library/filter/testfilter/testfilter
+/library/tbc/testlinenumber/testlinenumber
+/library/tbc/testmetadata/testmetadata
 /library/tbc/testvbidecoder/testvbidecoder
-
+/library/tbc/testvitcdecoder/testvitcdecoder

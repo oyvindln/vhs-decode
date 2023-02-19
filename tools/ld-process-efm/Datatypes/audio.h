@@ -3,7 +3,7 @@
     audio.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -42,11 +42,11 @@ public:
     };
 
     Audio();
-    Audio(uchar *_sampleFrame);
+    Audio(const uchar *_sampleFrame);
 
-    uchar* getSampleFrame();
-    void setSampleValues(Audio::SampleValues _sampleValues);
-    SampleValues getSampleValues();
+    const uchar *getSampleFrame() const;
+    void setSampleValues(const Audio::SampleValues &_sampleValues);
+    const SampleValues &getSampleValues() const;
     void setSampleToSilence();
 
 private:

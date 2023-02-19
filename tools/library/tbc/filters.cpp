@@ -39,6 +39,7 @@ static constexpr std::array<double, 5> palLumaFilterCoeffs {
 static constexpr auto palLumaFilter = makeFIRFilter(palLumaFilterCoeffs);
 
 // NTSC - Filter at Fsc/2 (Fsc = 3579545 (/2 = 1,789,772.5), sample rate = 14,318,180)
+// (PAL-M's fSC is very close to NTSC's, so we can use the same filter for both.)
 // 1.8 MHz LPF - 5 Taps
 // import scipy.signal
 // scipy.signal.firwin(5, [1.8e6/14318180], window='hamming')
@@ -93,4 +94,20 @@ void Filters::ntscLumaFirFilter(quint16 *data, qint32 dataPoints)
 void Filters::ntscLumaFirFilter(QVector<qint32> &data)
 {
     ntscLumaFilter.apply(data);
+}
+
+// Apply a FIR filter to remove PAL-M chroma leaving just luma
+// Accepts quint16 greyscale data and returns the filtered data into
+// the same array
+void Filters::palMLumaFirFilter(quint16 *data, qint32 dataPoints)
+{
+    ntscLumaFirFilter(data, dataPoints);
+}
+
+// Apply a FIR filter to remove PAL-M chroma leaving just luma
+// Accepts qint32 greyscale data and returns the filtered data into
+// the same array
+void Filters::palMLumaFirFilter(QVector<qint32> &data)
+{
+    ntscLumaFirFilter(data);
 }

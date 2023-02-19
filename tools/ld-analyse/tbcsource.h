@@ -3,8 +3,8 @@
     tbcsource.h
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
-    Copyright (C) 2021 Adam Sampson
+    Copyright (C) 2018-2022 Simon Inns
+    Copyright (C) 2021-2022 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -35,7 +35,9 @@
 // TBC library includes
 #include "sourcevideo.h"
 #include "lddecodemetadata.h"
+#include "linenumber.h"
 #include "vbidecoder.h"
+#include "vitcdecoder.h"
 #include "filters.h"
 
 // Chroma decoder includes
@@ -50,6 +52,8 @@ public:
     explicit TbcSource(QObject *parent = nullptr);
 
     struct ScanLineData {
+        QString systemDescription;
+        LineNumber lineNumber;
         QVector<qint32> composite;
         QVector<qint32> luma;
         QVector<bool> isDropout;
@@ -61,13 +65,14 @@ public:
         qint32 activeVideoStart;
         qint32 activeVideoEnd;
         bool isActiveLine;
-        bool isSourcePal;
     };
 
     void loadSource(QString inputFileName);
     void unloadSource();
     bool getIsSourceLoaded();
+    void saveSourceJson();
     QString getCurrentSourceFilename();
+    QString getLastIOError();
 
     void setHighlightDropouts(bool _state);
     void setChromaDecoder(bool _state);
@@ -76,25 +81,43 @@ public:
     bool getChromaDecoder();
     bool getFieldOrder();
 
+    enum SourceMode {
+        ONE_SOURCE,
+        LUMA_SOURCE,
+        CHROMA_SOURCE,
+        BOTH_SOURCES,
+    };
+    SourceMode getSourceMode();
+    void setSourceMode(SourceMode sourceMode);
+
     void loadFrame(qint32 frameNumber);
 
     QImage getFrameImage();
     qint32 getNumberOfFrames();
     qint32 getNumberOfFields();
     bool getIsWidescreen();
-    bool getIsSourcePal();
+    VideoSystem getSystem();
+    QString getSystemDescription();
     qint32 getFrameHeight();
     qint32 getFrameWidth();
 
     VbiDecoder::Vbi getFrameVbi();
     bool getIsFrameVbiValid();
+    VitcDecoder::Vitc getFrameVitc();
+    bool getIsFrameVitcValid();
 
-    QVector<qreal> getBlackSnrGraphData();
-    QVector<qreal> getWhiteSnrGraphData();
-    QVector<qreal> getDropOutGraphData();
+    QVector<double> getBlackSnrGraphData();
+    QVector<double> getWhiteSnrGraphData();
+    QVector<double> getDropOutGraphData();
+    QVector<double> getVisibleDropOutGraphData();
     qint32 getGraphDataSize();
 
     bool getIsDropoutPresent();
+
+    const LdDecodeMetaData::VideoParameters &getVideoParameters();
+    void setVideoParameters(const LdDecodeMetaData::VideoParameters &videoParameters);
+
+    const ComponentFrame &getComponentFrame();
     ScanLineData getScanLineData(qint32 scanLine);
 
     qint32 getFirstFieldNumber();
@@ -113,19 +136,22 @@ public:
     qint32 startOfChapter(qint32 currentFrameNumber);
 
 signals:
-    void busyLoading(QString information);
-    void finishedLoading();
+    void busy(QString information);
+    void finishedLoading(bool success);
+    void finishedSaving(bool success);
 
 private slots:
     void finishBackgroundLoad();
+    void finishBackgroundSave();
 
 private:
     bool sourceReady;
 
     // Frame data
-    QVector<qreal> blackSnrGraphData;
-    QVector<qreal> whiteSnrGraphData;
-    QVector<qreal> dropoutGraphData;
+    QVector<double> blackSnrGraphData;
+    QVector<double> whiteSnrGraphData;
+    QVector<double> dropoutGraphData;
+    QVector<double> visibleDropoutGraphData;
 
     // Frame image options
     bool chromaOn;
@@ -134,21 +160,25 @@ private:
 
     // Source globals
     SourceVideo sourceVideo;
+    SourceVideo chromaSourceVideo;
+    SourceMode sourceMode;
     LdDecodeMetaData ldDecodeMetaData;
     QString currentSourceFilename;
-    QString lastLoadError;
+    QString currentJsonFilename;
+    QString lastIOError;
 
     // Chroma decoder objects
     PalColour palColour;
     Comb ntscColour;
     OutputWriter outputWriter;
 
-    // VBI decoder
+    // VBI decoders
     VbiDecoder vbiDecoder;
+    VitcDecoder vitcDecoder;
 
     // Background loader globals
-    QFutureWatcher<void> watcher;
-    QFuture <void> future;
+    QFutureWatcher<bool> watcher;
+    QFuture<bool> future;
 
     // Metadata for the loaded frame
     qint32 firstFieldNumber, secondFieldNumber;
@@ -157,6 +187,7 @@ private:
 
     // Source fields needed to decode the loaded frame
     QVector<SourceField> inputFields;
+    QVector<SourceField> chromaInputFields;
     qint32 inputStartIndex, inputEndIndex;
     bool inputFieldsValid;
 
@@ -178,11 +209,13 @@ private:
 
     void resetState();
     void invalidateFrameCache();
+    void configureChromaDecoder();
     void loadInputFields();
     void decodeFrame();
     QImage generateQImage();
     void generateData();
-    void startBackgroundLoad(QString sourceFilename);
+    bool startBackgroundLoad(QString sourceFilename);
+    bool startBackgroundSave(QString jsonFilename);
 };
 
 #endif // TBCSOURCE_H

@@ -3,7 +3,7 @@
     syncf3frames.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -45,18 +45,18 @@ SyncF3Frames::SyncF3Frames()
 // Public methods -----------------------------------------------------------------------------------------------------
 
 // Main processing method
-QVector<F3Frame> SyncF3Frames::process(QVector<F3Frame> f3FramesIn, bool debugState)
+const std::vector<F3Frame> &SyncF3Frames::process(const std::vector<F3Frame> &f3FramesIn, bool debugState)
 {
     debugOn = debugState;
 
     // Clear the output buffer
     f3FramesOut.clear();
 
-    if (f3FramesIn.isEmpty()) return f3FramesOut;
+    if (f3FramesIn.empty()) return f3FramesOut;
 
     // Append input data to the processing buffer
     statistics.totalF3Frames += f3FramesIn.size();
-    f3FrameBuffer.append(f3FramesIn);
+    f3FrameBuffer.insert(f3FrameBuffer.end(), f3FramesIn.begin(), f3FramesIn.end());
 
     waitingForData = false;
     while (!waitingForData) {
@@ -88,13 +88,13 @@ QVector<F3Frame> SyncF3Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
 }
 
 // Get method - retrieve statistics
-SyncF3Frames::Statistics SyncF3Frames::getStatistics()
+const SyncF3Frames::Statistics &SyncF3Frames::getStatistics() const
 {
     return statistics;
 }
 
 // Method to report decoding statistics to qInfo
-void SyncF3Frames::reportStatistics()
+void SyncF3Frames::reportStatistics() const
 {
     qInfo() << "";
     qInfo() << "F3 Frame synchronisation:";
@@ -141,7 +141,8 @@ SyncF3Frames::StateMachine SyncF3Frames::sm_state_findInitialSync0()
     //if (debugOn) qDebug() << "SyncF3Frames::sm_state_findInitialSync0(): Called";
 
     qint32 i = 0;
-    for (i = 0; i < f3FrameBuffer.size() - 1; i++) {
+    const qint32 bufferSize = static_cast<qint32>(f3FrameBuffer.size());
+    for (i = 0; i < bufferSize - 1; i++) {
         if (f3FrameBuffer[i].isSubcodeSync0() || f3FrameBuffer[i+1].isSubcodeSync1()) break;
     }
 
@@ -157,7 +158,7 @@ SyncF3Frames::StateMachine SyncF3Frames::sm_state_findInitialSync0()
         return state_findInitialSync0;
     } else {
         // Found, discard frames up to initial sync
-        f3FrameBuffer.remove(0, i);
+        f3FrameBuffer.erase(f3FrameBuffer.begin(), f3FrameBuffer.begin() + i);
         statistics.discardedFrames += i;
         if (debugOn) qDebug() << "SyncF3Frames::sm_state_findInitialSync0(): Found initial sync0 - discarding" << i << "frames";
     }
@@ -202,7 +203,7 @@ SyncF3Frames::StateMachine SyncF3Frames::sm_state_syncRecovery()
     qint32 requiredF3Frames = 98 * (syncRecoveryAttempts + 2);
 
     // Ensure we have enough data to see the next section
-    if (f3FrameBuffer.size() < (requiredF3Frames + 2)) {
+    if (static_cast<qint32>(f3FrameBuffer.size()) < (requiredF3Frames + 2)) {
         waitingForData = true;
         return state_syncRecovery;
     }
@@ -248,7 +249,7 @@ SyncF3Frames::StateMachine SyncF3Frames::sm_state_syncLost()
     if (debugOn) qDebug() << "SyncF3Frames::sm_state_syncLost(): Called";
 
     // We have lost sync; clear the buffer and go back to looking for an initial sync
-    f3FrameBuffer.remove(0, 98);
+    f3FrameBuffer.erase(f3FrameBuffer.begin(), f3FrameBuffer.begin() + 98);
     statistics.discardedFrames += 98;
     if (debugOn) qDebug() << "SyncF3Frames::sm_state_findNextSync(): Sync lost! - discarding 98 frames";
 
@@ -265,13 +266,11 @@ SyncF3Frames::StateMachine SyncF3Frames::sm_state_processSection()
     //if (debugOn) qDebug() << "SyncF3Frames::sm_state_processSection(): Called";
 
     // Write the complete section of 98 F3 frames to the output buffer
-    for (qint32 i = 0; i < 98; i++) {
-        f3FramesOut.append(f3FrameBuffer[i]);
-    }
+    f3FramesOut.insert(f3FramesOut.end(), f3FrameBuffer.begin(), f3FrameBuffer.begin() + 98);
     statistics.totalSections++;
 
     // Remove the processed section from the F3 frame buffer
-    f3FrameBuffer.remove(0, 98);
+    f3FrameBuffer.erase(f3FrameBuffer.begin(), f3FrameBuffer.begin() + 98);
 
     return state_findNextSync;
 }

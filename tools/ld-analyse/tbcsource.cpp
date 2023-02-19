@@ -3,8 +3,8 @@
     tbcsource.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
-    Copyright (C) 2021 Adam Sampson
+    Copyright (C) 2018-2022 Simon Inns
+    Copyright (C) 2021-2022 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -36,7 +36,7 @@ TbcSource::TbcSource(QObject *parent) : QObject(parent)
     palConfiguration.chromaFilter = PalColour::transform2DFilter;
     ntscConfiguration = ntscColour.getConfiguration();
     outputConfiguration.pixelFormat = OutputWriter::PixelFormat::RGB48;
-    outputConfiguration.usePadding = false;
+    outputConfiguration.paddingAmount = 1;
 }
 
 // Public methods -----------------------------------------------------------------------------------------------------
@@ -49,11 +49,12 @@ void TbcSource::loadSource(QString sourceFilename)
     // Set the current file name
     QFileInfo inFileInfo(sourceFilename);
     currentSourceFilename = inFileInfo.fileName();
-    qDebug() << "TbcSource::startBackgroundLoad(): Opening TBC source file:" << currentSourceFilename;
+    qDebug() << "TbcSource::loadSource(): Opening TBC source file:" << currentSourceFilename;
 
     // Set up and fire-off background loading thread
     qDebug() << "TbcSource::loadSource(): Setting up background loader thread";
-    connect(&watcher, SIGNAL(finished()), this, SLOT(finishBackgroundLoad()));
+    disconnect(&watcher, &QFutureWatcher<bool>::finished, nullptr, nullptr);
+    connect(&watcher, &QFutureWatcher<bool>::finished, this, &TbcSource::finishBackgroundLoad);
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     future = QtConcurrent::run(this, &TbcSource::startBackgroundLoad, sourceFilename);
 #else
@@ -66,7 +67,23 @@ void TbcSource::loadSource(QString sourceFilename)
 void TbcSource::unloadSource()
 {
     sourceVideo.close();
+    if (sourceMode != ONE_SOURCE) chromaSourceVideo.close();
     resetState();
+}
+
+// Start saving the JSON file for the current source
+void TbcSource::saveSourceJson()
+{
+    // Start a background saving thread
+    qDebug() << "TbcSource::saveSourceJson(): Starting background save thread";
+    disconnect(&watcher, &QFutureWatcher<bool>::finished, nullptr, nullptr);
+    connect(&watcher, &QFutureWatcher<bool>::finished, this, &TbcSource::finishBackgroundSave);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    future = QtConcurrent::run(this, &TbcSource::startBackgroundSave, currentJsonFilename);
+#else
+    future = QtConcurrent::run(&TbcSource::startBackgroundSave, this, currentJsonFilename);
+#endif
+    watcher.setFuture(future);
 }
 
 // Method returns true is a TBC source is loaded
@@ -81,6 +98,12 @@ QString TbcSource::getCurrentSourceFilename()
     if (!sourceReady) return QString();
 
     return currentSourceFilename;
+}
+
+// Return a description of the last IO error
+QString TbcSource::getLastIOError()
+{
+    return lastIOError;
 }
 
 // Method to set the highlight dropouts mode (true = dropouts highlighted)
@@ -123,6 +146,21 @@ bool TbcSource::getChromaDecoder()
 bool TbcSource::getFieldOrder()
 {
     return reverseFoOn;
+}
+
+// Return the source mode
+TbcSource::SourceMode TbcSource::getSourceMode()
+{
+    return sourceMode;
+}
+
+// Set the source mode
+void TbcSource::setSourceMode(TbcSource::SourceMode _sourceMode)
+{
+    if (sourceMode == ONE_SOURCE) return;
+
+    invalidateFrameCache();
+    sourceMode = _sourceMode;
 }
 
 // Load the metadata for a frame
@@ -224,11 +262,18 @@ bool TbcSource::getIsWidescreen()
     return ldDecodeMetaData.getVideoParameters().isWidescreen;
 }
 
-// Method returns true if the TBC source is PAL (false for NTSC)
-bool TbcSource::getIsSourcePal()
+// Return the source's VideoSystem
+VideoSystem TbcSource::getSystem()
 {
-    if (!sourceReady) return false;
-    return ldDecodeMetaData.getVideoParameters().isSourcePal;
+    if (!sourceReady) return NTSC;
+    return ldDecodeMetaData.getVideoParameters().system;
+}
+
+// Return the source's VideoSystem description
+QString TbcSource::getSystemDescription()
+{
+    if (!sourceReady) return "None";
+    return ldDecodeMetaData.getVideoSystemDescription();
 }
 
 // Method to get the frame height in scanlines
@@ -256,21 +301,27 @@ qint32 TbcSource::getFrameWidth()
 }
 
 // Get black SNR data for graphing
-QVector<qreal> TbcSource::getBlackSnrGraphData()
+QVector<double> TbcSource::getBlackSnrGraphData()
 {
     return blackSnrGraphData;
 }
 
 // Get white SNR data for graphing
-QVector<qreal> TbcSource::getWhiteSnrGraphData()
+QVector<double> TbcSource::getWhiteSnrGraphData()
 {
     return whiteSnrGraphData;
 }
 
 // Get dropout data for graphing
-QVector<qreal> TbcSource::getDropOutGraphData()
+QVector<double> TbcSource::getDropOutGraphData()
 {
     return dropoutGraphData;
+}
+
+// Get visible dropout data for graphing
+QVector<double> TbcSource::getVisibleDropOutGraphData()
+{
+    return visibleDropoutGraphData;
 }
 
 // Method to get the size of the graphing data
@@ -290,6 +341,34 @@ bool TbcSource::getIsDropoutPresent()
     return false;
 }
 
+// Get the decoded ComponentFrame for the current frame
+const ComponentFrame &TbcSource::getComponentFrame()
+{
+    // Load and decode SourceFields for the current frame
+    loadInputFields();
+    decodeFrame();
+
+    return componentFrames[0];
+}
+
+// Get the VideoParameters for the current source
+const LdDecodeMetaData::VideoParameters &TbcSource::getVideoParameters()
+{
+    return ldDecodeMetaData.getVideoParameters();
+}
+
+// Update the VideoParameters for the current source
+void TbcSource::setVideoParameters(const LdDecodeMetaData::VideoParameters &videoParameters)
+{
+    invalidateFrameCache();
+
+    // Update the metadata
+    ldDecodeMetaData.setVideoParameters(videoParameters);
+
+    // Reconfigure the chroma decoder
+    configureChromaDecoder();
+}
+
 // Get scan line data from the frame
 TbcSource::ScanLineData TbcSource::getScanLineData(qint32 scanLine)
 {
@@ -298,18 +377,10 @@ TbcSource::ScanLineData TbcSource::getScanLineData(qint32 scanLine)
     ScanLineData scanLineData;
     LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
 
-    // Convert the scan line into field and field line
-    bool isFieldTop = true;
-    qint32 fieldLine = 0;
-
-    if (scanLine % 2 == 0) isFieldTop = false;
-    else isFieldTop = true;
-
-    if (isFieldTop) {
-        fieldLine = (scanLine / 2) + 1;
-    } else {
-        fieldLine = (scanLine / 2);
-    }
+    // Set the system and line number
+    scanLineData.systemDescription = ldDecodeMetaData.getVideoSystemDescription();
+    scanLineData.lineNumber = LineNumber::fromFrame1(scanLine, videoParameters.system);
+    const LineNumber &lineNumber = scanLineData.lineNumber;
 
     // Set the video parameters
     scanLineData.blackIre = videoParameters.black16bIre;
@@ -319,22 +390,17 @@ TbcSource::ScanLineData TbcSource::getScanLineData(qint32 scanLine)
     scanLineData.colourBurstEnd = videoParameters.colourBurstEnd;
     scanLineData.activeVideoStart = videoParameters.activeVideoStart;
     scanLineData.activeVideoEnd = videoParameters.activeVideoEnd;
-    scanLineData.isSourcePal = videoParameters.isSourcePal;
 
     // Is this line part of the active region?
     scanLineData.isActiveLine = (scanLine - 1) >= videoParameters.firstActiveFrameLine
                                 && (scanLine -1) < videoParameters.lastActiveFrameLine;
 
-    // Load and decode SourceFields for the current frame
-    loadInputFields();
-    decodeFrame();
-
     // Get the field video and dropout data
-    const SourceVideo::Data &fieldData = isFieldTop ? inputFields[inputStartIndex].data
-                                                    : inputFields[inputStartIndex + 1].data;
-    const ComponentFrame &componentFrame = componentFrames[0];
-    DropOuts &dropouts = isFieldTop ? firstField.dropOuts
-                                    : secondField.dropOuts;
+    const SourceVideo::Data &fieldData = lineNumber.isFirstField() ? inputFields[inputStartIndex].data
+                                                                   : inputFields[inputStartIndex + 1].data;
+    const ComponentFrame &componentFrame = getComponentFrame();
+    DropOuts &dropouts = lineNumber.isFirstField() ? firstField.dropOuts
+                                                   : secondField.dropOuts;
 
     scanLineData.composite.resize(videoParameters.fieldWidth);
     scanLineData.luma.resize(videoParameters.fieldWidth);
@@ -342,14 +408,14 @@ TbcSource::ScanLineData TbcSource::getScanLineData(qint32 scanLine)
 
     for (qint32 xPosition = 0; xPosition < videoParameters.fieldWidth; xPosition++) {
         // Get the 16-bit composite value for the current pixel (frame data is numbered 0-624 or 0-524)
-        scanLineData.composite[xPosition] = fieldData[((fieldLine - 1) * videoParameters.fieldWidth) + xPosition];
+        scanLineData.composite[xPosition] = fieldData[(lineNumber.field0() * videoParameters.fieldWidth) + xPosition];
 
         // Get the decoded luma value for the current pixel (only computed in the active region)
         scanLineData.luma[xPosition] = static_cast<qint32>(componentFrame.y(scanLine - 1)[xPosition]);
 
         scanLineData.isDropout[xPosition] = false;
         for (qint32 doCount = 0; doCount < dropouts.size(); doCount++) {
-            if (dropouts.fieldLine(doCount) == fieldLine) {
+            if (dropouts.fieldLine(doCount) == lineNumber.field1()) {
                 if (xPosition >= dropouts.startx(doCount) && xPosition <= dropouts.endx(doCount)) scanLineData.isDropout[xPosition] = true;
             }
         }
@@ -378,6 +444,26 @@ bool TbcSource::getIsFrameVbiValid()
     return true;
 }
 
+// Method to return the decoded VITC data for the frame
+VitcDecoder::Vitc TbcSource::getFrameVitc()
+{
+    if (loadedFrameNumber == -1) return VitcDecoder::Vitc();
+
+    const VideoSystem system = ldDecodeMetaData.getVideoParameters().system;
+    if (firstField.vitc.inUse) return vitcDecoder.decode(firstField.vitc.vitcData, system);
+    if (secondField.vitc.inUse) return vitcDecoder.decode(secondField.vitc.vitcData, system);
+
+    return VitcDecoder::Vitc();
+}
+
+// Method returns true if the VITC is valid for the frame
+bool TbcSource::getIsFrameVitcValid()
+{
+    if (loadedFrameNumber == -1) return false;
+
+    return firstField.vitc.inUse || secondField.vitc.inUse;
+}
+
 // Method to get the field number of the first field of the frame
 qint32 TbcSource::getFirstFieldNumber()
 {
@@ -396,16 +482,16 @@ qint32 TbcSource::getCcData0()
 {
     if (loadedFrameNumber == -1) return 0;
 
-    if (firstField.ntsc.ccData0 != -1) return firstField.ntsc.ccData0;
-    return secondField.ntsc.ccData0;
+    if (firstField.closedCaption.data0 != -1) return firstField.closedCaption.data0;
+    return secondField.closedCaption.data0;
 }
 
 qint32 TbcSource::getCcData1()
 {
     if (loadedFrameNumber == -1) return 0;
 
-    if (firstField.ntsc.ccData1 != -1) return firstField.ntsc.ccData1;
-    return secondField.ntsc.ccData1;
+    if (firstField.closedCaption.data1 != -1) return firstField.closedCaption.data1;
+    return secondField.closedCaption.data1;
 }
 
 void TbcSource::setChromaConfiguration(const PalColour::Configuration &_palConfiguration,
@@ -418,17 +504,7 @@ void TbcSource::setChromaConfiguration(const PalColour::Configuration &_palConfi
     ntscConfiguration = _ntscConfiguration;
     outputConfiguration = _outputConfiguration;
 
-    // Configure the chroma decoder
-    LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
-    if (videoParameters.isSourcePal) {
-        palColour.updateConfiguration(videoParameters, palConfiguration);
-    } else {
-        ntscColour.updateConfiguration(videoParameters, ntscConfiguration);
-    }
-
-    // Configure the OutputWriter.
-    // Because we have padding disabled, this won't change the VideoParameters.
-    outputWriter.updateConfiguration(videoParameters, outputConfiguration);
+    configureChromaDecoder();
 }
 
 const PalColour::Configuration &TbcSource::getPalConfiguration()
@@ -501,6 +577,7 @@ void TbcSource::resetState()
     dropoutsOn = false;
     reverseFoOn = false;
     sourceReady = false;
+    sourceMode = ONE_SOURCE;
 
     // Cache state
     loadedFrameNumber = -1;
@@ -519,6 +596,22 @@ void TbcSource::invalidateFrameCache()
     frameCacheValid = false;
 }
 
+// Configure the chroma decoder for its settings and the VideoParameters
+void TbcSource::configureChromaDecoder()
+{
+    // Configure the chroma decoder
+    LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
+    if (videoParameters.system == PAL || videoParameters.system == PAL_M) {
+        palColour.updateConfiguration(videoParameters, palConfiguration);
+    } else {
+        ntscColour.updateConfiguration(videoParameters, ntscConfiguration);
+    }
+
+    // Configure the OutputWriter.
+    // Because we have padding disabled, this won't change the VideoParameters.
+    outputWriter.updateConfiguration(videoParameters, outputConfiguration);
+}
+
 // Ensure the SourceFields for the current frame are loaded
 void TbcSource::loadInputFields()
 {
@@ -526,7 +619,7 @@ void TbcSource::loadInputFields()
 
     // Work out how many frames ahead/behind we need to fetch
     qint32 lookBehind, lookAhead;
-    if (getIsSourcePal()) {
+    if (getSystem() == PAL || getSystem() == PAL_M) {
         lookBehind = palConfiguration.getLookBehind();
         lookAhead = palConfiguration.getLookAhead();
     } else {
@@ -534,10 +627,38 @@ void TbcSource::loadInputFields()
         lookAhead = ntscConfiguration.getLookAhead();
     }
 
-    // Fetch the input fields and metadata
-    SourceField::loadFields(sourceVideo, ldDecodeMetaData,
-                            loadedFrameNumber, 1, lookBehind, lookAhead,
-                            inputFields, inputStartIndex, inputEndIndex);
+    if (sourceMode == CHROMA_SOURCE) {
+        // Load chroma directly into inputFields
+        SourceField::loadFields(chromaSourceVideo, ldDecodeMetaData,
+                                loadedFrameNumber, 1, lookBehind, lookAhead,
+                                inputFields, inputStartIndex, inputEndIndex);
+    } else {
+        // Load the only source, or luma, into inputFields
+        SourceField::loadFields(sourceVideo, ldDecodeMetaData,
+                                loadedFrameNumber, 1, lookBehind, lookAhead,
+                                inputFields, inputStartIndex, inputEndIndex);
+    }
+
+    if (sourceMode == BOTH_SOURCES) {
+        // Load chroma into chromaInputFields
+        SourceField::loadFields(chromaSourceVideo, ldDecodeMetaData,
+                                loadedFrameNumber, 1, lookBehind, lookAhead,
+                                chromaInputFields, inputStartIndex, inputEndIndex);
+
+        // Separate chroma is offset (see chroma_to_u16 in vhsdecode/chroma.py)
+        static constexpr qint32 CHROMA_OFFSET = 32767;
+
+        // Add chroma to luma, removing the offset
+        for (qint32 fieldIndex = inputStartIndex; fieldIndex < inputEndIndex; fieldIndex++) {
+            auto &sourceData = inputFields[fieldIndex].data;
+            const auto &chromaData = chromaInputFields[fieldIndex].data;
+
+            for (qint32 i = 0; i < sourceData.size(); i++) {
+                qint32 sum = static_cast<qint32>(sourceData[i]) + static_cast<qint32>(chromaData[i]) - CHROMA_OFFSET;
+                sourceData[i] = static_cast<quint16>(qBound(0, sum, 65535));
+            }
+        }
+    }
 
     inputFieldsValid = true;
 }
@@ -551,7 +672,7 @@ void TbcSource::decodeFrame()
 
     // Decode the current frame to components
     componentFrames.resize(1);
-    if (getIsSourcePal()) {
+    if (getSystem() == PAL || getSystem() == PAL_M) {
         // PAL source
         palColour.decodeFrames(inputFields, inputStartIndex, inputEndIndex, componentFrames);
     } else {
@@ -646,10 +767,12 @@ QImage TbcSource::generateQImage()
 void TbcSource::generateData()
 {
     dropoutGraphData.clear();
+    visibleDropoutGraphData.clear();
     blackSnrGraphData.clear();
     whiteSnrGraphData.clear();
 
     dropoutGraphData.resize(ldDecodeMetaData.getNumberOfFrames());
+    visibleDropoutGraphData.resize(ldDecodeMetaData.getNumberOfFrames());
     blackSnrGraphData.resize(ldDecodeMetaData.getNumberOfFrames());
     whiteSnrGraphData.resize(ldDecodeMetaData.getNumberOfFrames());
 
@@ -660,23 +783,24 @@ void TbcSource::generateData()
 
     const qint32 numFrames = ldDecodeMetaData.getNumberOfFrames();
     for (qint32 frameNumber = 0; frameNumber < numFrames; frameNumber++) {
-        qreal doLength = 0;
-        qreal blackSnrTotal = 0;
-        qreal whiteSnrTotal = 0;
+        double doLength = 0;
+        double visibleDoLength = 0;
+        double blackSnrTotal = 0;
+        double whiteSnrTotal = 0;
 
         // SNR data may be missing in some fields, so we count the points to prevent
         // the frame average from being thrown-off by missing data
-        qreal blackSnrPoints = 0;
-        qreal whiteSnrPoints = 0;
+        double blackSnrPoints = 0;
+        double whiteSnrPoints = 0;
 
-        LdDecodeMetaData::Field firstField = ldDecodeMetaData.getField(ldDecodeMetaData.getFirstFieldNumber(frameNumber + 1));
-        LdDecodeMetaData::Field secondField = ldDecodeMetaData.getField(ldDecodeMetaData.getSecondFieldNumber(frameNumber + 1));
+        const LdDecodeMetaData::Field &firstField = ldDecodeMetaData.getField(ldDecodeMetaData.getFirstFieldNumber(frameNumber + 1));
+        const LdDecodeMetaData::Field &secondField = ldDecodeMetaData.getField(ldDecodeMetaData.getSecondFieldNumber(frameNumber + 1));
 
         // Get the first field DOs
         if (firstField.dropOuts.size() > 0) {
             // Calculate the total length of the dropouts
             for (qint32 i = 0; i < firstField.dropOuts.size(); i++) {
-                doLength += firstField.dropOuts.endx(i) - firstField.dropOuts.startx(i);
+                doLength += static_cast<double>(firstField.dropOuts.endx(i) - firstField.dropOuts.startx(i));
             }
         }
 
@@ -684,7 +808,47 @@ void TbcSource::generateData()
         if (secondField.dropOuts.size() > 0) {
             // Calculate the total length of the dropouts
             for (qint32 i = 0; i < secondField.dropOuts.size(); i++) {
-                doLength += secondField.dropOuts.endx(i) - secondField.dropOuts.startx(i);
+                doLength += static_cast<double>(secondField.dropOuts.endx(i) - secondField.dropOuts.startx(i));
+            }
+        }
+
+        // Get the first field visible DOs
+        const LdDecodeMetaData::VideoParameters &videoParameters = ldDecodeMetaData.getVideoParameters();
+
+        if (firstField.dropOuts.size() > 0) {
+            // Calculate the total length of the visible dropouts
+            for (qint32 i = 0; i < firstField.dropOuts.size(); i++) {
+                // Does the drop out start in the visible area?
+                if ((firstField.dropOuts.fieldLine(i) >= videoParameters.firstActiveFieldLine) &&
+                    (firstField.dropOuts.fieldLine(i) <= videoParameters.lastActiveFieldLine)) {
+                    if (firstField.dropOuts.startx(i) >= videoParameters.activeVideoStart) {
+                        qint32 startx = firstField.dropOuts.startx(i);
+                        qint32 endx;
+                        if (firstField.dropOuts.endx(i) < videoParameters.activeVideoEnd) endx = firstField.dropOuts.endx(i);
+                        else endx = videoParameters.activeVideoEnd;
+
+                        visibleDoLength += static_cast<double>(endx - startx);
+                    }
+                }
+            }
+        }
+
+        // Get the second field visible DOs
+        if (secondField.dropOuts.size() > 0) {
+            // Calculate the total length of the visible dropouts
+            for (qint32 i = 0; i < secondField.dropOuts.size(); i++) {
+                // Does the drop out start in the visible area?
+                if ((secondField.dropOuts.fieldLine(i) >= videoParameters.firstActiveFieldLine) &&
+                    (secondField.dropOuts.fieldLine(i) <= videoParameters.lastActiveFieldLine)) {
+                    if (secondField.dropOuts.startx(i) >= videoParameters.activeVideoStart) {
+                        qint32 startx = secondField.dropOuts.startx(i);
+                        qint32 endx;
+                        if (secondField.dropOuts.endx(i) < videoParameters.activeVideoEnd) endx = secondField.dropOuts.endx(i);
+                        else endx = videoParameters.activeVideoEnd;
+
+                        visibleDoLength += static_cast<double>(endx - startx);
+                    }
+                }
             }
         }
 
@@ -714,6 +878,7 @@ void TbcSource::generateData()
 
         // Add the result to the vectors
         dropoutGraphData[frameNumber] = doLength;
+        visibleDropoutGraphData[frameNumber] = visibleDoLength;
         blackSnrGraphData[frameNumber] = blackSnrTotal / blackSnrPoints; // Calc average for frame
         whiteSnrGraphData[frameNumber] = whiteSnrTotal / whiteSnrPoints; // Calc average for frame
 
@@ -740,21 +905,29 @@ void TbcSource::generateData()
     }
 }
 
-void TbcSource::startBackgroundLoad(QString sourceFilename)
+bool TbcSource::startBackgroundLoad(QString sourceFilename)
 {
     // Open the TBC metadata file
     qDebug() << "TbcSource::startBackgroundLoad(): Processing JSON metadata...";
-    emit busyLoading("Processing JSON metadata...");
+    emit busy("Processing JSON metadata...");
 
     QString jsonFileName = sourceFilename + ".json";
 
-    const bool chroma_tbc = sourceFilename.endsWith("_chroma.tbc");
+    const bool isChromaTbc = sourceFilename.endsWith("_chroma.tbc");
+    if (isChromaTbc && !QFileInfo::exists(jsonFileName)) {
+        // The user specified a _chroma.tbc file, and it doesn't have a .json.
 
-    // If we are trying to open a _chroma tbc from vhs-decode.
-    // Try to look for the json for the luma part if the chroma doesn't have it's own.
-    if (!QFileInfo::exists(jsonFileName) && chroma_tbc) {
-        jsonFileName.chop(16);
-        jsonFileName += ".tbc.json";
+        // The corresponding luma file should have a .json, so use that.
+        QString baseFilename = sourceFilename;
+        baseFilename.chop(11);
+        jsonFileName = baseFilename + ".tbc.json";
+
+        // But does the luma file itself exist?
+        QString lumaFilename = baseFilename + ".tbc";
+        if (QFileInfo::exists(lumaFilename)) {
+            // Yes. Open both of them, defaulting to the chroma view.
+            sourceFilename = lumaFilename;
+        }
     }
 
     if (!ldDecodeMetaData.read(jsonFileName)) {
@@ -762,50 +935,126 @@ void TbcSource::startBackgroundLoad(QString sourceFilename)
         qWarning() << "Open TBC JSON metadata failed for filename" << sourceFilename;
         currentSourceFilename.clear();
 
-        // Show an error to the user
-        lastLoadError = "Could not open TBC JSON metadata file for the TBC input file!";
-    } else {
-        // Get the video parameters from the metadata
-        LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
-
-        // Open the new source video
-        qDebug() << "TbcSource::startBackgroundLoad(): Loading TBC file...";
-        emit busyLoading("Loading TBC file...");
-        if (!sourceVideo.open(sourceFilename, videoParameters.fieldWidth * videoParameters.fieldHeight)) {
-            // Open failed
-            qWarning() << "Open TBC file failed for filename" << sourceFilename;
-            currentSourceFilename.clear();
-
-            // Show an error to the user
-            lastLoadError = "Could not open TBC data file!";
-        } else {
-            // Both the video and metadata files are now open
-            sourceReady = true;
-            currentSourceFilename = sourceFilename;
-        }
+        // Show an error to the user and give up
+        lastIOError = "Could not load source TBC JSON metadata file";
+        return false;
     }
 
-    // Get the video parameters
+    // Get the video parameters from the metadata
     LdDecodeMetaData::VideoParameters videoParameters = ldDecodeMetaData.getVideoParameters();
 
+    // Open the new source video
+    qDebug() << "TbcSource::startBackgroundLoad(): Loading TBC file...";
+    emit busy("Loading TBC file...");
+    if (!sourceVideo.open(sourceFilename, videoParameters.fieldWidth * videoParameters.fieldHeight)) {
+        // Open failed
+        qWarning() << "Open TBC file failed for filename" << sourceFilename;
+        currentSourceFilename.clear();
+
+        // Show an error to the user and give up
+        lastIOError = "Could not open source TBC data file";
+        return false;
+    }
+
+    // Is there a separate _chroma.tbc file?
+    QString chromaSourceFilename = sourceFilename;
+    chromaSourceFilename.chop(4);
+    chromaSourceFilename += "_chroma.tbc";
+    if (QFileInfo::exists(chromaSourceFilename)) {
+        // Yes! Open it.
+        qDebug() << "TbcSource::startBackgroundLoad(): Loading chroma TBC file...";
+        emit busy("Loading chroma TBC file...");
+        if (!chromaSourceVideo.open(chromaSourceFilename, videoParameters.fieldWidth * videoParameters.fieldHeight)) {
+            // Open failed
+            qWarning() << "Open chroma TBC file failed for filename" << chromaSourceFilename;
+            currentSourceFilename.clear();
+            sourceVideo.close();
+
+            // Show an error to the user and give up
+            lastIOError = "Could not open source chroma TBC data file";
+            return false;
+        }
+
+        sourceMode = isChromaTbc ? CHROMA_SOURCE : BOTH_SOURCES;
+    }
+
+    // Both the video and metadata files are now open
+    sourceReady = true;
+    currentSourceFilename = sourceFilename;
+    currentJsonFilename = jsonFileName;
+
     // Configure the chroma decoder
-    if (getIsSourcePal()) {
+    if (videoParameters.system == PAL || videoParameters.system == PAL_M) {
         palColour.updateConfiguration(videoParameters, palConfiguration);
     } else {
-        // Enable this option by default if we are loading a vhs-decode chroma only tbc file.
-        if(chroma_tbc) {
+        if (isChromaTbc || sourceMode != ONE_SOURCE) {
+            // Enable phase compensation by default, since this is probably a videotape source
             ntscConfiguration.phaseCompensation = true;
         }
         ntscColour.updateConfiguration(videoParameters, ntscConfiguration);
     }
 
     // Analyse the metadata
-    emit busyLoading("Generating graph data and chapter map...");
+    emit busy("Generating graph data and chapter map...");
     generateData();
+
+    return true;
 }
 
 void TbcSource::finishBackgroundLoad()
 {
     // Send a finished loading message to the main window
-    emit finishedLoading();
+    emit finishedLoading(future.result());
+}
+
+bool TbcSource::startBackgroundSave(QString jsonFilename)
+{
+    qDebug() << "TbcSource::startBackgroundSave(): Saving to" << jsonFilename;
+    emit busy("Saving JSON metadata...");
+
+    // The general idea here is that decoding takes a long time -- so we want
+    // to be careful not to destroy the user's only copy of their JSON file if
+    // something goes wrong!
+
+    // Write the metadata out to a new temporary file
+    QString newJsonFilename = jsonFilename + ".new";
+    if (!ldDecodeMetaData.write(newJsonFilename)) {
+        // Writing failed
+        lastIOError = "Could not write to new JSON file";
+        return false;
+    }
+
+    // If there isn't already a .bup backup file, rename the existing file to that name
+    // (matching the behaviour of ld-process-vbi)
+    QString backupFilename = jsonFilename + ".bup";
+    if (!QFile::exists(backupFilename)) {
+        if (!QFile::rename(jsonFilename, jsonFilename + ".bup")) {
+            // Renaming failed
+            lastIOError = "Could not rename existing JSON file to backup";
+            return false;
+        }
+    } else {
+        // There is a backup, so it's safe to remove the existing file
+        if (!QFile::remove(jsonFilename)) {
+            // Deleting failed
+            lastIOError = "Could not remove existing JSON file";
+            return false;
+        }
+    }
+
+    // Rename the new file to the target name
+    if (!QFile::rename(newJsonFilename, jsonFilename)) {
+        // Renaming failed
+        lastIOError = "Could not rename new JSON file to target name";
+        return false;
+    }
+
+    qDebug() << "TbcSource::startBackgroundSave(): Save complete";
+    return true;
+}
+
+void TbcSource::finishBackgroundSave()
+{
+    // Send a finished saving message to the main window
+    emit finishedSaving(future.result());
 }

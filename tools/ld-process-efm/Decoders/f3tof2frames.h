@@ -3,7 +3,7 @@
     f3tof2frames.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 #include "Datatypes/f3frame.h"
 #include "Datatypes/f2frame.h"
@@ -59,9 +60,9 @@ public:
         qint32 preempFrames;
     };
 
-    QVector<F2Frame> process(QVector<F3Frame> f3FramesIn, bool debugState, bool noTimeStamp);
-    Statistics getStatistics();
-    void reportStatistics();
+    const std::vector<F2Frame> &process(const std::vector<F3Frame> &f3FramesIn, bool debugState, bool noTimeStamp);
+    const Statistics &getStatistics();
+    void reportStatistics() const;
     void reset();
 
 private:
@@ -74,9 +75,10 @@ private:
     C2Circ c2Circ;
     C2Deinterleave c2Deinterleave;
 
-    QVector<F2Frame> f2FrameBuffer;
-    QVector<Section> sectionBuffer;
-    QVector<TrackTime> sectionDiscTimes;
+    std::vector<F2Frame> f2FrameBuffer;
+    std::vector<F2Frame> f2FramesOut;
+    std::vector<Section> sectionBuffer;
+    std::vector<TrackTime> sectionDiscTimes;
 
     bool initialDiscTimeSet;
     TrackTime lastDiscTime;

@@ -38,7 +38,7 @@ class FMDeEmphasisB:
     Deemphasis using a low-shelf filter.
     """
 
-    def __init__(self, fs, dBgain, mid_point):
+    def __init__(self, fs, dBgain, mid_point, Q=1 / 2):
         #        print("corner freq", corner_freq)
         #        self.ataps, self.btaps = bq.shelf((corner_freq) / (fs / 2), 14 ,
         #                                          btype="high", ftype="inner", analog=False, output="ba")
@@ -51,7 +51,7 @@ class FMDeEmphasisB:
         # We want to generate this based on time constant and 'X' value
         # currently we use the mid frequency and a gain to get the correct shape
         # with eyeballed mid value. Q=1/2 seems to give the corret slope.
-        self.ataps, self.btaps = gen_high_shelf(mid_point, dBgain, 1 / 2, fs)
+        self.ataps, self.btaps = gen_high_shelf(mid_point, dBgain, Q, fs)
 
     def get(self):
         return self.btaps, self.ataps

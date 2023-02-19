@@ -50,6 +50,7 @@ def auto_chop(data):
 
 def fft_plot(data, samp_rate, f_limit, title="FFT"):
     import matplotlib.pyplot as plt
+
     fft = np.fft.fft(data)
     power = np.abs(fft) ** 2
     sample_freq = np.fft.fftfreq(len(data), d=1.0 / samp_rate)
@@ -62,12 +63,12 @@ def fft_plot(data, samp_rate, f_limit, title="FFT"):
 # simple scope plot
 def plot_scope(data, title="plot", ylabel="", xlabel="t (samples)"):
     import matplotlib.pyplot as plt
+
     fig, ax1 = plt.subplots()
     plt.title(title)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.grid(which="both", axis="both")
-    ax2 = ax1.twinx()
     ax1.plot(data, color="#FF0000")
     plt.show()
 
@@ -77,6 +78,7 @@ def dualplot_scope(
     ch0, ch1, title="dual plot", xlabel="t (samples)", a_label="ch0", b_label="ch1"
 ):
     import matplotlib.pyplot as plt
+
     fig, ax1 = plt.subplots()
     plt.title(title)
     plt.xlabel(xlabel)
@@ -90,6 +92,7 @@ def dualplot_scope(
 
 def plot_image(data):
     import matplotlib.pyplot as plt
+
     plt.imshow(data, cmap="hot", clim=(0, 1.0))
     plt.show()
 
@@ -105,13 +108,33 @@ def pad_or_truncate(data, filler):
     return data
 
 
+@njit(cache=True)
 def moving_average(data_list, window=1024):
-    average = np.mean(data_list)
 
+    # TODO(oln): Should this maybe be done first?
     if len(data_list) >= window:
         data_list = data_list[-window:]
 
+    average = np.mean(data_list)
+
     return average, data_list
+
+
+# This converts a regular B, A filter to an FFT of our selected block length
+# if Whole is false, output only up to and including the nyquist frequency (for use with rfft)
+def filtfft(filt, blocklen, whole=True):
+    # worN = blocklen if whole else (blocklen // 2) + 1
+    worN = blocklen
+    output_size = blocklen if whole else (blocklen // 2) + 1
+
+    # When not calculating the whole spectrum,
+    # we still need to include the nyquist value here to give the same result as with
+    # the whole freq range output.
+    # This requires scipy 1.5.0 or newer.
+    # return signal.freqz(filt[0], filt[1], worN, whole=whole, include_nyquist=True)[1]
+
+    # Using the old way for now.
+    return signal.freqz(filt[0], filt[1], worN, whole=True)[1][:output_size]
 
 
 def design_filter(samp_rate, passband, stopband, order_limit=20):
@@ -157,36 +180,16 @@ def filter_plot(iir_b, iir_a, samp_rate, type, title, xlim=0):
     )
     fig = plt.figure()
     plt.semilogx(w, 20 * np.log10(abs(h)))
-    ax1 = fig.add_subplot()
+    _ = fig.add_subplot()
     plt.ylim([-42, 3])
     plt.title("Butterworth IIR %s fit to\n%s" % (type, title))
     plt.xlabel("Frequency [Hz]")
     plt.ylabel("Amplitude [dB]")
     plt.grid(which="both", axis="both")
-    ax2 = ax1.twinx()
     angles = np.unwrap(np.angle(h))
     plt.plot(w, angles, "g")
     plt.ylabel("Angle [degrees]", color="g")
     plt.show()
-
-
-# assembles the current filter design on a pipe-able filter
-class FiltersClass:
-    def __init__(self, iir_b, iir_a, samp_rate):
-        self.iir_b, self.iir_a = iir_b, iir_a
-        self.z = signal.lfilter_zi(self.iir_b, self.iir_a)
-        self.samp_rate = samp_rate
-
-    def rate(self):
-        return self.samp_rate
-
-    def filtfilt(self, data):
-        output = signal.filtfilt(self.iir_b, self.iir_a, data)
-        return output
-
-    def lfilt(self, data):
-        output, self.z = signal.lfilter(self.iir_b, self.iir_a, data, zi=self.z)
-        return output
 
 
 # stacks and returns the moving average of the last window_average elements

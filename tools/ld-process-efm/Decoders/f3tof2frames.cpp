@@ -3,7 +3,7 @@
     f3tof2frames.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -32,13 +32,15 @@ F3ToF2Frames::F3ToF2Frames()
 
 // Public methods -----------------------------------------------------------------------------------------------------
 
-QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugState, bool noTimeStamp)
+const std::vector<F2Frame> &F3ToF2Frames::process(const std::vector<F3Frame> &f3FramesIn, bool debugState, bool noTimeStamp)
 {
     debugOn = debugState;
-    QVector<F2Frame> f2FramesOut;
+
+    // Clear the output buffer
+    f2FramesOut.clear();
 
     // Make sure there is something to process
-    if (f3FramesIn.isEmpty()) return f2FramesOut;
+    if (f3FramesIn.empty()) return f2FramesOut;
 
     // Ensure that the upstream is providing only complete sections of
     // 98 frames... otherwise we have an upstream bug.
@@ -48,24 +50,17 @@ QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
         // return f2FramesOut;
     }
 
-    // Process the incoming F3 Frames
-    while (!f3FramesIn.isEmpty()) {
-        // Input data must be available in sections of 98 F3 frames, synchronised with a section
-        // read in the 98 F3 Frames
-        F3Frame f3FrameBuffer[98];
-        F3Frame f3Frame;
+    // Process the incoming F3 Frames.
+    // Input data must be available in sections of 98 F3 frames, synchronised with a section.
+    const qint32 numInputFrames = static_cast<qint32>(f3FramesIn.size());
+    for (qint32 inputIndex = 0; inputIndex < numInputFrames; inputIndex += 98) {
+        statistics.totalF3Frames += 98;
+
+        // Collect the 98 subcode data symbols
         uchar sectionData[98];
         for (qint32 i = 0; i < 98; i++) {
-            // Get the incoming F3 frame and place it in the F3 frame buffer
-            f3FrameBuffer[i] = f3FramesIn[i];
-            statistics.totalF3Frames++;
-
-            // Collect the 98 subcode data symbols
-            sectionData[i] = f3FrameBuffer[i].getSubcodeSymbol();
+            sectionData[i] = f3FramesIn[inputIndex + i].getSubcodeSymbol();
         }
-
-        // Remove the consumed F3 frames from the input buffer
-        f3FramesIn.remove(0, 98);
 
         // Process the subcode data into a section
         Section section;
@@ -181,13 +176,13 @@ QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
             statistics.currentDiscTime = currentDiscTime;
 
             // Add the new section to our section buffer
-            sectionBuffer.append(section);
-            sectionDiscTimes.append(currentDiscTime);
+            sectionBuffer.push_back(section);
+            sectionDiscTimes.push_back(currentDiscTime);
 
             // Process the F3 frames into F2 frames (payload data)
             for (qint32 i = 0; i < 98; i++) {
                 // Process C1 CIRC
-                c1Circ.pushF3Frame(f3FrameBuffer[i]);
+                c1Circ.pushF3Frame(f3FramesIn[inputIndex + i]);
 
                 // If we have C1 results, process C2
                 if (c1Circ.getDataSymbols() != nullptr) {
@@ -246,7 +241,7 @@ QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
                             }
 
                             // Add the F2 frame to our output buffer
-                            f2FrameBuffer.append(newF2Frame);
+                            f2FrameBuffer.push_back(newF2Frame);
 
                         }
                     }
@@ -254,12 +249,12 @@ QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
 
                 // If we have 98 F2 frames, move them to the output buffer
                 if (f2FrameBuffer.size() == 98) {
-                    for (qint32 i = 0; i < 98; i++) f2FramesOut.append(f2FrameBuffer[i]);
+                    f2FramesOut.insert(f2FramesOut.end(), f2FrameBuffer.begin(), f2FrameBuffer.end());
                     statistics.totalF2Frames += 98;
                     f2FrameBuffer.clear();
 
-                    sectionBuffer.removeFirst();
-                    sectionDiscTimes.removeFirst();
+                    sectionBuffer.erase(sectionBuffer.begin());
+                    sectionDiscTimes.erase(sectionDiscTimes.begin());
                 }
             }
         }
@@ -269,7 +264,7 @@ QVector<F2Frame> F3ToF2Frames::process(QVector<F3Frame> f3FramesIn, bool debugSt
 }
 
 // Get method - retrieve statistics
-F3ToF2Frames::Statistics F3ToF2Frames::getStatistics()
+const F3ToF2Frames::Statistics &F3ToF2Frames::getStatistics()
 {
     // Ensure sub-class statistics are updated
     statistics.c1Circ_statistics = c1Circ.getStatistics();
@@ -280,7 +275,7 @@ F3ToF2Frames::Statistics F3ToF2Frames::getStatistics()
 }
 
 // Method to report decoding statistics to qInfo
-void F3ToF2Frames::reportStatistics()
+void F3ToF2Frames::reportStatistics() const
 {
     qInfo() << "";
     qInfo() << "F3 Frame to F2 Frame decode:";

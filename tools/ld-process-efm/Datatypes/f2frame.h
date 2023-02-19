@@ -3,7 +3,7 @@
     f2frame.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -36,18 +36,18 @@ class F2Frame
 public:
     F2Frame();
 
-    void setData(uchar *dataParam, uchar *erasuresParam);
-    uchar* getDataSymbols();
-    bool isFrameCorrupt();
+    void setData(const uchar *dataParam, const uchar *erasuresParam);
+    const uchar *getDataSymbols() const;
+    bool isFrameCorrupt() const;
 
     void setDiscTime(TrackTime _discTime);
     void setTrackTime(TrackTime _trackTime);
-    TrackTime getDiscTime();
-    TrackTime getTrackTime();
+    TrackTime getDiscTime() const;
+    TrackTime getTrackTime() const;
     void setTrackNumber(qint32 _trackNumber);
-    qint32 getTrackNumber();
+    qint32 getTrackNumber() const;
     void setIsEncoderRunning(bool _isEncoderRunning);
-    bool getIsEncoderRunning();
+    bool getIsEncoderRunning() const;
 
 private:
     uchar dataSymbols[24];

@@ -189,23 +189,10 @@ Nnrc = 16
 hp_nrc_filter = sps.firwin(Nnrc + 1, 0.4 / (freq / 2.0), window='hamming', pass_zero=False)
 WriteFilter("nrc", hp_nrc_filter)
 
-Ncolorlp = 8 
-colorwlpi_filter = sps.firwin(Ncolorlp + 1, [1.3 / (freq4 / 1)], window='hamming')
-colorwlpq_filter = sps.firwin(Ncolorlp + 1, [0.6 / (freq4 / 1)], window='hamming')
-
-#Ncolorlp = 16
-#colorwlpi_filter = sps.firwin(Ncolorlp + 1, [1.6 / (freq4 / 2)], window='hamming')
-#colorwlpq_filter = sps.firwin(Ncolorlp + 1, [0.55 / (freq4 / 2)], window='hamming')
-
-#WriteFilter("colorlpi", colorwlpi_filter)
-#WriteFilter("colorlpq", colorwlpq_filter)
-
-i_filter_b, i_filter_a = sps.butter(1, (1.3/(freq4/2)), 'low')
-q_filter_b, q_filter_a = sps.butter(1, (0.6/(freq4/2)), 'low')
-WriteFilter("colorlpi", i_filter_b, i_filter_a)
-WriteFilter("colorlpq", q_filter_b, q_filter_a)
-print("const int f_colorlpi_offset = 2;")
-print("const int f_colorlpq_offset = 2;")
+# Post-filter for decoding NTSC, used for both I and Q.
+# The shape is based on the PAL post-filters.
+colorlp = sps.remez(17, [0.0, 1.3, 3.8, freq4/2], [1.0, 0.0], [1.0, 1.0], fs=freq4)
+WriteFilter("colorlp", colorlp)
 
 Ncolorbp4 = 8
 colorbp4_filter = sps.firwin(Ncolorbp4 + 1, [3.4006 / (freq / 2), 3.7585 / (freq / 2)], window='hamming', pass_zero=False)

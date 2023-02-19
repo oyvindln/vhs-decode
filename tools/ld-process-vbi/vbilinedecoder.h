@@ -32,9 +32,6 @@
 
 #include "lddecodemetadata.h"
 #include "sourcevideo.h"
-#include "fmcode.h"
-#include "whiteflag.h"
-#include "closedcaption.h"
 
 class DecoderPool;
 
@@ -44,9 +41,9 @@ class VbiLineDecoder : public QThread {
 public:
     explicit VbiLineDecoder(QAtomicInt& _abort, DecoderPool& _decoderPool, QObject *parent = nullptr);
 
-    // The range of field lines needed from the input file (inclusive)
-    static constexpr qint32 startFieldLine = 10;
-    static constexpr qint32 endFieldLine = 21;
+    // The range of field lines needed from the input file (1-based, inclusive)
+    static constexpr qint32 startFieldLine = 6;
+    static constexpr qint32 endFieldLine = 22;
 
 protected:
     void run() override;
@@ -56,14 +53,8 @@ private:
     QAtomicInt& abort;
     DecoderPool& decoderPool;
 
-    // Temporary output buffer
-    LdDecodeMetaData::Field outputData;
-
-    SourceVideo::Data getActiveVideoLine(const SourceVideo::Data& sourceFrame, qint32 scanLine,
-                                         LdDecodeMetaData::VideoParameters videoParameters);
-    qint32 manchesterDecoder(const SourceVideo::Data& lineData, qint32 zcPoint,
-                             LdDecodeMetaData::VideoParameters videoParameters);
-    QVector<bool> getTransitionMap(const SourceVideo::Data& lineData, qint32 zcPoint);
+    SourceVideo::Data getFieldLine(const SourceVideo::Data& sourceField, qint32 fieldLine,
+                                   const LdDecodeMetaData::VideoParameters& videoParameters);
 };
 
 #endif // VBILINEDECODER_H

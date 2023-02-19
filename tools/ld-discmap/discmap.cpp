@@ -3,7 +3,7 @@
     discmap.cpp
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -24,8 +24,8 @@
 
 #include "discmap.h"
 
-DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrder,
-                 const bool &noStrict)
+DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool reverseFieldOrder,
+                 const bool noStrict)
             : m_metadataFileInfo(metadataFileInfo), m_reverseFieldOrder(reverseFieldOrder),
               m_noStrict(noStrict)
 {
@@ -53,7 +53,7 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
         return;
     }
 
-    if (m_numberOfFrames > 100000) {
+    if (m_numberOfFrames > 108000) {
         qDebug() << "JSON metadata contains" << m_numberOfFrames << "frames - too big";
         m_tbcValid = false;
         return;
@@ -76,8 +76,8 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
         m_frames[frameNumber].secondField(ldDecodeMetaData->getSecondFieldNumber(frameNumber + 1));
 
         // Get the VBI data and then decode (frames are indexed from 1)
-        QVector<qint32> vbi1 = ldDecodeMetaData->getFieldVbi(ldDecodeMetaData->getFirstFieldNumber(frameNumber + 1)).vbiData;
-        QVector<qint32> vbi2 = ldDecodeMetaData->getFieldVbi(ldDecodeMetaData->getSecondFieldNumber(frameNumber + 1)).vbiData;
+        auto vbi1 = ldDecodeMetaData->getFieldVbi(ldDecodeMetaData->getFirstFieldNumber(frameNumber + 1)).vbiData;
+        auto vbi2 = ldDecodeMetaData->getFieldVbi(ldDecodeMetaData->getSecondFieldNumber(frameNumber + 1)).vbiData;
         vbiData[frameNumber] = vbiDecoder.decodeFrame(vbi1[0], vbi1[1], vbi1[2], vbi2[0], vbi2[1], vbi2[2]);
 
         if (vbiData[frameNumber].leadIn || vbiData[frameNumber].leadOut) m_frames[frameNumber].isLeadInOrOut(true);
@@ -85,8 +85,13 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
     }
 
     // Get the source format (PAL/NTSC)
-    if (ldDecodeMetaData->getVideoParameters().isSourcePal) m_isDiscPal = true;
-    else m_isDiscPal = false;
+    m_videoSystemDescription = ldDecodeMetaData->getVideoSystemDescription();
+    if (ldDecodeMetaData->getVideoParameters().system == PAL) m_isDiscPal = true;
+    else if (ldDecodeMetaData->getVideoParameters().system == NTSC) m_isDiscPal = false;
+    else {
+        qDebug() << "Input TBC video system" << m_videoSystemDescription << "is not supported";
+        qCritical("Video system must be PAL or NTSC");
+    }
 
     // Set the audio field length
     if (m_isDiscPal) {
@@ -132,9 +137,11 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
     // Determine disc type
     if (cavCount > clvCount) {
         m_isDiscCav = true;
+        m_discType = "CAV";
         qDebug() << "Got" << cavCount << "valid CAV picture numbers from" << framesToCheck << "frames - source disc type is CAV";
     } else {
         m_isDiscCav = false;
+        m_discType = "CLV";
         qDebug() << "Got" << clvCount << "valid CLV picture numbers from" << framesToCheck << "frames - source disc type is CLV";
     }
 
@@ -283,7 +290,7 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
     for (qint32 frameNumber = 0; frameNumber < m_numberOfFrames; frameNumber++) {
         // If the frame following the current one has a lower VBI number, give the current
         // frame a quality penalty as the likelyhood the player skipped is higher
-        qreal penaltyPercent = 0;
+        double penaltyPercent = 0;
         if (frameNumber < m_numberOfFrames - 1) {
             if (vbiData[frameNumber + 1].picNo < vbiData[frameNumber].picNo) penaltyPercent = 80.0;
             else penaltyPercent = 100.0;
@@ -291,13 +298,13 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
 
         // Add the Black SNR to the quality value
         // Get the average bPSNR for both fields
-        qreal bsnr = (ldDecodeMetaData->getFieldVitsMetrics(ldDecodeMetaData->getFirstFieldNumber(frameNumber + 1)).bPSNR +
+        double bsnr = (ldDecodeMetaData->getFieldVitsMetrics(ldDecodeMetaData->getFirstFieldNumber(frameNumber + 1)).bPSNR +
                 ldDecodeMetaData->getFieldVitsMetrics(ldDecodeMetaData->getSecondFieldNumber(frameNumber + 1)).bPSNR) / 2.0;
 
         // Convert logarithmic to linear and then into percentage
-        qreal blackSnrLinear = pow(bsnr / 20, 10);
-        qreal snrReferenceLinear = pow(43.0 / 20, 10); // Note: 43 dB is the expected maximum
-        qreal bsnrPercent = (100.0 / snrReferenceLinear) * blackSnrLinear;
+        double blackSnrLinear = pow(bsnr / 20, 10);
+        double snrReferenceLinear = pow(43.0 / 20, 10); // Note: 43 dB is the expected maximum
+        double bsnrPercent = (100.0 / snrReferenceLinear) * blackSnrLinear;
         if (bsnrPercent > 100.0) bsnrPercent = 100.0;
 
         // Calculate the cumulative length of all the dropouts in the frame (by summing both fields)
@@ -314,13 +321,13 @@ DiscMap::DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrde
             frameDoLength += dropOuts2.endx(i) - dropOuts2.startx(i);
         }
 
-        qreal frameDoPercent = 100.0 - (static_cast<qreal>(frameDoLength) / static_cast<qreal>(totalDotsInFrame));
+        double frameDoPercent = 100.0 - (static_cast<double>(frameDoLength) / static_cast<double>(totalDotsInFrame));
 
         // Include the sync confidence in the quality value (this is 100% where each measurement is 50% of the total)
         qint32 syncConfPercent = (ldDecodeMetaData->getField(ldDecodeMetaData->getFirstFieldNumber(frameNumber + 1)).syncConf +
                                   ldDecodeMetaData->getField(ldDecodeMetaData->getSecondFieldNumber(frameNumber + 1)).syncConf) / 2;
 
-        m_frames[frameNumber].frameQuality((bsnrPercent + penaltyPercent + static_cast<qreal>(syncConfPercent) + (frameDoPercent * 1000.0)) / 1004.0);
+        m_frames[frameNumber].frameQuality((bsnrPercent + penaltyPercent + static_cast<double>(syncConfPercent) + (frameDoPercent * 1000.0)) / 1004.0);
         //qDebug() << "Frame:" << frameNumber << bsnrPercent << penaltyPercent << syncConfPercent << frameDoPercent << "quality =" << m_frames[frameNumber].frameQuality();
     }
 
@@ -383,21 +390,13 @@ bool DiscMap::isDiscPal() const
 // Method to return the disc type as a string
 QString DiscMap::discType() const
 {
-    QString discType;
-    if (m_isDiscCav) discType = "CAV";
-    else discType = "CLV";
-
-    return discType;
+    return m_discType;
 }
 
 // Method to return the disc format as a string
 QString DiscMap::discFormat() const
 {
-    QString discFormat;
-    if (m_isDiscPal) discFormat = "PAL";
-    else discFormat = "NTSC";
-
-    return discFormat;
+    return m_videoSystemDescription;
 }
 
 // Method to return the VBI frame number
@@ -467,7 +466,7 @@ bool DiscMap::isLeadInOut(qint32 frameNumber) const
 }
 
 // Get the frame quality
-qreal DiscMap::frameQuality(qint32 frameNumber) const
+double DiscMap::frameQuality(qint32 frameNumber) const
 {
     if (frameNumber < 0 || frameNumber >= m_numberOfFrames) {
         qDebug() << "frameQuality out of frameNumber range";
@@ -631,6 +630,7 @@ bool DiscMap::isNtscAmendment2ClvFrameNumber(qint32 frameNumber)
 // disc map must be sorted afterwards.
 void DiscMap::addPadding(qint32 startFrame, qint32 numberOfFrames)
 {
+    m_frames.reserve(m_frames.size() + numberOfFrames);
     qint32 currentVbi = m_frames[startFrame].vbiFrameNumber() + 1;
     for (qint32 i = 0; i < numberOfFrames; i++) {
         Frame paddingFrame;
@@ -638,7 +638,7 @@ void DiscMap::addPadding(qint32 startFrame, qint32 numberOfFrames)
         paddingFrame.seqFrameNumber(-1);
         paddingFrame.isPadded(true);
 
-        m_frames.append(paddingFrame);
+        m_frames.push_back(paddingFrame);
     }
 
     m_numberOfFrames = m_frames.size();
@@ -735,7 +735,7 @@ qint32 DiscMap::getSecondFieldAudioDataLength(qint32 frameNumber) const
         qDebug() << "getSecondFieldAudioDataLength out of frameNumber range";
         return false;
     }
-    return ldDecodeMetaData->getFieldPcmAudioLength(m_frames[frameNumber].firstField());
+    return ldDecodeMetaData->getFieldPcmAudioLength(m_frames[frameNumber].secondField());
 }
 
 // Save the target metadata from the disc map
@@ -779,7 +779,6 @@ bool DiscMap::saveTargetMetadata(QFileInfo outputFileInfo)
                 // inserted into VBI lines 17 and 18 of the first field
                 if (!firstSourceMetadata.vbi.inUse) {
                     firstSourceMetadata.vbi.inUse = true;
-                    firstSourceMetadata.vbi.vbiData.resize(3);
                     firstSourceMetadata.vbi.vbiData[0] = 0;
                 }
 
@@ -801,7 +800,6 @@ bool DiscMap::saveTargetMetadata(QFileInfo outputFileInfo)
                 // Disc is CLV - add a timecode
                 if (!firstSourceMetadata.vbi.inUse) {
                     firstSourceMetadata.vbi.inUse = true;
-                    firstSourceMetadata.vbi.vbiData.resize(3);
                 }
                 firstSourceMetadata.vbi.vbiData[0] = convertFrameToClvPicNo(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.vbi.vbiData[1] = convertFrameToClvTimeCode(m_frames[frameNumber].vbiFrameNumber());
@@ -827,14 +825,12 @@ bool DiscMap::saveTargetMetadata(QFileInfo outputFileInfo)
             if (m_isDiscCav) {
                 // CAV
                 firstSourceMetadata.vbi.inUse = true;
-                firstSourceMetadata.vbi.vbiData.resize(3);
                 firstSourceMetadata.vbi.vbiData[0] = 0;
                 firstSourceMetadata.vbi.vbiData[1] = convertFrameToVbi(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.vbi.vbiData[2] = convertFrameToVbi(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.audioSamples = m_audioFieldSampleLength;
 
                 secondSourceMetadata.vbi.inUse = true;
-                secondSourceMetadata.vbi.vbiData.resize(3);
                 secondSourceMetadata.vbi.vbiData[0] = 0;
                 secondSourceMetadata.vbi.vbiData[1] = 0;
                 secondSourceMetadata.vbi.vbiData[2] = 0;
@@ -842,14 +838,12 @@ bool DiscMap::saveTargetMetadata(QFileInfo outputFileInfo)
             } else {
                 // CLV
                 firstSourceMetadata.vbi.inUse = true;
-                firstSourceMetadata.vbi.vbiData.resize(3);
                 firstSourceMetadata.vbi.vbiData[0] = convertFrameToClvPicNo(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.vbi.vbiData[1] = convertFrameToClvTimeCode(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.vbi.vbiData[2] = convertFrameToClvTimeCode(m_frames[frameNumber].vbiFrameNumber());
                 firstSourceMetadata.audioSamples = m_audioFieldSampleLength;
 
                 secondSourceMetadata.vbi.inUse = true;
-                secondSourceMetadata.vbi.vbiData.resize(3);
                 secondSourceMetadata.vbi.vbiData[0] = 0;
                 secondSourceMetadata.vbi.vbiData[1] = 0;
                 secondSourceMetadata.vbi.vbiData[2] = 0;

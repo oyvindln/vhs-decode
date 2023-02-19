@@ -42,15 +42,6 @@
     site (http://www.jim-easterbrook.me.uk/pal/).
  */
 
-// Definitions of static constexpr data members, for compatibility with
-// pre-C++17 compilers
-constexpr qint32 TransformPal2D::YTILE;
-constexpr qint32 TransformPal2D::HALFYTILE;
-constexpr qint32 TransformPal2D::XTILE;
-constexpr qint32 TransformPal2D::HALFXTILE;
-constexpr qint32 TransformPal2D::YCOMPLEX;
-constexpr qint32 TransformPal2D::XCOMPLEX;
-
 // Compute one value of the window function, applied to the data blocks before
 // the FFT to reduce edge effects. This is a symmetrical raised-cosine
 // function, which means that the overlapping inverse-FFT blocks can be summed
@@ -142,12 +133,8 @@ void TransformPal2D::filterField(const SourceField& inputField, qint32 outputInd
             // Compute the forward FFT
             forwardFFTTile(tileX, tileY, startY, endY, inputField);
 
-            // Apply the frequency-domain filter in the appropriate mode
-            if (mode == levelMode) {
-                applyFilter<levelMode>();
-            } else {
-                applyFilter<thresholdMode>();
-            }
+            // Apply the frequency-domain filter
+            applyFilter();
 
             // Compute the inverse FFT
             inverseFFTTile(tileX, tileY, startY, endY, outputIndex);
@@ -207,8 +194,6 @@ static inline double fftwAbsSq(const fftw_complex &value)
 }
 
 // Apply the frequency-domain filter.
-// (Templated so that the inner loop gets specialised for each mode.)
-template <TransformPal::TransformMode MODE>
 void TransformPal2D::applyFilter()
 {
     // Get pointer to squared threshold values
@@ -270,37 +255,17 @@ void TransformPal2D::applyFilter()
             const double m_in_sq = fftwAbsSq(in_val);
             const double m_ref_sq = fftwAbsSq(ref_val);
 
-            if (MODE == levelMode) {
-                // Compare the magnitudes of the two values, and scale the
-                // larger one down so its magnitude is the same as the
-                // smaller one.
-                const double factor = sqrt(m_in_sq / m_ref_sq);
-                if (m_in_sq > m_ref_sq) {
-                    // Reduce in_val, keep ref_val as is
-                    bo[x][0] = in_val[0] / factor;
-                    bo[x][1] = in_val[1] / factor;
-                    bo_ref[x_ref][0] = ref_val[0];
-                    bo_ref[x_ref][1] = ref_val[1];
-                } else {
-                    // Reduce ref_val, keep in_val as is
-                    bo[x][0] = in_val[0];
-                    bo[x][1] = in_val[1];
-                    bo_ref[x_ref][0] = ref_val[0] * factor;
-                    bo_ref[x_ref][1] = ref_val[1] * factor;
-                }
+            // Compare the magnitudes of the two values, and discard both
+            // if they are more different than the threshold for this
+            // bin.
+            if (m_in_sq < m_ref_sq * threshold_sq || m_ref_sq < m_in_sq * threshold_sq) {
+                // Probably not a chroma signal; throw it away.
             } else {
-                // Compare the magnitudes of the two values, and discard both
-                // if they are more different than the threshold for this
-                // bin.
-                if (m_in_sq < m_ref_sq * threshold_sq || m_ref_sq < m_in_sq * threshold_sq) {
-                    // Probably not a chroma signal; throw it away.
-                } else {
-                    // They're similar. Keep it!
-                    bo[x][0] = in_val[0];
-                    bo[x][1] = in_val[1];
-                    bo_ref[x_ref][0] = ref_val[0];
-                    bo_ref[x_ref][1] = ref_val[1];
-                }
+                // They're similar. Keep it!
+                bo[x][0] = in_val[0];
+                bo[x][1] = in_val[1];
+                bo_ref[x_ref][0] = ref_val[0];
+                bo_ref[x_ref][1] = ref_val[1];
             }
         }
     }
@@ -329,12 +294,8 @@ void TransformPal2D::overlayFFTFrame(qint32 positionX, qint32 positionY,
     // Compute the forward FFT
     forwardFFTTile(positionX, tileY, startY, endY, inputField);
 
-    // Apply the frequency-domain filter in the appropriate mode
-    if (mode == levelMode) {
-        applyFilter<levelMode>();
-    } else {
-        applyFilter<thresholdMode>();
-    }
+    // Apply the frequency-domain filter
+    applyFilter();
 
     // Create a canvas
     FrameCanvas canvas(componentFrame, videoParameters);

@@ -20,7 +20,7 @@
 
 // 
 // ezpwd::RS<SYMBOLS,PAYLOAD>	-- Implements an RS(SYMBOLS,PAYLOAD) codec
-// ezpwd::RS_CCSDS<...>		-- CCSDS standard 8-bit R-S codec
+// ezpwd::RS_CCSDS<...>		-- CCSDS standard 8-bit R-S codec w/ dual-basis encoding
 // 
 //     Support for Reed-Solomon codecs for symbols of 2 to 16 bits is supported.  The R-S "codeword"
 // for an N-bit symbol is defined to be 2^N-1 symbols in size.  For example, for 5-bit symbols,
@@ -42,20 +42,21 @@ namespace ezpwd {
     // @POLY:		A primitive polynomial appropriate to the SYMBOLS size
     // @FCR:		The first consecutive root of the Reed-Solomon generator polynomial
     // @PRIM:		The primitive root of the generator polynomial
+    // @DUAL:		Assumes user data/parity is Berleskamp dual-basis encoded
     // 
-#   define __RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM )		\
+#   define __RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM, DUAL )	\
 	ezpwd::reed_solomon<						\
 	    TYPE,							\
 	    ezpwd::log_< (SYMBOLS) + 1 >::value,			\
 	    (SYMBOLS) - (PAYLOAD), FCR, PRIM,				\
 	    ezpwd::gfpoly<						\
 		ezpwd::log_< (SYMBOLS) + 1 >::value,			\
-		POLY >>
+		POLY >, DUAL >
 
-#   define __RS( NAME, TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM )	\
-	__RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM ) {		\
+#   define __RS( NAME, TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM, DUAL )	\
+	__RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM, DUAL ) {	\
 	    NAME()							\
-		: __RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM )()	\
+		: __RS_TYP( TYPE, SYMBOLS, PAYLOAD, POLY, FCR, PRIM, DUAL )() \
 	    {;}								\
 	}
 
@@ -71,25 +72,36 @@ namespace ezpwd {
     // default constructor must be provided.
     // 
     template < size_t SYMBOLS, size_t PAYLOAD > struct RS;
-    template < size_t PAYLOAD > struct RS<    3, PAYLOAD> : public __RS( RS, uint8_t,      3, PAYLOAD,     0x7,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<    7, PAYLOAD> : public __RS( RS, uint8_t,      7, PAYLOAD,     0xb,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<   15, PAYLOAD> : public __RS( RS, uint8_t,     15, PAYLOAD,    0x13,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<   31, PAYLOAD> : public __RS( RS, uint8_t,     31, PAYLOAD,    0x25,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<   63, PAYLOAD> : public __RS( RS, uint8_t,     63, PAYLOAD,    0x43,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<  127, PAYLOAD> : public __RS( RS, uint8_t,    127, PAYLOAD,    0x89,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<  255, PAYLOAD> : public __RS( RS, uint8_t,    255, PAYLOAD,   0x11d,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<  511, PAYLOAD> : public __RS( RS, uint16_t,   511, PAYLOAD,   0x211,	 1,  1 );
-    template < size_t PAYLOAD > struct RS< 1023, PAYLOAD> : public __RS( RS, uint16_t,  1023, PAYLOAD,   0x409,	 1,  1 );
-    template < size_t PAYLOAD > struct RS< 2047, PAYLOAD> : public __RS( RS, uint16_t,  2047, PAYLOAD,   0x805,	 1,  1 );
-    template < size_t PAYLOAD > struct RS< 4095, PAYLOAD> : public __RS( RS, uint16_t,  4095, PAYLOAD,  0x1053,	 1,  1 );
-    template < size_t PAYLOAD > struct RS< 8191, PAYLOAD> : public __RS( RS, uint16_t,  8191, PAYLOAD,  0x201b,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<16383, PAYLOAD> : public __RS( RS, uint16_t, 16383, PAYLOAD,  0x4443,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<32767, PAYLOAD> : public __RS( RS, uint16_t, 32767, PAYLOAD,  0x8003,	 1,  1 );
-    template < size_t PAYLOAD > struct RS<65535, PAYLOAD> : public __RS( RS, uint16_t, 65535, PAYLOAD, 0x1100b,	 1,  1 );
-    
-    template < size_t SYMBOLS, size_t PAYLOAD > struct RS_CCSDS;
-    template < size_t PAYLOAD > struct RS_CCSDS<255, PAYLOAD> : public __RS( RS_CCSDS, uint8_t, 255, PAYLOAD, 0x187, 112, 11 );
+    template < size_t PAYLOAD > struct RS<    3, PAYLOAD>: public __RS( RS, uint8_t,      3, PAYLOAD,     0x7,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<    7, PAYLOAD>: public __RS( RS, uint8_t,      7, PAYLOAD,     0xb,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<   15, PAYLOAD>: public __RS( RS, uint8_t,     15, PAYLOAD,    0x13,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<   31, PAYLOAD>: public __RS( RS, uint8_t,     31, PAYLOAD,    0x25,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<   63, PAYLOAD>: public __RS( RS, uint8_t,     63, PAYLOAD,    0x43,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<  127, PAYLOAD>: public __RS( RS, uint8_t,    127, PAYLOAD,    0x89,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<  255, PAYLOAD>: public __RS( RS, uint8_t,    255, PAYLOAD,   0x11d,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<  511, PAYLOAD>: public __RS( RS, uint16_t,   511, PAYLOAD,   0x211,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS< 1023, PAYLOAD>: public __RS( RS, uint16_t,  1023, PAYLOAD,   0x409,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS< 2047, PAYLOAD>: public __RS( RS, uint16_t,  2047, PAYLOAD,   0x805,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS< 4095, PAYLOAD>: public __RS( RS, uint16_t,  4095, PAYLOAD,  0x1053,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS< 8191, PAYLOAD>: public __RS( RS, uint16_t,  8191, PAYLOAD,  0x201b,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<16383, PAYLOAD>: public __RS( RS, uint16_t, 16383, PAYLOAD,  0x4443,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<32767, PAYLOAD>: public __RS( RS, uint16_t, 32767, PAYLOAD,  0x8003,	 1,  1, false );
+    template < size_t PAYLOAD > struct RS<65535, PAYLOAD>: public __RS( RS, uint16_t, 65535, PAYLOAD, 0x1100b,	 1,  1, false );
 
+    // RS_CCSDS... specifies an R-S encoder using the CCSDS polynomial; RS_CCSDS assumes Berlekamp
+    // style dual-basis encoding, while RS_CCSDS_CONV assumes conventional encoding. To match
+    // standard CCSDS encoding, transformational lookup tables (to remove the dual-basis encoding)
+    // are used before encoding on the data and then afterwards on the parity (to return dual-basis
+    // encoded parity).  For decoding, the dual-basis is removed, the data decoded, and then the
+    // corrected data/parity is restored to dual-basis encoding.  This is done automatically.  See
+    // CCSDS 131.0-B-3 Annex F for details.  See also the discussion about the Falcon 9 telemetry at
+    // https://destevez.net/2021/03/decoding-the-falcon-9-upper-stage/, which uses the CCSDS
+    // (255,239) coding w/ 16 parity symbols, 8 symbols of error-correction capacity.
+    // RS_CCSDS... works *only* for PAYLOAD values of 223 and 239.
+    template < size_t SYMBOLS, size_t PAYLOAD > struct RS_CCSDS_CONV;
+    template < size_t PAYLOAD > struct RS_CCSDS_CONV<255, PAYLOAD>: public __RS( RS_CCSDS_CONV, uint8_t, 255, PAYLOAD, 0x187, 128-(255-PAYLOAD)/2, 11, false );
+    template < size_t SYMBOLS, size_t PAYLOAD > struct RS_CCSDS;
+    template < size_t PAYLOAD > struct RS_CCSDS<255, PAYLOAD>: public __RS( RS_CCSDS, uint8_t, 255, PAYLOAD, 0x187, 128-(255-PAYLOAD)/2, 11, true );
 
     // 
     // strength<PARITY>	-- compute strength (given N parity symbols) of R-S correction
@@ -109,11 +121,11 @@ namespace ezpwd {
     // effective strength -- all symbols in the R-S complete codeword are equally effective in
     // recovering any other symbol in error/erasure.
     // 
-    template < size_t PARITY >
+    template < size_t PARITY, typename ERR = unsigned >
     int				strength(
 				    int			corrected,
-				    const std::vector<int>&erasures,	// original erasures positions
-				    const std::vector<int>&positions )	// all reported correction positions
+				    const std::vector<ERR>&erasures,	// original erasures positions
+				    const std::vector<ERR>&positions )	// all reported correction positions
     {
 	// -'ve indicates R-S failure; all parity consumed, but insufficient to correct the R-S
 	// codeword.  Missing an unknown number of additional required parity symbols, so just
@@ -132,12 +144,14 @@ namespace ezpwd {
 	// Any erasures that don't turn out to contain errors are not returned as fixed positions.
 	// However, they have consumed parity resources.  Search for each erasure location in
 	// positions, and if not reflected, add to the corrected/missed counters.
+#if defined( DEBUG ) && DEBUG >= 2
 	int			missed	= 0;
+#endif
 	for ( auto e : erasures ) {
 	    if ( std::find( positions.begin(), positions.end(), e ) == positions.end() ) {
 		++corrected;
-		++missed;
 #if defined( DEBUG ) && DEBUG >= 2
+		++missed;
 		std::cout
 		    << corrected << " corrections (R-S erasure missed): " << e
 		    << std::endl;

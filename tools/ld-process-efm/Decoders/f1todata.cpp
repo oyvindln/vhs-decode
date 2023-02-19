@@ -3,7 +3,7 @@
     f1todata.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -48,23 +48,23 @@ F1ToData::F1ToData()
 // Public methods -----------------------------------------------------------------------------------------------------
 
 // Method to feed the sector processing state-machine with F1 frames
-QByteArray F1ToData::process(QVector<F1Frame> f1FramesIn, bool debugState)
+QByteArray F1ToData::process(const std::vector<F1Frame> &f1FramesIn, bool debugState)
 {
     debugOn = debugState;
 
     // Clear the output buffer
     dataOutputBuffer.clear();
 
-    if (f1FramesIn.isEmpty()) return dataOutputBuffer;
+    if (f1FramesIn.empty()) return dataOutputBuffer;
 
     // Append input data to the processing buffer
-    for (qint32 i = 0; i < f1FramesIn.size(); i++) {
-        f1DataBuffer.append(reinterpret_cast<char*>(f1FramesIn[i].getDataSymbols()), 24);
+    for (const F1Frame &f1Frame: f1FramesIn) {
+        f1DataBuffer.append(reinterpret_cast<const char *>(f1Frame.getDataSymbols()), 24);
 
         // Each validity flag covers 24 bytes of data symbols
         for (qint32 p = 0; p < 24; p++) {
-            f1IsCorruptBuffer.append(f1FramesIn[i].isCorrupt());
-            f1IsMissingBuffer.append(f1FramesIn[i].isMissing());
+            f1IsCorruptBuffer.append(f1Frame.isCorrupt());
+            f1IsMissingBuffer.append(f1Frame.isMissing());
         }
     }
 
@@ -95,13 +95,13 @@ QByteArray F1ToData::process(QVector<F1Frame> f1FramesIn, bool debugState)
 }
 
 // Get method - retrieve statistics
-F1ToData::Statistics F1ToData::getStatistics()
+const F1ToData::Statistics &F1ToData::getStatistics() const
 {
     return statistics;
 }
 
 // Method to report decoding statistics to qInfo
-void F1ToData::reportStatistics()
+void F1ToData::reportStatistics() const
 {
     qInfo()           << "";
     qInfo()           << "F1 Frames to Data:";

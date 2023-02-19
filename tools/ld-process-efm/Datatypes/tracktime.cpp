@@ -3,7 +3,7 @@
     tracktime.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -80,14 +80,14 @@ void TrackTime::subtractFrames(qint32 frames)
 }
 
 // Method to get the difference (in frames) between two track times
-qint32 TrackTime::getDifference(TrackTime::Time timeToCompare)
+qint32 TrackTime::getDifference(TrackTime::Time timeToCompare) const
 {
     qint32 framesToCompare = timeToCompare.frames + (timeToCompare.seconds * 75) + (timeToCompare.minutes * 60 * 75);
     return trackFrames - framesToCompare;
 }
 
 // Method to get the track time
-TrackTime::Time TrackTime::getTime()
+TrackTime::Time TrackTime::getTime() const
 {
     Time time;
 
@@ -102,7 +102,7 @@ TrackTime::Time TrackTime::getTime()
 }
 
 // Method to return the track time as a string
-QString TrackTime::getTimeAsQString()
+QString TrackTime::getTimeAsQString() const
 {
     QString timeString;
 
@@ -114,7 +114,7 @@ QString TrackTime::getTimeAsQString()
 }
 
 // Method to return track time in number of frames
-qint32 TrackTime::getFrames()
+qint32 TrackTime::getFrames() const
 {
     return trackFrames;
 }

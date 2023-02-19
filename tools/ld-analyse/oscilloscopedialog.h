@@ -3,7 +3,7 @@
     oscilloscopedialog.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -47,15 +47,17 @@ public:
     explicit OscilloscopeDialog(QWidget *parent = nullptr);
     ~OscilloscopeDialog();
 
-    void showTraceImage(TbcSource::ScanLineData scanLineData, qint32 scanLine, qint32 pictureDot, qint32 frameHeight);
+    void showTraceImage(TbcSource::ScanLineData scanLineData, qint32 xCoord, qint32 yCoord, qint32 frameWidth, qint32 frameHeight);
 
 signals:
-    void scanLineChanged(qint32 scanLine, qint32 lastScopeDot);
+    void scopeCoordsChanged(qint32 xCoord, qint32 yCoord);
+    void scopeLevelSelect(qint32 value);
 
 private slots:
     void on_previousPushButton_clicked();
     void on_nextPushButton_clicked();
-    void on_scanLineSpinBox_valueChanged(int arg1);
+    void on_xCoordSpinBox_valueChanged(int arg1);
+    void on_yCoordSpinBox_valueChanged(int arg1);
     void on_YCcheckBox_clicked();
     void on_YcheckBox_clicked();
     void on_CcheckBox_clicked();
@@ -66,12 +68,14 @@ private slots:
 
 private:
     Ui::OscilloscopeDialog *ui;
-    qint32 maximumScanLines;
+    qint32 maximumX;
+    qint32 maximumY;
     qint32 scopeWidth;
-    qint32 lastScopeLine;
-    qint32 lastScopeDot;
+    qint32 lastScopeX;
+    qint32 lastScopeY;
 
     QImage getFieldLineTraceImage(TbcSource::ScanLineData scanLineData, qint32 pictureDot);
+    void mouseLevelSelect(qint32 oY);
     void mousePictureDotSelect(qint32 oX);
 };
 

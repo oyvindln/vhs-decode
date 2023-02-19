@@ -3,7 +3,7 @@
     sector.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -30,10 +30,12 @@
 
 // CD-ROM Q and P specific CIRC configuration for Reed-Solomon forward error correction
 template < size_t SYMBOLS, size_t PAYLOAD > struct QRS;
-template < size_t PAYLOAD > struct QRS<255, PAYLOAD> : public __RS(QRS, uint8_t, 255, PAYLOAD, 0x11d, 0,  1);
+template < size_t PAYLOAD > struct QRS<255, PAYLOAD>
+    : public __RS(QRS, uint8_t, 255, PAYLOAD, 0x11d, 0, 1, false);
 
 template < size_t SYMBOLS, size_t PAYLOAD > struct PRS;
-template < size_t PAYLOAD > struct PRS<255, PAYLOAD> : public __RS(PRS, uint8_t, 255, PAYLOAD, 0x11d, 0,  1);
+template < size_t PAYLOAD > struct PRS<255, PAYLOAD>
+    : public __RS(PRS, uint8_t, 255, PAYLOAD, 0x11d, 0, 1, false);
 
 #include "tracktime.h"
 
@@ -44,13 +46,13 @@ public:
     Sector(QByteArray _sectorData, bool _isValid);
 
     void setData(QByteArray _sectorData, bool _isValid);
-    qint32 getMode();
-    TrackTime getAddress();
+    qint32 getMode() const;
+    TrackTime getAddress() const;
     QByteArray getUserData();
     void setAsNull(TrackTime _address);
-    bool isValid();
-    bool isMissing();
-    bool isCorrected();
+    bool isValid() const;
+    bool isMissing() const;
+    bool isCorrected() const;
 
 private:
     // Mode 1 sector fields:
@@ -68,10 +70,10 @@ private:
     void performQParityECC(uchar *uF1Data, uchar *uF1Erasures);
     void performPParityECC(uchar *uF1Data, uchar *uF1Erasures);
 
-    qint32 bcdToInteger(uchar bcd);
-    QString dataToString(QByteArray data);
+    static qint32 bcdToInteger(uchar bcd);
+    static QString dataToString(QByteArray data);
 
-    quint32 crc32(uchar *src, qint32 size);
+    static quint32 crc32(uchar *src, qint32 size);
 };
 
 // This table is the CRC32 look-up for the EDC process.  The table is generated from the

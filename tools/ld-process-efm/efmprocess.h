@@ -3,7 +3,7 @@
     efmprocess.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -25,10 +25,6 @@
 #ifndef EFMPROCESS_H
 #define EFMPROCESS_H
 
-#include <QObject>
-#include <QThread>
-#include <QMutex>
-#include <QWaitCondition>
 #include <QString>
 #include <QFile>
 #include <QDebug>
@@ -40,13 +36,12 @@
 #include "Decoders/f1toaudio.h"
 #include "Decoders/f1todata.h"
 
-class EfmProcess : public QThread
+class EfmProcess
 {
-Q_OBJECT
-
 public:
-    explicit EfmProcess(QObject *parent = nullptr);
-    ~EfmProcess() override;
+    EfmProcess();
+
+    using ErrorTreatment = F1ToAudio::ErrorTreatment;
 
     struct Statistics {
         EfmToF3Frames::Statistics efmToF3Frames;
@@ -60,31 +55,14 @@ public:
     void setDebug(bool _debug_efmToF3Frames, bool _debug_syncF3Frames,
                   bool _debug_f3ToF2Frames, bool _debug_f2ToF1Frames,
                   bool _debug_f1ToAudio, bool _debug_f1ToData);
-    void setAudioErrorTreatment(F1ToAudio::ErrorTreatment _errorTreatment,
-                                            F1ToAudio::ConcealType _concealType);
-    void setDecoderOptions(bool _padInitialDiscTime, bool _decodeAsAudio, bool _decodeAsData, bool _noTimeStamp);
-    void reportStatistics();
-    void startProcessing(QFile *_inputFilename, QFile *_audioOutputFilename, QFile *_dataOutputFilename);
-    void stopProcessing();
-    void quit();
+    void setAudioErrorTreatment(ErrorTreatment _errorTreatment);
+    void setDecoderOptions(bool _padInitialDiscTime, bool _decodeAsData, bool _audioIsDts, bool _noTimeStamp);
+    void reportStatistics() const;
+    bool process(QString inputFilename, QString outputFilename);
     Statistics getStatistics();
     void reset();
 
-signals:
-    void processingComplete(bool audioAvailable, bool dataAvailable);
-    void percentProcessed(qint32 percent);
-
-protected:
-    void run() override;
-
 private:
-    // Thread control
-    QMutex mutex;
-    QWaitCondition condition;
-    bool restart;
-    bool cancel;
-    bool abort;
-
     // Debug
     bool debug_efmToF3Frames;
     bool debug_f3ToF2Frames;
@@ -107,21 +85,10 @@ private:
     bool padInitialDiscTime;
     bool decodeAsAudio;
     bool decodeAsData;
+    bool audioIsDts;
     bool noTimeStamp;
 
     Statistics statistics;
-
-    // Externally settable variables
-    QFile* efmInputFileHandle;
-    QFile* audioOutputFileHandle;
-    QFile* dataOutputFileHandle;
-
-    // Thread-safe variables
-    QFile* efmInputFileHandleTs;
-    QFile* audioOutputFileHandleTs;
-    QFile* dataOutputFileHandleTs;
-
-    QByteArray readEfmData(void);
 };
 
 #endif // EFMPROCESS_H

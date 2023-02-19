@@ -4,30 +4,44 @@ modeselection=0
 comp=true
 uncomp=false
 verify=false
+gpu=false
 fileinput_method=cat
 level=11
 ext=ldf
 
 help_msg () {
-  echo "Usage: $0 [-c] [-u] [-v] [-p] [-h] [-l <1-12>] [-g] file(s)"; printf -- "\nModes:\n-c Compress (default): Takes one or more .lds files and compresses them to .ldf files in the current directory.\n-u Uncompress: Takes one or more .ldf/.raw.oga files and uncompresses them to .lds files in the current directory.\n-v Verify: Returns md5 checksums of the given .ldf/.raw.oga files and their contained .lds files for verification purposes.\n\nOptions\n-p Progress: displays progress bars - requires pv to be installed.\n-h Help: This dialog.\n-l Compression level 1 - 12. Default is 11. 6 is recommended for faster but fair compression.\n-g Use .raw.oga extension instead of .ldf when compressing.\n\n"
+  echo "Usage: $0 [-c] [-a] [-u] [-v] [-p] [-h] [-l <1-12>] [-g] file(s)"; printf -- "\nModes:\n-c Compress (default): Takes one or more .lds files and compresses them to .ldf files in the current directory.\n-u Uncompress: Takes one or more .ldf/.raw.oga files and uncompresses them to .lds files in the current directory.\n-a GPU Acceleration.  Uses OpenCL or CUDA to accelerate encoding. See https://github.com/happycube/ld-decode/wiki/ld-compress\n-v Verify: Returns md5 checksums of the given .ldf/.raw.oga files and their contained .lds files for verification purposes.\nOptions\n-p Progress: displays progress bars - requires pv to be installed.\n-h Help: This dialog.\n-l Compression level 1 - 12 (1 - 11 for GPU encoding). Default is 11 (10 for GPU). 6 is recommended for faster but fair compression.\n-g Use .raw.oga extension instead of .ldf when compressing.\n\n"
 }
 
-while getopts ":hcuvpl:g" option; do
+while getopts ":hcauvpl:g" option; do
   case $option in
     h) help_msg ; exit ;;
     c) comp=true ; modeselection=$((modeselection+1)) ;;
     u) uncomp=true ; comp=false ; modeselection=$((modeselection+1)) ;;
+    a) gpu=true ; comp=false ; level=10 ; modeselection=$((modeselection+1)) ;;
     v) verify=true ; comp=false ; modeselection=$((modeselection+1)) ;;
     p) fileinput_method="pv" ;;
     l)
       level=${OPTARG}
-      if [ $level -gt 0 -a $level -le 12 ]
+      if [[ "$gpu" == true ]]
       then
-        >&2 echo "Compression level: $level"
+        if [ $level -gt 0 -a $level -le 11 ]
+        then
+          >&2 echo "Compression level: $level"
+        else
+          help_msg
+          >&2 echo "Error: invalid compression level: $level."
+          exit
+        fi
       else
+          if [ $level -gt 0 -a $level -le 12 ]
+          then
+          >&2 echo "Compression level: $level"
+        else
         help_msg
         >&2 echo "Error: invalid compression level: $level."
         exit
+        fi
       fi
       ;;
     g) ext=raw.oga ;;
@@ -61,7 +75,23 @@ else
         fi
       done
     fi
-    if [[ "$uncomp" == true ]] # Perfom uncompression
+    if [[ "$gpu" == true ]] # Perform GPU accelerated compression
+    then
+      for f in "$@" ; do
+        if [[ "$f" == *.lds ]]
+        then
+                    if [ ! -f "$(basename "$f" .lds).flac.ldf" ]
+          then
+           >&2 echo Compressing \'"$f"\' to \'"$(basename "$f" .lds).flac.ldf"\' && ${fileinput_method} "$f" | ld-lds-converter -r -u |  flaldf - --ignore-chunk-sizes -q -"$level" --lax -o "$(basename "$f" .lds).flac.ldf" && >&2 echo \'"$(basename "$f" .lds).flac.ldf"\' written. || echo Error: Please see the ld-decode wiki to troubleshoot https://github.com/happycube/ld-decode/wiki/ld-compress
+           else
+           >&2 echo File "$(basename "$f" .lds).flac.ldf" already exists. Skipping.
+           fi
+          else
+           >&2 echo Error: \'"$f"\' does not appear to be a .lds file. Skipping.
+        fi
+      done
+    fi
+    if [[ "$uncomp" == true ]] # Perform uncompression
     then
       for f in "$@" ; do
         if [[ "$f" == *.raw.oga || "$f" == *.ldf ]]
@@ -79,7 +109,7 @@ else
       if [[ "$f" == *.raw.oga || "$f" == *.ldf ]]
       then
         sleep 1 # Give any previous iteration a second to output.
-        >&2 echo "Performing checksum of" \'"$f"\': && ${fileinput_method} "$f" | tee >(openssl dgst -md5 | echo $(awk '{print $2}') " $f") >(ffmpeg -hide_banner -loglevel error -f ogg -i - -f s16le -c:a pcm_s16le - | ld-lds-converter -p | openssl dgst -md5 | echo $(awk '{print $2}') " $(basename "${f%.raw.oga}" .ldf).lds") > /dev/null
+        >&2 echo "Performing checksum of" \'"$f"\': && ${fileinput_method} "$f" | tee >(openssl dgst -md5 -binary | xxd -p | echo $(awk '{print}') " $f") >(ffmpeg -hide_banner -loglevel error -i - -f s16le -c:a pcm_s16le - | ld-lds-converter -p | openssl dgst -md5 -binary | xxd -p | echo $(awk '{print}') " $(basename "${f%.raw.oga}" .ldf).lds") > /dev/null
       else
         sleep 1
         >&2 echo Error: \'"$f"\' does not appear to be a .raw.oga/.ldf file. Skipping.

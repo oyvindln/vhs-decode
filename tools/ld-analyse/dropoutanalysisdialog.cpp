@@ -3,7 +3,7 @@
     dropoutanalysisdialog.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -52,7 +52,15 @@ DropoutAnalysisDialog::DropoutAnalysisDialog(QWidget *parent) :
     numberOfFrames = 0;
 
     // Connect to scale changed slot
-    connect(((QObject*)plot->axisWidget(QwtPlot::xBottom)) , SIGNAL(scaleDivChanged () ), this, SLOT(scaleDivChangedSlot () ));
+#ifdef Q_OS_WIN32
+    // Workaround for linker issue with Qwt on windows
+    connect(
+        plot->axisWidget(QwtPlot::xBottom), SIGNAL( scaleDivChanged() ),
+        this, SLOT( scaleDivChangedSlot() )
+    );
+#else
+    connect(plot->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged, this, &DropoutAnalysisDialog::scaleDivChangedSlot);
+#endif
 }
 
 DropoutAnalysisDialog::~DropoutAnalysisDialog()
@@ -78,9 +86,9 @@ void DropoutAnalysisDialog::removeChartContents()
 }
 
 // Add a data point to the chart
-void DropoutAnalysisDialog::addDataPoint(qint32 frameNumber, qreal doLength)
+void DropoutAnalysisDialog::addDataPoint(qint32 frameNumber, double doLength)
 {
-    points->append(QPointF(frameNumber, doLength));
+    points->append(QPointF(static_cast<qreal>(frameNumber), static_cast<qreal>(doLength)));
 
     // Keep track of the maximum Y value
     if (doLength > maxY) maxY = doLength;

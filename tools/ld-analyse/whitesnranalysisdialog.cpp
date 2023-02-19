@@ -3,7 +3,7 @@
     whitesnranalysisdialog.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -54,7 +54,15 @@ WhiteSnrAnalysisDialog::WhiteSnrAnalysisDialog(QWidget *parent) :
     numberOfFrames = 0;
 
     // Connect to scale changed slot
-    connect(((QObject*)plot->axisWidget(QwtPlot::xBottom)) , SIGNAL(scaleDivChanged () ), this, SLOT(scaleDivChangedSlot () ));
+#ifdef Q_OS_WIN32
+    // Workaround for linker issue with Qwt on windows
+    connect(
+        plot->axisWidget(QwtPlot::xBottom), SIGNAL( scaleDivChanged() ),
+        this, SLOT( scaleDivChangedSlot() )
+    );
+#else
+    connect(plot->axisWidget(QwtPlot::xBottom), &QwtScaleWidget::scaleDivChanged, this, &WhiteSnrAnalysisDialog::scaleDivChangedSlot);
+#endif
 }
 
 WhiteSnrAnalysisDialog::~WhiteSnrAnalysisDialog()
@@ -68,7 +76,7 @@ void WhiteSnrAnalysisDialog::startUpdate(qint32 _numberOfFrames)
 {
     removeChartContents();
     numberOfFrames = _numberOfFrames;
-    tlPoint.resize(numberOfFrames);
+    tlPoint.resize(numberOfFrames + 1);
     whitePoints->reserve(numberOfFrames);
 }
 
@@ -83,10 +91,10 @@ void WhiteSnrAnalysisDialog::removeChartContents()
 }
 
 // Add a data point to the chart
-void WhiteSnrAnalysisDialog::addDataPoint(qint32 frameNumber, qreal whiteSnr)
+void WhiteSnrAnalysisDialog::addDataPoint(qint32 frameNumber, double whiteSnr)
 {
-    if (!std::isnan(static_cast<float>(whiteSnr))) {
-        whitePoints->append(QPointF(frameNumber, whiteSnr));
+    if (!std::isnan(whiteSnr)) {
+        whitePoints->append(QPointF(static_cast<qreal>(frameNumber), static_cast<qreal>(whiteSnr)));
         if (whiteSnr > maxY) maxY = ceil(whiteSnr); // Round up
 
         // Add to trendline data

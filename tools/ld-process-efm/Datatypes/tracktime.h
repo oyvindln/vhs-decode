@@ -3,7 +3,7 @@
     tracktime.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -48,10 +48,10 @@ public:
     bool setTime(TrackTime::Time timeParam);
     void addFrames(qint32 frames);
     void subtractFrames(qint32 frames);
-    qint32 getDifference(TrackTime::Time timeToCompare);
-    Time getTime();
-    QString getTimeAsQString();
-    qint32 getFrames();
+    qint32 getDifference(TrackTime::Time timeToCompare) const;
+    Time getTime() const;
+    QString getTimeAsQString() const;
+    qint32 getFrames() const;
 
 private:
     qint32 trackFrames;

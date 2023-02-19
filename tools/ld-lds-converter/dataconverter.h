@@ -33,7 +33,7 @@ class DataConverter : public QObject
 {
     Q_OBJECT
 public:
-    explicit DataConverter(QString inputFileNameParam, QString outputFileNameParam, bool isPackingParam, QObject *parent = nullptr);
+    explicit DataConverter(QString inputFileNameParam, QString outputFileNameParam, bool isPackingParam, bool isRIFFParam, QObject *parent = nullptr);
     bool process(void);
 
 signals:
@@ -44,6 +44,7 @@ private:
     QString inputFileName;
     QString outputFileName;
     bool isPacking;
+    bool isRIFF;
 
     QFile *inputFileHandle;
     QFile *outputFileHandle;

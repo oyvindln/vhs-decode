@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+from vhsdecode.main import main
+
+
+if __name__ == "__main__":
+    main(use_gui=True)
+

@@ -3,7 +3,7 @@
     f2frame.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -35,7 +35,7 @@ F2Frame::F2Frame()
     trackNumber = 0;
 }
 
-void F2Frame::setData(uchar* dataParam, uchar* erasuresParam)
+void F2Frame::setData(const uchar *dataParam, const uchar *erasuresParam)
 {
     errorState = false;
 
@@ -47,14 +47,14 @@ void F2Frame::setData(uchar* dataParam, uchar* erasuresParam)
 }
 
 // This method returns the 24 data symbols for the F2 Frame
-uchar *F2Frame::getDataSymbols()
+const uchar *F2Frame::getDataSymbols() const
 {
     return dataSymbols;
 }
 
 // This method returns true if the data in the F2 Frame
 // is marked with erasures (i.e. it's corrupt)
-bool F2Frame::isFrameCorrupt()
+bool F2Frame::isFrameCorrupt() const
 {
     return errorState;
 }
@@ -71,12 +71,12 @@ void F2Frame::setTrackTime(TrackTime _trackTime)
     trackTime = _trackTime;
 }
 
-TrackTime F2Frame::getDiscTime()
+TrackTime F2Frame::getDiscTime() const
 {
     return discTime;
 }
 
-TrackTime F2Frame::getTrackTime()
+TrackTime F2Frame::getTrackTime() const
 {
     return trackTime;
 }
@@ -86,7 +86,7 @@ void F2Frame::setTrackNumber(qint32 _trackNumber)
     trackNumber = _trackNumber;
 }
 
-qint32 F2Frame::getTrackNumber()
+qint32 F2Frame::getTrackNumber() const
 {
     return trackNumber;
 }
@@ -96,7 +96,7 @@ void F2Frame::setIsEncoderRunning(bool _isEncoderRunning)
     isEncoderRunning = _isEncoderRunning;
 }
 
-bool F2Frame::getIsEncoderRunning()
+bool F2Frame::getIsEncoderRunning() const
 {
     return isEncoderRunning;
 }

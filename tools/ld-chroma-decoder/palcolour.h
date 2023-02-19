@@ -28,9 +28,9 @@
 
 #include <QtGlobal>
 #include <QDebug>
-#include <QScopedPointer>
 #include <QVector>
 #include <QtMath>
+#include <memory>
 
 #include "lddecodemetadata.h"
 
@@ -60,7 +60,6 @@ public:
         double yNRLevel = 0.5;
         bool simplePAL = false;
         ChromaFilterMode chromaFilter = palColourFilter;
-        TransformPal::TransformMode transformMode = TransformPal::thresholdMode;
         double transformThreshold = 0.4;
         QVector<double> transformThresholds;
         bool showFFTs = false;
@@ -109,7 +108,7 @@ private:
     LdDecodeMetaData::VideoParameters videoParameters;
 
     // Transform PAL filter
-    QScopedPointer<TransformPal> transformPal;
+    std::unique_ptr<TransformPal> transformPal;
 
     // The subcarrier reference signal
     double sine[MAX_WIDTH], cosine[MAX_WIDTH];

@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 #
 # test-decode - run the decoding toolchain against an RF sample
-# Copyright (C) 2019 Adam Sampson
+# Copyright (C) 2019-2022 Adam Sampson
+# Copyright (C) 2022 Chad Page
 #
 # This file is part of ld-decode.
 #
@@ -29,20 +30,27 @@ import subprocess
 import sys
 
 dry_run = False
-src_dir = None
+source_dir = None
+build_dir = None
 
 def die(*args):
     """Print an error message and exit."""
     print(*args, file=sys.stderr)
     sys.exit(1)
 
+def safe_unlink(filename):
+    """Remove a file if it exists; if not, do nothing."""
+
+    try:
+        os.unlink(filename)
+    except FileNotFoundError:
+        pass
+
 def clean(args, suffixes):
     """Remove output files, if they exist."""
+
     for suffix in suffixes:
-        try:
-            os.unlink(args.output + suffix)
-        except FileNotFoundError:
-            pass
+        safe_unlink(args.output + suffix)
 
 def run_command(cmd, **kwopts):
     """Run a command, as with subprocess.call.
@@ -60,28 +68,68 @@ def run_command(cmd, **kwopts):
     if rc != 0:
         die(cmd[0], 'failed with exit code', rc)
 
+def run_ld_cut(args):
+    """Run ld-cut."""
+
+    cutfile = args.output + '.cut.ldf'
+    safe_unlink(cutfile)
+
+    cmd = [source_dir + '/ld-cut']
+    if args.pal:
+        cmd += ['--pal']
+    if args.cutseek is not None:
+        cmd += ['-S', str(args.cutseek)]
+    elif args.cutstart is not None:
+        cmd += ['-s', str(args.cutstart)]
+    else:
+        die(cmd[0], 'internal error: run_ld_cut() run without seek or start points')
+
+    cmd += ['-l', str(args.cutlength)]
+    cmd += [args.infile, cutfile]
+
+    # Set PATH so it can invoke helper programs
+    env = os.environ.copy()
+    env['PATH'] = build_dir + ':' + source_dir + ':' + env['PATH']
+    run_command(cmd, env=env)
+
+    # Use the output as the input for the rest of the decoding process
+    args.infile = cutfile
+
 def run_ld_decode(args):
     """Run ld-decode."""
 
-    clean(args, ['.tbc', '.tbc.json', '.efm', '.pcm'])
+    clean(args, ['.tbc', '.tbc.json', '.efm', '.pcm', '.ac3', '.ac3.log'])
 
-    cmd = [src_dir + '/ld-decode']
+    cmd = [source_dir + '/ld-decode']
     cmd += ['--ignoreleadout']
     if args.pal:
         cmd += ['--pal']
+    if args.AC3:
+        cmd += ['--AC3']
+
     cmd += [args.infile, args.output]
 
     # Set PATH so it can invoke helper programs
     env = os.environ.copy()
-    env['PATH'] = src_dir + ':' + env['PATH']
+    env['PATH'] = build_dir + ':' + source_dir + ':' + env['PATH']
     run_command(cmd, env=env)
+    
+    # If doing AC3, check that there are enough output samples
+    if (args.expect_ac3_bytes is not None) and (not dry_run):
+        ac3_file = args.output + '.ac3'
+        if not os.path.exists(ac3_file):
+            die(ac3_file, 'does not exist')
+        ac3_bytes = os.stat(ac3_file).st_size
+        if ac3_bytes < args.expect_ac3_bytes:
+            die(ac3_file, 'contains', ac3_bytes,
+                'samples; expected at least', args.ac3_bytes)
 
 def run_ld_process_vbi(args):
     """Run ld-process-vbi."""
 
     clean(args, ['.tbc.json.bup'])
 
-    cmd = [src_dir + '/tools/ld-process-vbi/ld-process-vbi']
+    cmd = [build_dir + '/tools/ld-process-vbi/ld-process-vbi']
     cmd += [args.output + '.tbc']
     run_command(cmd)
 
@@ -107,6 +155,11 @@ def run_ld_process_vbi(args):
             die(json_file, 'has median bPSNR', bpsnr, 'dB, expected',
                 args.expect_bpsnr, 'dB')
 
+    # Print VBI data (useful for finding --expect_vbi values)
+    if args.print_vbi:
+        for field in data["fields"]:
+            print("VBI data:", field["vbi"]["vbiData"])
+
     # Check for a field with the expected VBI values
     if args.expect_vbi is not None:
         for field in data["fields"]:
@@ -118,12 +171,29 @@ def run_ld_process_vbi(args):
             die(json_file, 'did not contain a field with VBI values',
                 args.expect_vbi)
 
+    # Print VITC data
+    if args.print_vitc:
+        for field in data["fields"]:
+            if "vitc" in field:
+                print("VITC data:", field["vitc"]["vitcData"])
+
+    # Check for a field with the expected VITC values
+    if args.expect_vitc is not None:
+        for field in data["fields"]:
+            if ("vitc" not in field) or ("vitcData" not in field["vitc"]):
+                pass
+            elif field["vitc"]["vitcData"] == args.expect_vitc:
+                break
+        else:
+            die(json_file, 'did not contain a field with VITC values',
+                args.expect_vitc)
+
 def run_ld_export_metadata(args):
     """Run ld-export-metadata."""
 
     clean(args, ['.vits.csv', '.vbi.csv', '.ffmetadata'])
 
-    cmd = [src_dir + '/tools/ld-export-metadata/ld-export-metadata']
+    cmd = [build_dir + '/tools/ld-export-metadata/ld-export-metadata']
     cmd += ['--vits-csv', args.output + '.vits.csv']
     cmd += ['--vbi-csv', args.output + '.vbi.csv']
     cmd += ['--ffmetadata', args.output + '.ffmetadata']
@@ -148,10 +218,8 @@ def run_ld_process_efm(args):
         if os.stat(efm_file).st_size == 0:
             die(efm_file, 'is empty')
 
-    cmd = [src_dir + '/tools/ld-process-efm/ld-process-efm']
-    # XXX Work around Qt needing a display for this tool
-    cmd += ['-platform', 'offscreen']
-    cmd += ['--noninteractive', efm_file, pcm_file]
+    cmd = [build_dir + '/tools/ld-process-efm/ld-process-efm']
+    cmd += [efm_file, pcm_file]
     run_command(cmd)
 
     # Check there are enough output samples
@@ -168,7 +236,7 @@ def run_ld_dropout_correct(args):
 
     clean(args, ['.doc.tbc', '.doc.tbc.json'])
 
-    cmd = [src_dir + '/tools/ld-dropout-correct/ld-dropout-correct']
+    cmd = [build_dir + '/tools/ld-dropout-correct/ld-dropout-correct']
     cmd += ['--overcorrect', args.output + '.tbc', args.output + '.doc.tbc']
     run_command(cmd)
 
@@ -178,7 +246,7 @@ def run_ld_chroma_decoder(args, decoder):
     clean(args, ['.rgb'])
     rgb_file = args.output + '.rgb'
 
-    cmd = [src_dir + '/tools/ld-chroma-decoder/ld-chroma-decoder']
+    cmd = [build_dir + '/tools/ld-chroma-decoder/ld-chroma-decoder']
     if decoder is not None:
         cmd += ['--decoder', decoder]
     cmd += [args.output + '.doc.tbc', rgb_file]
@@ -197,12 +265,18 @@ def run_ld_chroma_decoder(args, decoder):
             die(rgb_file, 'contains', rgb_frames,
                 'frames; expected at least', args.expect_frames)
 
-def parse_vbi_arg(s):
-    """Parse a VBI triple argument."""
+def parse_list_arg(s, num):
+    """Parse an argument with a comma-separated list of values."""
     values = s.split(",")
-    if len(values) != 3:
-        raise ValueError("VBI argument must have three values")
+    if len(values) != num:
+        raise ValueError(f"Argument must have {num} values")
     return [int(value) for value in values]
+
+def parse_vbi_arg(s):
+    return parse_list_arg(s, 3)
+
+def parse_vitc_arg(s):
+    return parse_list_arg(s, 8)
 
 def main():
     parser = argparse.ArgumentParser(description='Run the decoding toolchain against an RF sample')
@@ -213,13 +287,26 @@ def main():
                        help='base name for output files (default testout/test)')
     group.add_argument('-n', '--dry-run', action='store_true',
                        help='show commands, rather than running them')
+    group.add_argument('--source', metavar='DIR',
+                       help='source tree to test (default same as this script)')
+    group.add_argument('--build', metavar='DIR',
+                       help='build tree to test (default source tree)')
     group.add_argument('--pal', action='store_true',
                        help='source is PAL (default NTSC)')
     group.add_argument('--no-efm', action='store_true', dest='no_efm',
                        help='source has no EFM')
+    group.add_argument('--AC3', action='store_true', dest='AC3',
+                       help='source has AC3 audio')
+    group.add_argument('--cut-seek', dest='cutseek', type=int,
+                       help='start ld-cut by seeking to frame #')
+    group.add_argument('--cut-start', dest='cutstart', type=int,
+                       help='start ld-cut by seeking to frame #')
+    group.add_argument('--cut-length', dest='cutlength', type=int, default = 2,
+                       help='get N frames from ld-cut')
     group.add_argument('--decoder', metavar='decoder', action='append',
                        dest='decoders', default=[],
-                       help='use specific ld-chroma-decoder decoder (use more than once to test multiple decoders)')
+                       help='use specific ld-chroma-decoder decoder '
+                            '(use more than once to test multiple decoders)')
     group = parser.add_argument_group("Sanity checks")
     group.add_argument('--expect-frames', metavar='N', type=int,
                        help='expect at least N frames of video output')
@@ -227,8 +314,16 @@ def main():
                        help='expect median bPSNR of at least DB')
     group.add_argument('--expect-vbi', metavar='N,N,N', type=parse_vbi_arg,
                        help='expect at least one field with VBI values N,N,N')
+    group.add_argument('--print-vbi', action='store_true',
+                       help='Print VBI values (to find out what to pass into expect-vbi)')
+    group.add_argument('--expect-vitc', metavar='N,N,N,N,N,N,N,N', type=parse_vitc_arg,
+                       help='expect at least one field with VITC values N,N,N,N,N,N,N,N')
+    group.add_argument('--print-vitc', action='store_true',
+                       help='Print VITC values (to find out what to pass into expect-vitc)')
     group.add_argument('--expect-efm-samples', metavar='N', type=int,
                        help='expect at least N stereo pairs of samples in EFM output')
+    group.add_argument('--expect-AC3-file-size', dest='expect_ac3_bytes', metavar='N', type=int,
+                       help='expect at least N bytes in EFM output')
     args = parser.parse_args()
 
     global dry_run
@@ -236,11 +331,21 @@ def main():
     if args.decoders == []:
         args.decoders = [None]
 
+    if args.infile.startswith("testdata/") and not os.path.exists(args.infile):
+        print('Input file', args.infile, 'not present, skipping test')
+        return
+
     # Find the top-level source directory
     prog_path = os.path.realpath(sys.argv[0])
-    global src_dir
-    src_dir = os.path.dirname(os.path.dirname(prog_path))
-    print('Decoding', args.infile, 'using tools from', src_dir, file=sys.stderr)
+    global source_dir, build_dir
+    source_dir = os.path.dirname(os.path.dirname(prog_path))
+    if args.source:
+        source_dir = args.source
+    build_dir = source_dir
+    if args.build:
+        build_dir = args.build
+
+    print('Decoding', args.infile, 'using tools from', build_dir, file=sys.stderr)
 
     # Remove display environment variables, as the decoding tools shouldn't
     # depend on having a display
@@ -253,6 +358,11 @@ def main():
     if output_dir != '':
         os.makedirs(output_dir, exist_ok=True)
 
+    # Produce a trimmed input file using ld-cut, if requested
+    orig_infile = args.infile
+    if args.cutseek is not None or args.cutstart is not None:
+        run_ld_cut(args)
+
     # Run the stages of the decoding toolchain
     run_ld_decode(args)
     run_ld_process_vbi(args)
@@ -261,6 +371,8 @@ def main():
     run_ld_dropout_correct(args)
     for decoder in args.decoders:
         run_ld_chroma_decoder(args, decoder)
+
+    print('\nDecoding', orig_infile, 'completed successfully')
 
 if __name__ == '__main__':
     main()

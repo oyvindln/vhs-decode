@@ -50,7 +50,7 @@ public:
 
     // Output settings
     struct Configuration {
-        bool usePadding = true;
+        qint32 paddingAmount = 8;
         PixelFormat pixelFormat = RGB48;
         bool outputY4m = false;
     };

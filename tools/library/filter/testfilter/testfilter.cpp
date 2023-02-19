@@ -120,13 +120,9 @@ void testIIRFilter(const char *name, FN& fn, FO& fo)
 // Test IIRFilter for the sets of coefficients used in the code
 void testIIRFilters()
 {
-    auto f0(f_colorlpi);
-    SimpleFilter g0(c_colorlpi_b, c_colorlpi_a);
-    testIIRFilter("colorlpi", f0, g0);
-
-    auto f1(f_colorlpq);
-    SimpleFilter g1(c_colorlpq_b, c_colorlpq_a);
-    testIIRFilter("colorlpq", f1, g1);
+    auto f0(f_colorlp);
+    SimpleFilter g0(c_colorlp_b, c_colorlp_a);
+    testIIRFilter("colorlp", f0, g0);
 
     auto f2(f_nrc);
     SimpleFilter g2(c_nrc_b, c_nrc_a);

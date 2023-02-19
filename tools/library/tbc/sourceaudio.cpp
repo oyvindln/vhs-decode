@@ -24,6 +24,8 @@
 
 #include "sourceaudio.h"
 
+#include <QDataStream>
+
 SourceAudio::SourceAudio()
 {
     audioFileByteLength = 0;
@@ -38,7 +40,7 @@ SourceAudio::~SourceAudio()
 bool SourceAudio::open(QFileInfo inputFileInfo)
 {
     // Get the input audio fileinfo from the input TBC fileinfo:
-    QFileInfo inputAudioFileInfo(inputFileInfo.absolutePath() + "/" + inputFileInfo.baseName() + ".pcm");
+    QFileInfo inputAudioFileInfo(inputFileInfo.absolutePath() + "/" + inputFileInfo.completeBaseName() + ".pcm");
 
     // Open the audio source data file
     inputAudioFile.setFileName(inputAudioFileInfo.filePath());
@@ -114,19 +116,19 @@ SourceAudio::Data SourceAudio::getAudioData(qint32 startSample, qint32 numberOfS
     for (qint32 sample = 0; sample < numberOfSamples; sample++) {
         // Left 16 bit sample
         audioData >> x;
+        sampleData.append(x);
         if (audioData.atEnd()) {
-            qFatal("getAudioData hit premature end of file!");
+            qWarning("getAudioData hit end of file!");
             return sampleData;
         }
-        sampleData.append(x);
 
         // Right 16 bit sample
         audioData >> x;
+        sampleData.append(x);
         if (audioData.atEnd()) {
-            qFatal("getAudioData hit premature end of file!");
+            qWarning("getAudioData hit end of file!");
             return sampleData;
         }
-        sampleData.append(x);
     }
 
     return sampleData;

@@ -68,7 +68,7 @@ private:
         qint32 fieldLine;
 
         qint32 sourceNumber;
-        qreal quality;
+        double quality;
 
         qint32 distance;
     };
@@ -91,18 +91,18 @@ private:
                       const QVector<QVector<DropOutLocation> > &otherFieldDropouts,
                       QVector<SourceVideo::Data> &thisFieldData, const QVector<SourceVideo::Data> &otherFieldData,
                       bool thisFieldIsFirst, bool intraField, const QVector<qint32> &availableSourcesForFrame,
-                      const QVector<qreal> &sourceFrameQuality, Statistics &statistics);
+                      const QVector<double> &sourceFrameQuality, Statistics &statistics);
     QVector<DropOutLocation> populateDropoutsVector(LdDecodeMetaData::Field field, bool overCorrect);
     QVector<DropOutLocation> setDropOutLocations(QVector<DropOutLocation> dropOuts);
     Replacement findReplacementLine(const QVector<QVector<DropOutLocation>> &thisFieldDropouts,
                                     const QVector<QVector<DropOutLocation>> &otherFieldDropouts,
                                     qint32 dropOutIndex, bool thisFieldIsFirst, bool matchChromaPhase,
                                     bool isColourBurst, bool intraField, const QVector<qint32> &availableSourcesForFrame,
-                                    const QVector<qreal> &sourceFrameQuality);
+                                    const QVector<double> &sourceFrameQuality);
     void findPotentialReplacementLine(const QVector<QVector<DropOutLocation>> &targetDropouts, qint32 targetIndex,
                                       const QVector<QVector<DropOutLocation>> &sourceDropouts, bool isSameField,
                                       qint32 sourceOffset, qint32 stepAmount,
-                                      qint32 sourceNo, const QVector<qreal> &sourceFrameQuality,
+                                      qint32 sourceNo, const QVector<double> &sourceFrameQuality,
                                       QVector<Replacement> &candidates);
     void correctDropOut(const DropOutLocation &dropOut,
                         const Replacement &replacement, const Replacement &chromaReplacement,

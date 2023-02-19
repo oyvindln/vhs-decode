@@ -29,6 +29,9 @@
 #include <QtGlobal>
 #include <QMetaType>
 
+class JsonReader;
+class JsonWriter;
+
 class DropOuts
 {
 public:
@@ -41,21 +44,42 @@ public:
     DropOuts &operator=(const DropOuts &);
 
     void append(const qint32 startx, const qint32 endx, const qint32 fieldLine);
-    qint32 size() const;
     void reserve(int size);
     void resize(qint32 size);
     void clear();
     void concatenate();
-    bool empty() const;
 
-    qint32 startx(qint32 index);
-    qint32 endx(qint32 index);
-    qint32 fieldLine(qint32 index);
+    // Return the number of dropouts
+    qint32 size() const {
+        return m_startx.size();
+    }
+
+    // Return true if there are no dropouts
+    bool empty() const {
+        return m_startx.empty();
+    }
+
+    // Get position of a dropout
+    qint32 startx(qint32 index) const {
+        return m_startx[index];
+    }
+    qint32 endx(qint32 index) const {
+        return m_endx[index];
+    }
+    qint32 fieldLine(qint32 index) const {
+        return m_fieldLine[index];
+    }
+
+    void read(JsonReader &reader);
+    void write(JsonWriter &writer) const;
 
 private:
     QVector<qint32> m_startx;
     QVector<qint32> m_endx;
     QVector<qint32> m_fieldLine;
+
+    void readArray(JsonReader &reader, QVector<qint32> &array);
+    void writeArray(JsonWriter &writer, const QVector<qint32> &array) const;
 };
 
 #endif // DROPOUTS_H

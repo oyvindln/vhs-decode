@@ -3,7 +3,7 @@
     efmtof3frames.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -33,9 +33,10 @@ EfmToF3Frames::EfmToF3Frames()
 // Public methods -----------------------------------------------------------------------------------------------------
 
 // Main processing method
-QVector<F3Frame> EfmToF3Frames::process(QByteArray efmDataIn, bool debugState)
+std::vector<F3Frame> EfmToF3Frames::process(QByteArray efmDataIn, bool debugState, bool _audioIsDts)
 {
     debugOn = debugState;
+    audioIsDts = _audioIsDts;
 
     // Clear the output buffer
     f3FramesOut.clear();
@@ -73,13 +74,13 @@ QVector<F3Frame> EfmToF3Frames::process(QByteArray efmDataIn, bool debugState)
 }
 
 // Get method - retrieve statistics
-EfmToF3Frames::Statistics EfmToF3Frames::getStatistics()
+const EfmToF3Frames::Statistics &EfmToF3Frames::getStatistics() const
 {
     return statistics;
 }
 
 // Method to report decoding statistics to qInfo
-void EfmToF3Frames::reportStatistics()
+void EfmToF3Frames::reportStatistics() const
 {
     qInfo() << "";
     qInfo() << "EFM to F3 Frames:";
@@ -92,7 +93,7 @@ void EfmToF3Frames::reportStatistics()
     qInfo() << "    Invalid EFM symbols:" << statistics.invalidEfmSymbols;
     qInfo() << "  Corrected EFM symbols:" << statistics.correctedEfmSymbols;
 
-    qreal efmSymbolErrorRate = static_cast<qreal>(statistics.validEfmSymbols + statistics.invalidEfmSymbols);
+    double efmSymbolErrorRate = static_cast<double>(statistics.validEfmSymbols + statistics.invalidEfmSymbols);
     efmSymbolErrorRate = (100 / efmSymbolErrorRate) * (statistics.invalidEfmSymbols);
     qInfo().nospace() << "         EFM error rate: " << efmSymbolErrorRate << "%";
 
@@ -108,7 +109,7 @@ void EfmToF3Frames::reportStatistics()
 }
 
 // Method to reset the class
-void EfmToF3Frames::reset(void)
+void EfmToF3Frames::reset()
 {
     clearStatistics();
 
@@ -382,11 +383,11 @@ EfmToF3Frames::StateMachine EfmToF3Frames::sm_state_processFrame()
 
     // Now we hand the data over to the F3 frame class which converts the data
     // into a F3 frame and save the F3 frame to our output data buffer
-    f3FramesOut.append(F3Frame(frameT, tLength));
+    f3FramesOut.emplace_back(frameT, tLength, audioIsDts);
 
-    statistics.validEfmSymbols += f3FramesOut.last().getNumberOfValidEfmSymbols();
-    statistics.invalidEfmSymbols += f3FramesOut.last().getNumberOfInvalidEfmSymbols();
-    statistics.correctedEfmSymbols += f3FramesOut.last().getNumberOfCorrectedEfmSymbols();
+    statistics.validEfmSymbols += f3FramesOut.back().getNumberOfValidEfmSymbols();
+    statistics.invalidEfmSymbols += f3FramesOut.back().getNumberOfInvalidEfmSymbols();
+    statistics.correctedEfmSymbols += f3FramesOut.back().getNumberOfCorrectedEfmSymbols();
 
     // Discard all transitions up to the sync end
     efmDataBuffer.remove(0, endSyncTransition);

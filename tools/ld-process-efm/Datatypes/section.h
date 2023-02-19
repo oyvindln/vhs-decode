@@ -3,7 +3,7 @@
     section.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -67,9 +67,9 @@ public:
         QMode2 qMode2;
     };
 
-    bool setData(uchar* dataIn);
-    qint32 getQMode();
-    QMetadata getQMetadata();
+    bool setData(const uchar *dataIn);
+    qint32 getQMode() const;
+    const QMetadata &getQMetadata() const;
 
 private:
     // Q channel specific data
@@ -87,12 +87,12 @@ private:
     uchar wSubcode[12];
 
     bool verifyQ();
-    quint16 crc16(char *addr, quint16 num);
+    static quint16 crc16(const uchar *addr, quint16 num);
     qint32 decodeQAddress();
     void decodeQControl();
     void decodeQDataMode1And4();
     void decodeQDataMode2();
-    qint32 bcdToInteger(uchar bcd);
+    static qint32 bcdToInteger(uchar bcd);
 };
 
 #endif // SECTION_H

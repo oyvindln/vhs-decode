@@ -1,7 +1,0 @@
-<RCC>
-    <qresource prefix="/icons">
-        <file>Graphics/ld-process-efm logo 64px.png</file>
-        <file>Graphics/ld-process-efm logo 128px.png</file>
-        <file>Graphics/ld-process-efm logo 256px.png</file>
-    </qresource>
-</RCC>

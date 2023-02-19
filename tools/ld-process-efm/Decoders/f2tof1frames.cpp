@@ -3,7 +3,7 @@
     f2framestoaudio.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -33,7 +33,7 @@ F2ToF1Frames::F2ToF1Frames()
 // Public methods -----------------------------------------------------------------------------------------------------
 
 // Method to feed the audio processing state-machine with F2Frames
-QVector<F1Frame> F2ToF1Frames::process(QVector<F2Frame> f2FramesIn, bool _debugState, bool _noTimeStamp)
+const std::vector<F1Frame> &F2ToF1Frames::process(const std::vector<F2Frame> &f2FramesIn, bool _debugState, bool _noTimeStamp)
 {
     debugOn = _debugState;
     noTimeStamp = _noTimeStamp;
@@ -41,10 +41,10 @@ QVector<F1Frame> F2ToF1Frames::process(QVector<F2Frame> f2FramesIn, bool _debugS
     // Clear the output buffer
     f1FramesOut.clear();
 
-    if (f2FramesIn.isEmpty()) return f1FramesOut;
+    if (f2FramesIn.empty()) return f1FramesOut;
 
     // Append input data to the processing buffer
-    f2FrameBuffer.append(f2FramesIn);
+    f2FrameBuffer.insert(f2FrameBuffer.end(), f2FramesIn.begin(), f2FramesIn.end());
 
     waitingForData = false;
     while (!waitingForData) {
@@ -67,13 +67,13 @@ QVector<F1Frame> F2ToF1Frames::process(QVector<F2Frame> f2FramesIn, bool _debugS
 }
 
 // Get method - retrieve statistics
-F2ToF1Frames::Statistics F2ToF1Frames::getStatistics()
+const F2ToF1Frames::Statistics &F2ToF1Frames::getStatistics() const
 {
     return statistics;
 }
 
 // Method to report decoding statistics to qInfo
-void F2ToF1Frames::reportStatistics()
+void F2ToF1Frames::reportStatistics() const
 {
     qInfo()           << "";
     qInfo()           << "F2 Frames to F1 Frames:";
@@ -162,7 +162,7 @@ F2ToF1Frames::StateMachine F2ToF1Frames::sm_state_getInitialDiscTime()
             f1Frame.setData(outputData, false, true, true, lastDiscTime, TrackTime(0, 0, 0), 0);
 
             for (qint32 s = 0; s < 98; s++) {
-                f1FramesOut.append(f1Frame);
+                f1FramesOut.push_back(f1Frame);
             }
 
             // Add filled section to statistics
@@ -205,7 +205,7 @@ F2ToF1Frames::StateMachine F2ToF1Frames::sm_state_processSection()
             f1Frame.setData(outputData, false, true, true, lastDiscTime, TrackTime(0, 0, 0), 0);
 
             for (qint32 s = 0; s < 98; s++) {
-                f1FramesOut.append(f1Frame);
+                f1FramesOut.push_back(f1Frame);
             }
 
             // Add filled section to statistics
@@ -234,7 +234,7 @@ F2ToF1Frames::StateMachine F2ToF1Frames::sm_state_processSection()
     for (qint32 i = 0; i < 98; i++) {
         f1Frame.setData(f2FrameBuffer[i].getDataSymbols(), f2FrameBuffer[i].isFrameCorrupt(), sectionEncoderState, false,
                         f2FrameBuffer[i].getDiscTime(), f2FrameBuffer[i].getTrackTime(), f2FrameBuffer[i].getTrackNumber());
-        f1FramesOut.append(f1Frame);
+        f1FramesOut.push_back(f1Frame);
 
         // Update the statistics
         if (f2FrameBuffer[i].isFrameCorrupt()) statistics.invalidF2Frames++; else statistics.validF2Frames++;
@@ -243,7 +243,7 @@ F2ToF1Frames::StateMachine F2ToF1Frames::sm_state_processSection()
     }
 
     // Remove the processed section from the F2 frame buffer
-    f2FrameBuffer.remove(0, 98);
+    f2FrameBuffer.erase(f2FrameBuffer.begin(), f2FrameBuffer.begin() + 98);
 
     // Request more F2 frame data if required
     if (f2FrameBuffer.size() < 98) waitingForData = true;

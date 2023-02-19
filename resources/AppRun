@@ -1,0 +1,46 @@
+#!/bin/sh
+
+# This is a sample AppRun that can be adapted for building your own
+# AppDirs.  It contains several interesting features, some of which may
+# or may not be useful to you.
+# Much of the code to build and run the application was taken from
+# the AppRun script for ROX-Session, by Thomas Leonard.
+
+# Based on script used for https://github.com/iTrooz/nmap-appimage/blob/main/AppRun by iTrooz
+# (originally INSPIRED BY https://www.skepticats.com/rox/wrappers.html#template)
+
+FULL_PATH=`realpath $0`
+APP_DIR=`dirname $0`
+EXEC_NAME=`basename $FULL_PATH`
+
+BINS_PATH="usr/bin"
+
+
+# Try to determine executable from appimage name
+
+#if [ "$EXEC_NAME" != "AppRun.wrapped" ]; then
+#	EXEC_FILE_PATH="$APP_DIR/$BINS_PATH/$EXEC_NAME"
+#	if [ -x "$EXEC_FILE_PATH" ] ; then
+#		shift ; shift
+#		exec "$EXEC_FILE_PATH" "$@"
+#	else
+#		echo "Unable to find '$EXEC_NAME' in binary directory."
+#		echo "Use '$0' --lsexec to list the existing binaries."
+#		exit 1
+#	fi
+#fi
+
+
+EXEC_FILE_PATH="$APP_DIR/$BINS_PATH/$1"
+if [ -n "$1" ] && [ -x "$EXEC_FILE_PATH" ] ; then
+	shift
+	exec "$EXEC_FILE_PATH" "$@"
+fi
+
+# Print possible executables if asked
+if [ "$1" = "lsexec" ] || [ "$1" = "--lsexec" ]; then
+	ls "$APP_DIR/$BINS_PATH"
+	exit 0
+fi
+
+exec "$APP_DIR/$BINS_PATH/ld-analyse" "$@"

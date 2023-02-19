@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61", "setuptools_scm>=6.2", "wheel", "Cython", "numpy"]
+# build-backend = "setuptools.build_meta"
+
+[project]
+name = "vhs_decode"
+description = "Software Decoder for raw rf captures of laserdisc, vhs and other analog video formats"
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["laserdisc", "vhs", "video"]
+license = {file = "LICENSE"}
+classifiers = [
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "numpy>=1.17","numba>=0.48","scipy>=1.3","samplerate", "static-ffmpeg", "cython"
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+
+#[project.scripts]
+#my-script = "my_package.module:function"
+
+[project.urls]
+Homepage = "https://www.domesday86.com"
+
+
+
+[console_scripts]
+ld-decode = "lddecode:main"
+vhs-decode = "vhsdecode:main"
+cvbs-decode = "cvbsdecode:main"
+
+[tool.setuptools_scm]
+write_to = "vhsdecode/_version.py"
+local_scheme = "no-local-version"
+

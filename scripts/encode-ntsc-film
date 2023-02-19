@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# Simple 1080p23.976 encoding script, intended for use with film footage.  Note that this is not the 
+# highest quality solution 
+
+# Note that "order=tff:field=bottom" may need to be changed to "order=bff:field=top"
+
+ld-process-efm  --input $1.efm --audio $1.efm.pcm
+ld-dropout-correct --output-json $1-dropout.tbc.json $1.tbc - | ld-chroma-decoder -f ntsc3d --input-json $1.tbc.json -  - | ffmpeg -f s16le -ar 44.1k -ac 2 -i $1.efm.pcm -f rawvideo -r 30000/1001 -pix_fmt rgb48 -s 760x488 -i /dev/stdin -vf fieldmatch=order=tff:field=bottom,decimate,scale=1440x1080 -b:v 15000k -aspect 4:3 -acodec flac -s 1440x1080 -vcodec mpeg4 $1.mkv 

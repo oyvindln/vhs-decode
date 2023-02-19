@@ -4,7 +4,7 @@
 
     ld-chroma-decoder - Colourisation filter for ld-decode
     Copyright (C) 2018-2020 Simon Inns
-    Copyright (C) 2019-2021 Adam Sampson
+    Copyright (C) 2019-2022 Adam Sampson
     Copyright (C) 2021 Chad Page
     Copyright (C) 2021 Phillip Blucas
 
@@ -29,9 +29,9 @@
 #include <QDebug>
 #include <QtGlobal>
 #include <QCommandLineParser>
-#include <QScopedPointer>
 #include <QThread>
 #include <fstream>
+#include <memory>
 
 #include "decoderpool.h"
 #include "lddecodemetadata.h"
@@ -174,6 +174,12 @@ int main(int argc, char *argv[])
                                        QCoreApplication::translate("main", "Output in black and white"));
     parser.addOption(setBwModeOption);
 
+    // Option to select output padding (-pad)
+    QCommandLineOption outputPaddingOption(QStringList() << "pad" << "output-padding",
+                                       QCoreApplication::translate("main", "Pad the output frame to a multiple of this many pixels on both axes (1 means no padding, maximum is 32)"),
+                                       QCoreApplication::translate("main", "number"));
+    parser.addOption(outputPaddingOption);
+
     // Option to select which decoder to use (-f)
     QCommandLineOption decoderOption(QStringList() << "f" << "decoder",
                                      QCoreApplication::translate("main", "Decoder to use (pal2d, transform2d, transform3d, ntsc1d, ntsc2d, ntsc3d, ntsc3dnoadapt, mono; default automatic)"),
@@ -182,9 +188,33 @@ int main(int argc, char *argv[])
 
     // Option to select the number of threads (-t)
     QCommandLineOption threadsOption(QStringList() << "t" << "threads",
-                                        QCoreApplication::translate("main", "Specify the number of concurrent threads (default number of logical CPUs)"),
-                                        QCoreApplication::translate("main", "number"));
+                                     QCoreApplication::translate("main", "Specify the number of concurrent threads (default number of logical CPUs)"),
+                                     QCoreApplication::translate("main", "number"));
     parser.addOption(threadsOption);
+
+    // Option to override calculated firstActiveFieldLine in our video parameters (-ffll)
+    QCommandLineOption firstFieldLineOption(QStringList() << "ffll" << "first_active_field_line",
+                                            QCoreApplication::translate("main", "The first visible line of a field. Range 1-259 for NTSC (default: 20), 2-308 for PAL (default: 22)"),
+                                            QCoreApplication::translate("main", "number"));
+    parser.addOption(firstFieldLineOption);
+
+    // Option to override calculated lastActiveFieldLine in our video parameters (-lfll)
+    QCommandLineOption lastFieldLineOption(QStringList() << "lfll" << "last_active_field_line",
+                                           QCoreApplication::translate("main", "The last visible line of a field. Range 1-259 for NTSC (default: 259), 2-308 for PAL (default: 308)"),
+                                           QCoreApplication::translate("main", "number"));
+    parser.addOption(lastFieldLineOption);
+
+    // Option to override calculated firstActiveFrameLine in our video parameters (-ffrl)
+    QCommandLineOption firstFrameLineOption(QStringList() << "ffrl" << "first_active_frame_line",
+                                            QCoreApplication::translate("main", "The first visible line of a frame. Range 1-525 for NTSC (default: 40), 1-620 for PAL (default: 44)"),
+                                            QCoreApplication::translate("main", "number"));
+    parser.addOption(firstFrameLineOption);
+
+    // Option to override calculated lastActiveFieldLine in our video parameters (-lfll)
+    QCommandLineOption lastFrameLineOption(QStringList() << "lfrl" << "last_active_frame_line",
+                                           QCoreApplication::translate("main", "The last visible line of a frame. Range 1-525 for NTSC (default: 525), 1-620 for PAL (default: 620)"),
+                                           QCoreApplication::translate("main", "number"));
+    parser.addOption(lastFrameLineOption);
 
     // -- NTSC decoder options --
 
@@ -205,6 +235,11 @@ int main(int argc, char *argv[])
                                     QCoreApplication::translate("main", "number"));
     parser.addOption(lumaNROption);
 
+    // Option to use phase compensating decoder
+    QCommandLineOption ntscPhaseCompOption(QStringList() << "ntsc-phase-comp",
+                                           QCoreApplication::translate("main", "NTSC: Adjust phase per-line using burst phase"));
+    parser.addOption(ntscPhaseCompOption);
+
     // -- PAL decoder options --
 
     // Option to use Simple PAL UV filter
@@ -212,21 +247,15 @@ int main(int argc, char *argv[])
                                            QCoreApplication::translate("main", "Transform: Use 1D UV filter (default 2D)"));
     parser.addOption(simplePALOption);
 
-    // Option to select the Transform PAL filter mode
-    QCommandLineOption transformModeOption(QStringList() << "transform-mode",
-                                           QCoreApplication::translate("main", "Transform: Filter mode to use (level, threshold; default threshold)"),
-                                           QCoreApplication::translate("main", "mode"));
-    parser.addOption(transformModeOption);
-
     // Option to select the Transform PAL threshold
     QCommandLineOption transformThresholdOption(QStringList() << "transform-threshold",
-                                                QCoreApplication::translate("main", "Transform: Uniform similarity threshold in 'threshold' mode (default 0.4)"),
+                                                QCoreApplication::translate("main", "Transform: Uniform similarity threshold (default 0.4)"),
                                                 QCoreApplication::translate("main", "number"));
     parser.addOption(transformThresholdOption);
 
     // Option to select the Transform PAL thresholds file
     QCommandLineOption transformThresholdsOption(QStringList() << "transform-thresholds",
-                                                 QCoreApplication::translate("main", "Transform: File containing per-bin similarity thresholds in 'threshold' mode"),
+                                                 QCoreApplication::translate("main", "Transform: File containing per-bin similarity thresholds"),
                                                  QCoreApplication::translate("main", "file"));
     parser.addOption(transformThresholdsOption);
 
@@ -234,11 +263,6 @@ int main(int argc, char *argv[])
     QCommandLineOption showFFTsOption(QStringList() << "show-ffts",
                                       QCoreApplication::translate("main", "Transform: Overlay the input and output FFTs"));
     parser.addOption(showFFTsOption);
-
-    // Option to use phase compensating decoder
-    QCommandLineOption ntscPhaseComp(QStringList() << "ntsc-phase-comp",
-                                      QCoreApplication::translate("main", "Use NTSC QADM decoder taking burst phase into account (BETA)"));
-    parser.addOption(ntscPhaseComp);
 
     // -- Positional arguments --
 
@@ -367,18 +391,8 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (parser.isSet(transformModeOption)) {
-        const QString name = parser.value(transformModeOption);
-
-        if (name == "level") {
-            palConfig.transformMode = TransformPal::levelMode;
-        } else if (name == "threshold") {
-            palConfig.transformMode = TransformPal::thresholdMode;
-        } else {
-            // Quit with error
-            qCritical() << "Unknown Transform mode" << name;
-            return -1;
-        }
+    if (parser.isSet(ntscPhaseCompOption)) {
+        combConfig.phaseCompensation = true;
     }
 
     if (parser.isSet(simplePALOption)) {
@@ -395,9 +409,21 @@ int main(int argc, char *argv[])
         }
     }
 
-
-    if (parser.isSet(ntscPhaseComp)) {
-        combConfig.phaseCompensation = true;
+    LdDecodeMetaData::LineParameters lineParameters;
+    if (parser.isSet(firstFieldLineOption)) {
+        lineParameters.firstActiveFieldLine = parser.value(firstFieldLineOption).toInt();
+    }
+    
+    if (parser.isSet(lastFieldLineOption)) {
+        lineParameters.lastActiveFieldLine = parser.value(lastFieldLineOption).toInt();
+    }
+    
+    if (parser.isSet(firstFrameLineOption)) {
+        lineParameters.firstActiveFrameLine = parser.value(firstFrameLineOption).toInt();
+    }
+    
+    if (parser.isSet(lastFrameLineOption)) {
+        lineParameters.lastActiveFrameLine = parser.value(lastFrameLineOption).toInt();
     }
 
     // Work out the metadata filename
@@ -412,7 +438,9 @@ int main(int argc, char *argv[])
         qInfo() << "Unable to open ld-decode metadata file";
         return -1;
     }
-
+    
+    metaData.processLineParameters(lineParameters);
+    
     // Reverse field order if required
     if (parser.isSet(setReverseOption)) {
         qInfo() << "Expected field order is reversed to second field/first field";
@@ -423,10 +451,10 @@ int main(int argc, char *argv[])
     QString decoderName;
     if (parser.isSet(decoderOption)) {
         decoderName = parser.value(decoderOption);
-    } else if (metaData.getVideoParameters().isSourcePal) {
-        decoderName = "pal2d";
-    } else {
+    } else if (metaData.getVideoParameters().system == NTSC) {
         decoderName = "ntsc2d";
+    } else {
+        decoderName = "pal2d";
     }
 
     // Require ntsc3d if the map overlay is selected
@@ -442,36 +470,36 @@ int main(int argc, char *argv[])
     }
 
     // Select the decoder
-    QScopedPointer<Decoder> decoder;
+    std::unique_ptr<Decoder> decoder;
     if (decoderName == "pal2d") {
-        decoder.reset(new PalDecoder(palConfig));
+        decoder = std::make_unique<PalDecoder>(palConfig);
     } else if (decoderName == "transform2d") {
         palConfig.chromaFilter = PalColour::transform2DFilter;
         if (!loadTransformThresholds(parser, transformThresholdsOption, palConfig)) {
             return -1;
         }
-        decoder.reset(new PalDecoder(palConfig));
+        decoder = std::make_unique<PalDecoder>(palConfig);
     } else if (decoderName == "transform3d") {
         palConfig.chromaFilter = PalColour::transform3DFilter;
         if (!loadTransformThresholds(parser, transformThresholdsOption, palConfig)) {
             return -1;
         }
-        decoder.reset(new PalDecoder(palConfig));
+        decoder = std::make_unique<PalDecoder>(palConfig);
     } else if (decoderName == "ntsc1d") {
         combConfig.dimensions = 1;
-        decoder.reset(new NtscDecoder(combConfig));
+        decoder = std::make_unique<NtscDecoder>(combConfig);
     } else if (decoderName == "ntsc2d") {
         combConfig.dimensions = 2;
-        decoder.reset(new NtscDecoder(combConfig));
+        decoder = std::make_unique<NtscDecoder>(combConfig);
     } else if (decoderName == "ntsc3d") {
         combConfig.dimensions = 3;
-        decoder.reset(new NtscDecoder(combConfig));
+        decoder = std::make_unique<NtscDecoder>(combConfig);
     } else if (decoderName == "ntsc3dnoadapt") {
         combConfig.dimensions = 3;
         combConfig.adaptive = false;
-        decoder.reset(new NtscDecoder(combConfig));
+        decoder = std::make_unique<NtscDecoder>(combConfig);
     } else if (decoderName == "mono") {
-        decoder.reset(new MonoDecoder);
+        decoder = std::make_unique<MonoDecoder>();
     } else {
         qCritical() << "Unknown decoder" << decoderName;
         return -1;
@@ -500,6 +528,14 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if (parser.isSet(outputPaddingOption)) {
+        outputConfig.paddingAmount = parser.value(outputPaddingOption).toInt();
+        if (outputConfig.paddingAmount < 1 || outputConfig.paddingAmount > 32) {
+            qInfo() << "Invalid value" << outputConfig.paddingAmount << "specified for padding amount, defaulting to 8.";
+            outputConfig.paddingAmount = 8;
+        }
+    }
+    
     // Perform the processing
     DecoderPool decoderPool(*decoder, inputFileName, metaData, outputConfig, outputFileName, startFrame, length, maxThreads);
     if (!decoderPool.process()) {

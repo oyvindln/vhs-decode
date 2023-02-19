@@ -3,7 +3,7 @@
     whiteflag.h
 
     ld-process-vbi - VBI and IEC NTSC specific processor for ld-decode
-    Copyright (C) 2018-2019 Simon Inns
+    Copyright (C) 2018-2021 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -24,11 +24,14 @@
 
 #include "whiteflag.h"
 
-// Public method to read the white flag status from a field-line
-bool WhiteFlag::getWhiteFlag(const SourceVideo::Data &lineData, LdDecodeMetaData::VideoParameters videoParameters)
+// Public method to read the white flag status from a field-line.
+// Return true if the flag is detected, false otherwise.
+bool WhiteFlag::decodeLine(const SourceVideo::Data& lineData,
+                           const LdDecodeMetaData::VideoParameters& videoParameters,
+                           LdDecodeMetaData::Field& fieldMetadata)
 {
     // Determine the 16-bit zero-crossing point
-    qint32 zcPoint = videoParameters.white16bIre - videoParameters.black16bIre;
+    qint32 zcPoint = (videoParameters.white16bIre + videoParameters.black16bIre) / 2;
 
     qint32 whiteCount = 0;
     for (qint32 x = videoParameters.activeVideoStart; x < videoParameters.activeVideoEnd; x++) {
@@ -39,9 +42,11 @@ bool WhiteFlag::getWhiteFlag(const SourceVideo::Data &lineData, LdDecodeMetaData
     if (whiteCount > ((videoParameters.activeVideoEnd - videoParameters.activeVideoStart) / 2)) {
         qDebug() << "WhiteFlag::getWhiteFlag(): White-flag detected: White count was" << whiteCount << "out of" <<
                     (videoParameters.activeVideoEnd - videoParameters.activeVideoStart);
+        fieldMetadata.ntsc.whiteFlag = true;
         return true;
     }
 
-    // Not a white flag
+    // No white flag detected
+    fieldMetadata.ntsc.whiteFlag = false;
     return false;
 }

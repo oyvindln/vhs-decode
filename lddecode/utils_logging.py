@@ -1,8 +1,5 @@
 import logging
-import os
 import sys
-import time
-import tempfile
 
 
 def init_logging(outfile_name, columns=80):
@@ -37,7 +34,7 @@ def init_logging(outfile_name, columns=80):
         # Delete old logfile if it exists
         try:
             os.unlink(outfile_name)
-        except:
+        except Exception:
             pass
 
         logger_file = logging.FileHandler(outfile_name)
@@ -63,6 +60,10 @@ def init_logging(outfile_name, columns=80):
 
 
 def logging_test():
+    import os
+    import time
+    import tempfile
+
     fname = os.path.join(tempfile.gettempdir(), "logtest.log")
     print("Writing to " + fname, file=sys.stderr)
 

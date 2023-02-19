@@ -1,0 +1,208 @@
+#!/usr/bin/python3
+
+# NOTE:  This is prototype code.  It listens to the directory it's in for new .lds files and automatically
+# starts .ldf compression.
+
+import os
+import numpy as np
+import pyinotify
+import re
+import subprocess
+import sys
+import threading
+import time
+
+import copy
+
+s_inst_copy = None
+
+def ldf_pipe(outname, compression_level=6):
+    corecmd = "ffmpeg -y -hide_banner -loglevel error -f s16le -ar 40k -ac 1 -i - -acodec flac -f ogg".split(
+        " "
+    )
+    process = subprocess.Popen(
+        [*corecmd, "-compression_level", str(compression_level), outname],
+        stdin=subprocess.PIPE,
+    )
+
+    return process, process.stdin
+
+class TrackFile():
+    def __init__(self, fname):
+        self.file = fname
+        self.loc = 0
+        self.len = 0
+        self.last_update = 0
+        self.finished = False
+        self.cleaned = False # XXX handle cleanup better        
+        
+    def update(self):
+        newlen = os.stat(self.file).st_size
+        if newlen != self.len:
+            self.len = newlen
+            self.last_update = time.time()
+#            print(self.file, self.len)
+
+class CompressFile(TrackFile):
+    def __init__(self, fname, blocksize = 128*1024):
+        TrackFile.__init__(self, fname)
+        
+        self.blocksize = blocksize
+        self.fed = 0
+        
+        self.infd = open(fname, 'rb')
+        self.comp_proc, self.comp_pipe = ldf_pipe(fname + '.ldf')
+        
+        self.compress_thread = threading.Thread(target=self.compress_thread)
+        self.compress_thread.start()
+        
+    def unpack_data_4_40(self, indata, readlen = None, offset = 0):
+
+        if readlen is None:
+            # this converts blocks of 10 bytes into 4 uint16's
+            readlen = len(indata) * 4 // 5
+
+        unpacked = np.zeros(readlen, dtype=np.uint16)
+        
+        #print(len(indata), readlen)
+        
+        # we need to load the 8-bit data into the 16-bit unpacked for left_shift to work
+        # correctly...
+        unpacked[0::4] = indata[0::5]
+        np.left_shift(unpacked[0::4], 2, out=unpacked[0::4])
+        np.bitwise_or(
+            unpacked[0::4],
+            np.bitwise_and(np.right_shift(indata[1::5], 6), 0x03),
+            out=unpacked[0::4],
+        )
+
+        unpacked[1::4] = np.bitwise_and(indata[1::5], 0x3F)
+        np.left_shift(unpacked[1::4], 4, out=unpacked[1::4])
+        np.bitwise_or(
+            unpacked[1::4],
+            np.bitwise_and(np.right_shift(indata[2::5], 4), 0x0F),
+            out=unpacked[1::4],
+        )
+
+        unpacked[2::4] = np.bitwise_and(indata[2::5], 0x0F)
+        np.left_shift(unpacked[2::4], 6, out=unpacked[2::4])
+        np.bitwise_or(
+            unpacked[2::4],
+            np.bitwise_and(np.right_shift(indata[3::5], 2), 0x3F),
+            out=unpacked[2::4],
+        )
+
+        unpacked[3::4] = np.bitwise_and(indata[3::5], 0x03)
+        np.left_shift(unpacked[3::4], 8, out=unpacked[3::4])
+        np.bitwise_or(unpacked[3::4], indata[4::5], out=unpacked[3::4])
+
+        # convert back to original DdD 16-bit format (signed 16-bit, left shifted)
+        rv_unsigned = unpacked[offset : offset + readlen]
+        rv_signed = np.left_shift(rv_unsigned.astype(np.int16) - 512, 6)
+
+        return rv_signed
+        
+    def compress_thread(self):
+        data = None
+        
+        self.up = 0
+        
+        while not self.finished:
+            unproc = self.len - self.fed
+            if unproc > 0:
+                readlen = self.blocksize if unproc > self.blocksize else unproc
+                indata = self.infd.read(readlen)
+                
+                if data is not None:
+                    #print('concat', type(indata), len(data))
+                    data += indata
+                    #print(len(data))
+                else:
+                    data = indata
+                    
+                indatau8 = np.frombuffer(data, "uint8", len(data))
+                to_process = (len(indatau8) // 5) * 5
+                    
+                unpacked_data = self.unpack_data_4_40(indatau8[:to_process])
+                processed = ((len(unpacked_data) // 4) * 5)
+                if processed < len(data):
+                    data = data[processed:]
+                    #print(type(data))
+                else:
+                    data = None
+                
+                self.up += len(unpacked_data.tobytes())
+                
+                rv = self.comp_pipe.write(unpacked_data.tobytes())
+                #rv = len(unpacked_data)
+                
+                if rv < len(unpacked_data):
+                    print("error: unable to feed ffmpeg")
+                    self.finished = True
+                    return
+                
+                self.fed += readlen
+            else:
+                time.sleep(0.1) # XXX: use notification/wakeup?
+                
+        if self.finished:
+            self.comp_pipe.close()
+            self.comp_proc.terminate()
+            self.comp_proc.wait()
+            self.cleaned = True
+            print('done writing ', self.file, self.fed, self.up)
+        
+    def update(self):
+        TrackFile.update(self)
+        #print('up', self.file, self.len, self.fed, self.last_update)
+        
+        if (self.fed == self.len) and (time.time() - self.last_update) > 15:
+            self.finished = True
+                
+class Tracker(pyinotify.ProcessEvent):
+    def __init__(self, stats):
+        pyinotify.ProcessEvent.__init__(self, stats)
+        self.files = {}
+    
+    def process_default(self, event):
+        # Does nothing, just to demonstrate how stuffs could trivially
+        # be accomplished after having processed statistics.
+        if re.match('.*\.lds$', event.pathname):
+            if event.pathname not in self.files:
+                print("Compressing ", event.pathname)
+                self.files[event.pathname] = CompressFile(event.pathname)
+            else:
+                #print(event, event.pathname)
+                #print(self.files[event.pathname])
+                self.files[event.pathname].update()
+            
+    def process_data(self):
+        donelist = []
+        
+        for f in self.files:
+            self.files[f].update()
+            
+            if self.files[f].finished:
+                donelist.append(f)
+                
+        for d in donelist:
+            del self.files[d]
+            
+            
+# Instanciate a new WatchManager (will be used to store watches).
+wm = pyinotify.WatchManager()
+# Associate this WatchManager with a Notifier (will be used to report and
+# process events).
+s = pyinotify.Stats()
+tracker = Tracker(s)
+notifier = pyinotify.Notifier(wm, default_proc_fun=tracker, read_freq=1)
+# Add a new watch on /tmp for ALL_EVENTS.
+wm.add_watch(os.getcwd(), pyinotify.IN_MODIFY)
+
+while True:
+    if notifier.check_events(100):
+        notifier.read_events()
+        notifier.process_events()
+        time.sleep(0.1)
+
+    tracker.process_data()

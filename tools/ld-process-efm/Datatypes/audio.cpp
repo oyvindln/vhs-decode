@@ -3,7 +3,7 @@
     audio.cpp
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -34,7 +34,7 @@ Audio::Audio()
 }
 
 // Method to set the audio sample frame data from a F2 Frame
-Audio::Audio(uchar* _sampleFrame)
+Audio::Audio(const uchar *_sampleFrame)
 {
     for (qint32 i = 0; i < 24; i++) sample.sampleFrame[i] = _sampleFrame[i];
 
@@ -43,13 +43,13 @@ Audio::Audio(uchar* _sampleFrame)
 }
 
 // Method to get the audio data as a sample frame (of 24 bytes)
-uchar* Audio::getSampleFrame()
+const uchar *Audio::getSampleFrame() const
 {
     return sample.sampleFrame;
 }
 
 // Method to set the signed 16-bit sample values
-void Audio::setSampleValues(Audio::SampleValues _sampleValues)
+void Audio::setSampleValues(const Audio::SampleValues &_sampleValues)
 {
     sample.sampleValues = _sampleValues;
 
@@ -58,7 +58,7 @@ void Audio::setSampleValues(Audio::SampleValues _sampleValues)
 }
 
 // Method to get the signed 16-bit sample values
-Audio::SampleValues Audio::getSampleValues()
+const Audio::SampleValues &Audio::getSampleValues() const
 {
     return sample.sampleValues;
 }

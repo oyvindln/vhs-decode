@@ -5,6 +5,8 @@ import json
 import math
 import os
 import subprocess
+import sys
+import traceback
 
 from multiprocessing import JoinableQueue
 import threading
@@ -14,7 +16,6 @@ from numba import jit, njit
 # standard numeric/scientific libraries
 import numpy as np
 import scipy.signal as sps
-
 
 # This runs a cubic scaler on a line.
 # originally from https://www.paulinternet.nl/?page=bicubic
@@ -97,16 +98,16 @@ def make_loader(filename, inputfreq=None):
     if inputfreq is not None:
         # We're resampling, so we have to use ffmpeg.
 
-        if filename.endswith(".s16"):
+        if filename.endswith(".s16") or filename.endswith(".raw"):
             input_args = ["-f", "s16le"]
-        elif filename.endswith(".r16") or filename.endswith(".u16"):
+        elif filename.endswith(".r16") or filename.endswith(".u16") or filename.endswith(".tbc"):
             input_args = ["-f", "u16le"]
         elif filename.endswith(".rf"):
             input_args = ["-f", "f32le"]
+        elif filename.endswith(".s8"):
+            input_args = ["-f", "s8"]
         elif filename.endswith(".r8") or filename.endswith(".u8"):
             input_args = ["-f", "u8"]
-        elif filename.endswith(".u16"):
-            input_args = ["-f", "u16le"]
         elif filename.endswith(".lds") or filename.endswith(".r30"):
             raise ValueError("File format not supported when resampling: " + filename)
         else:
@@ -133,11 +134,28 @@ def make_loader(filename, inputfreq=None):
         return load_unpacked_data_u16
     elif filename.endswith(".r8") or filename.endswith(".u8"):
         return load_unpacked_data_u8
-    elif filename.endswith("raw.oga") or filename.endswith(".ldf") or filename.endswith(".wav") or filename.endswith(".flac") or filename.endswith(".vhs"):
+    elif (
+        filename.endswith("raw.oga")
+        or filename.endswith(".ldf")
+        or filename.endswith(".wav")
+        or filename.endswith(".flac")
+        or filename.endswith(".vhs")
+    ):
         try:
             rv = LoadLDF(filename)
-        except:
+        except FileNotFoundError:
+            print(
+                "ld-ldf-reader not found in PATH, using ffmpeg instead.",
+                file=sys.stderr,
+            )
+            rv = LoadFFmpeg()
+        except Exception:
             # print("Please build and install ld-ldf-reader in your PATH for improved performance", file=sys.stderr)
+            traceback.print_exc()
+            print(
+                "Failed to load with ld-ldf-reader, trying ffmpeg instead.",
+                file=sys.stderr,
+            )
             rv = LoadFFmpeg()
 
         return rv
@@ -157,11 +175,13 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
     if sampletype == 4:
         indata = np.fromstring(inbuf, "float32", len(inbuf) // 4) * 32768
     elif sampletype == 3:
-        indata = np.fromstring(inbuf, "uint16", len(inbuf) // 2)
+        indata = np.frombuffer(inbuf, "uint16", len(inbuf) // 2)
     elif sampletype == 2:
         indata = np.fromstring(inbuf, "int16", len(inbuf) // 2)
     else:
-        indata = np.fromstring(inbuf, "uint8", len(inbuf))
+        # NOTE(oln): Can probably use frombuffer for other variants too but
+        # didn't have any samples to test with.
+        indata = np.frombuffer(inbuf, "uint8", len(inbuf))
 
     if len(indata) < readlen:
         return None
@@ -172,15 +192,14 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
 def load_unpacked_data_u8(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 1)
 
+
 def load_unpacked_data_s16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 2)
 
 
 def load_unpacked_data_u16(infile, sample, readlen):
-    return load_unpacked_data(infile, sample, readlen, 2)
-
-def load_unpacked_data_u16(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 3)
+
 
 def load_unpacked_data_float32(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 4)
@@ -217,25 +236,82 @@ def load_packed_data_3_32(infile, sample, readlen):
 
 
 # The 10-bit samples from the Duplicator...
+# """
+# From Simon's code:
 
-"""
-From Simon's code:
+# // Original
+# // 0: xxxx xx00 0000 0000
+# // 1: xxxx xx11 1111 1111
+# // 2: xxxx xx22 2222 2222
+# // 3: xxxx xx33 3333 3333
+# //
+# // Packed:
+# // 0: 0000 0000 0011 1111
+# // 2: 1111 2222 2222 2233
+# // 4: 3333 3333
+# """
 
-// Original
-// 0: xxxx xx00 0000 0000
-// 1: xxxx xx11 1111 1111
-// 2: xxxx xx22 2222 2222
-// 3: xxxx xx33 3333 3333
-//
-// Packed:
-// 0: 0000 0000 0011 1111
-// 2: 1111 2222 2222 2233
-// 4: 3333 3333
-"""
+@njit(cache=True, nogil=True)
+def unpack_data_4_40(indata, readlen, offset):
+    """Inner unpacking function, split off to allow numba optimisation."""
+    unpacked = np.zeros(readlen + 4, dtype=np.uint16)
+
+    # Data needs to be in uint16 for the shift to do the right thing
+    # Could've used dtype argument to right_shift but numba didn't like that.
+    #
+    indatai16 = indata.astype(np.uint16)
+    unpacked[0::4] = (indatai16[0::5] << 2) | ((indata[1::5] >> 6) & 0x03)
+    unpacked[1::4] = ((indatai16[1::5] & 0x3F) << 4) | ((indata[2::5] >> 4) & 0x0F)
+    unpacked[2::4] = ((indatai16[2::5] & 0x0F) << 6) | ((indata[3::5] >> 2) & 0x3F)
+    unpacked[3::4] = ((indatai16[3::5] & 0x03) << 8) | indata[4::5]
+
+    # convert back to original DdD 16-bit format (signed 16-bit, left shifted)
+    rv_unsigned = unpacked[offset : offset + readlen]
+    rv_signed = np.left_shift(rv_unsigned - 512, 6).astype(np.int16)
+
+    # # Original implementation.
+    #  unpacked = np.zeros(readlen + 4, dtype=np.uint16)
+    # # we need to load the 8-bit data into the 16-bit unpacked for left_shift to work
+    # # correctly...
+    # unpacked[0::4] = indata[0::5]
+    # np.left_shift(unpacked[0::4], 2, out=unpacked[0::4])
+    # np.bitwise_or(
+    #     unpacked[0::4],
+    #     np.bitwise_and(np.right_shift(indata[1::5], 6), 0x03),
+    #     out=unpacked[0::4],
+    # )
+
+    # unpacked[1::4] = np.bitwise_and(indata[1::5], 0x3F)
+    # np.left_shift(unpacked[1::4], 4, out=unpacked[1::4])
+    # np.bitwise_or(
+    #     unpacked[1::4],
+    #     np.bitwise_and(np.right_shift(indata[2::5], 4), 0x0F),
+    #     out=unpacked[1::4],
+    # )
+
+    # unpacked[2::4] = np.bitwise_and(indata[2::5], 0x0F)
+    # np.left_shift(unpacked[2::4], 6, out=unpacked[2::4])
+    # np.bitwise_or(
+    #     unpacked[2::4],
+    #     np.bitwise_and(np.right_shift(indata[3::5], 2), 0x3F),
+    #     out=unpacked[2::4],
+    # )
+
+    # unpacked[3::4] = np.bitwise_and(indata[3::5], 0x03)
+    # np.left_shift(unpacked[3::4], 8, out=unpacked[3::4])
+    # np.bitwise_or(unpacked[3::4], indata[4::5], out=unpacked[3::4])
+
+    # # convert back to original DdD 16-bit format (signed 16-bit, left shifted)
+    # rv_unsigned = unpacked[offset : offset + readlen].copy()
+    # rv_signed = np.left_shift(rv_unsigned.astype(np.int16) - 512, 6)
+
+    return rv_signed
+
 
 # The bit twiddling is a bit more complex than I'd like... but eh.  I think
 # it's debugged now. ;)
 def load_packed_data_4_40(infile, sample, readlen):
+    """Load data from packed DdD format (4 x 10-bits packed in 5 bytes)"""
     start = (sample // 4) * 5
     offset = sample % 4
 
@@ -250,43 +326,7 @@ def load_packed_data_4_40(infile, sample, readlen):
     if len(indata) < needed:
         return None
 
-    unpacked = np.zeros(readlen + 4, dtype=np.uint16)
-
-    # we need to load the 8-bit data into the 16-bit unpacked for left_shift to work
-    # correctly...
-    unpacked[0::4] = indata[0::5]
-    np.left_shift(unpacked[0::4], 2, out=unpacked[0::4])
-    np.bitwise_or(
-        unpacked[0::4],
-        np.bitwise_and(np.right_shift(indata[1::5], 6), 0x03),
-        out=unpacked[0::4],
-    )
-
-    unpacked[1::4] = np.bitwise_and(indata[1::5], 0x3F)
-    np.left_shift(unpacked[1::4], 4, out=unpacked[1::4])
-    np.bitwise_or(
-        unpacked[1::4],
-        np.bitwise_and(np.right_shift(indata[2::5], 4), 0x0F),
-        out=unpacked[1::4],
-    )
-
-    unpacked[2::4] = np.bitwise_and(indata[2::5], 0x0F)
-    np.left_shift(unpacked[2::4], 6, out=unpacked[2::4])
-    np.bitwise_or(
-        unpacked[2::4],
-        np.bitwise_and(np.right_shift(indata[3::5], 2), 0x3F),
-        out=unpacked[2::4],
-    )
-
-    unpacked[3::4] = np.bitwise_and(indata[3::5], 0x03)
-    np.left_shift(unpacked[3::4], 8, out=unpacked[3::4])
-    np.bitwise_or(unpacked[3::4], indata[4::5], out=unpacked[3::4])
-
-    # convert back to original DdD 16-bit format (signed 16-bit, left shifted)
-    rv_unsigned = unpacked[offset : offset + readlen].copy()
-    rv_signed = np.left_shift(rv_unsigned.astype(np.int16) - 512, 6)
-
-    return rv_signed
+    return unpack_data_4_40(indata, readlen, offset)
 
 
 class LoadFFmpeg:
@@ -308,10 +348,13 @@ class LoadFFmpeg:
         self.rewind_size = 2 * 1024 * 1024
         self.rewind_buf = b""
 
-    def __del__(self):
+    def _close(self):
         if self.ffmpeg is not None:
             self.ffmpeg.kill()
             self.ffmpeg.wait()
+
+    def __del__(self):
+        self._close()
 
     def _read_data(self, count):
         """Read data as bytes from ffmpeg, append it to the rewind buffer, and
@@ -367,7 +410,7 @@ class LoadFFmpeg:
 
         data = buf_data + read_data
         assert len(data) == readlen * 2
-        return np.fromstring(data, "<i2")
+        return np.frombuffer(data, "<i2")
 
     def __call__(self, infile, sample, readlen):
         return self.read(infile, sample, readlen)
@@ -419,7 +462,9 @@ class LoadLDF:
                 del self.ldfreader
 
             self.ldfreader = None
-        except:
+        except Exception:
+            print("Failed to close ldf reader", file=sys.stderr)
+            traceback.print_exc()
             pass
 
     def _open(self, sample):
@@ -482,7 +527,7 @@ class LoadLDF:
         return self.read(infile, sample, readlen)
 
 
-def ldf_pipe(outname, compression_level=6):
+def ldf_pipe(outname: str, compression_level: int = 6):
     corecmd = "ffmpeg -y -hide_banner -loglevel error -f s16le -ar 40k -ac 1 -i - -acodec flac -f ogg".split(
         " "
     )
@@ -493,27 +538,72 @@ def ldf_pipe(outname, compression_level=6):
 
     return process, process.stdin
 
+def ac3_pipe(outname: str):
+    processes = []
+
+    cmd1 = "sox -r 40000000 -b 8 -c 1 -e signed -t raw - -b 8 -r 46080000 -e unsigned -c 1 -t raw -"
+    cmd2 = "ld-ac3-demodulate -v 3 - -"
+    cmd3 = f"ld-ac3-decode - {outname}"
+
+    logfp = open(f"{outname + '.log'}", 'w')
+
+    # This is done in reverse order to allow for pipe building
+    processes.append(subprocess.Popen(cmd3.split(' '), 
+                                      stdin=subprocess.PIPE,
+                                      stdout=logfp,
+                                      stderr=subprocess.STDOUT))
+
+    processes.append(subprocess.Popen(cmd2.split(' '), 
+                                      stdin=subprocess.PIPE, 
+                                      stdout=processes[-1].stdin))
+
+    processes.append(subprocess.Popen(cmd1.split(' '), 
+                                      stdin=subprocess.PIPE, 
+                                      stdout=processes[-1].stdin))
+
+    return processes, processes[-1].stdin
 
 # Git helpers
 
+def get_version():
+    """ get version info stashed in this directory's version file """
+
+    try:
+        # get the directory this file was pulled from, then add /version
+        scriptdir = os.path.dirname(os.path.realpath(__file__))
+        fd = open(os.path.join(scriptdir, 'version'), 'r')
+
+        fdata = fd.read()
+        return fdata.strip() # remove trailing \n etc
+    except: # usually FileNotFoundError
+        return "unknown"
+
 
 def get_git_info():
-    """ Return git branch and commit for current directory, iff available. """
+    """ Return git branch and commit for current directory, if available. """
 
     branch = "UNKNOWN"
     commit = "UNKNOWN"
+
+    version = get_version()
+    if ':' in version:
+        branch, commit = version.split(':')[0:2]
 
     try:
         sp = subprocess.run(
             "git rev-parse --abbrev-ref HEAD", shell=True, capture_output=True
         )
-        branch = sp.stdout.decode("utf-8").strip() if not sp.returncode else "UNKNOWN"
+        if not sp.returncode:
+            branch = sp.stdout.decode("utf-8").strip()
 
         sp = subprocess.run(
             "git rev-parse --short HEAD", shell=True, capture_output=True
         )
-        commit = sp.stdout.decode("utf-8").strip() if not sp.returncode else "UNKNOWN"
-    except:
+        if not sp.returncode:
+            commit = sp.stdout.decode("utf-8").strip()
+    except Exception:
+        print("Something went wrong when trying to read git info...", file=sys.stderr)
+        traceback.print_exc()
         pass
 
     return branch, commit
@@ -597,7 +687,9 @@ def calczc_do(data, _start_offset, target, edge=0, count=10):
     if b - a != 0:
         y = -a / (-a + b)
     else:
-        print('RuntimeWarning: Div by zero prevented at lddecode/utils.calczc_do()', a, b)
+        print(
+            "RuntimeWarning: Div by zero prevented at lddecode/utils.calczc_do()", a, b
+        )
         y = 0
 
     return x - 1 + y
@@ -616,22 +708,6 @@ def calczc(data, _start_offset, target, edge=0, count=10, reverse=False):
     return calczc_do(data, _start_offset, target, edge, count)
 
 
-def calczc_sets(data, start, end, tgt=0, cliplevel=None):
-    zcsets = {False: [], True: []}
-    bi = start
-
-    while bi < end:
-        if np.abs(data[bi]) > cliplevel:
-            zc = calczc(data, bi, tgt)
-
-            if zc is not None:
-                zcsets[data[bi] > tgt].append(offset)
-                bi = np.int(zc)
-
-        bi += 1
-
-    return {False: np.array(zcsets[False]), True: np.array(zcsets[True])}
-
 # Shamelessly based on https://github.com/scipy/scipy/blob/v1.6.0/scipy/signal/signaltools.py#L2264-2267
 # ... and intended for real FFT, but seems fine with complex as well ;)
 def build_hilbert(fft_size):
@@ -640,13 +716,14 @@ def build_hilbert(fft_size):
 
     output = np.zeros(fft_size)
     output[0] = output[fft_size // 2] = 1
-    output[1:fft_size // 2] = 2
+    output[1 : fft_size // 2] = 2
 
     return output
 
+
 def unwrap_hilbert(hilbert, freq_hz):
     tangles = np.angle(hilbert)
-    dangles = np.pad(np.diff(tangles), (1, 0), mode="constant")
+    dangles = np.ediff1d(tangles, to_begin=0)
 
     # make sure unwapping goes the right way
     if dangles[0] < -pi:
@@ -660,12 +737,13 @@ def unwrap_hilbert(hilbert, freq_hz):
         tdangles2[tdangles2 > tau] -= tau
     return tdangles2 * (freq_hz / tau)
 
+
 def fft_determine_slices(center, min_bandwidth, freq_hz, bins_in):
-    ''' returns the # of sub-bins needed to get center+/-min_bandwidth.
+    """ returns the # of sub-bins needed to get center+/-min_bandwidth.
         The returned lowbin is the first bin (symmetrically) needed to be saved.
 
         This will need to be 'flipped' using fft_slice to get the trimmed set
-    '''
+    """
 
     # compute the width of each bin
     binwidth = freq_hz / bins_in
@@ -683,11 +761,17 @@ def fft_determine_slices(center, min_bandwidth, freq_hz, bins_in):
 
     return lowbin, nbins, cut_freq
 
+
 def fft_do_slice(fdomain, lowbin, nbins, blocklen):
-    ''' Uses lowbin and nbins as returned from fft_determine_slices to
-        cut the fft '''
-    nbins_half = nbins//2
-    return np.concatenate([fdomain[lowbin:lowbin+nbins_half], fdomain[blocklen-lowbin-nbins_half:blocklen-lowbin]])
+    """ Uses lowbin and nbins as returned from fft_determine_slices to
+        cut the fft """
+    nbins_half = nbins // 2
+    return np.concatenate(
+        [
+            fdomain[lowbin : lowbin + nbins_half],
+            fdomain[blocklen - lowbin - nbins_half : blocklen - lowbin],
+        ]
+    )
 
 
 @njit(cache=True)
@@ -762,38 +846,66 @@ def findareas(array, cross):
     return [(*z, z[1] - z[0]) for z in zip(starts, ends)]
 
 
-def findpulses(array, low, high):
-    """ Find areas where `array` is between `low` and `high`
+Pulse = namedtuple("Pulse", "start len")
 
-    returns: array of tuples of said areas (begin, end, length)
+
+@njit(cache=True, nogil=True)
+def findpulses_numba_raw(sync_ref, high, min_synclen=0, max_synclen=5000):
+    """Locate possible pulses by looking at areas within some range.
+    Outputs arrays of starts and lengths
     """
 
-    Pulse = namedtuple("Pulse", "start len")
+    in_pulse = sync_ref[0] <= high
 
-    array_inrange = inrange(array, low, high)
+    # Start/lengths lists
+    # It's possible this could be optimized further by using
+    # a different data structure here.
+    starts = []
+    lengths = []
 
-    starts = np.where(
-        np.logical_and(array_inrange[1:] == True, array_inrange[:-1] == False)
-    )[0]
-    ends = np.where(
-        np.logical_and(array_inrange[1:] == False, array_inrange[:-1] == True)
-    )[0]
+    cur_start = 0
 
-    if len(starts) == 0 or len(ends) == 0:
-        return []
+    # Basic algorithm here is swapping between two states, going to the other one if we detect the
+    # current sample passed the threshold.
+    for pos, value in enumerate(sync_ref):
+        if in_pulse:
+            if value > high:
+                length = pos - cur_start
+                # If the pulse is in range, and it's not a starting one
+                if inrange(length, min_synclen, max_synclen) and cur_start != 0:
+                    starts.append(cur_start)
+                    lengths.append(length)
+                in_pulse = False
+        elif value <= high:
+            cur_start = pos
+            in_pulse = True
 
-    # remove 'dangling' beginnings and endings so everything zips up nicely and in order
-    if ends[0] < starts[0]:
-        ends = ends[1:]
+    # Not using a possible trailing pulse
+    # if in_pulse:
+    #     # Handle trailing pulse
+    #     length = len(sync_ref) - 1 - cur_start
+    #     if inrange(length, min_synclen, max_synclen):
+    #         starts.append(cur_start)
+    #         lengths.append(length)
 
-    try:
-        if starts[-1] > ends[-1]:
-            starts = starts[:-1]
-    except IndexError:
-        print("Index error at lddecode/utils.findpulses(). Are we on the end of the file?")
-        return []
+    return np.asarray(starts), np.asarray(lengths)
 
-    return [Pulse(z[0], z[1] - z[0]) for z in zip(starts, ends)]
+
+def _to_pulses_list(pulses_starts, pulses_lengths):
+    """Make list of Pulse objects from arrays of pulses starts and lengths"""
+    # Not using numba for this right now as it seemed to cause random segfault
+    # in tests.
+    return [Pulse(z[0], z[1]) for z in zip(pulses_starts, pulses_lengths)]
+
+
+def findpulses(sync_ref, _, high):
+    """Locate possible pulses by looking at areas within some range.
+    .outputs a list of Pulse tuples
+    """
+    pulses_starts, pulses_lengths = findpulses_numba_raw(
+        sync_ref, high
+    )
+    return _to_pulses_list(pulses_starts, pulses_lengths)
 
 
 def findpeaks(array, low=0):
@@ -814,7 +926,7 @@ def LRUupdate(l, k):
     """
     try:
         l.remove(k)
-    except:
+    except Exception:
         pass
 
     l.insert(0, k)
@@ -908,10 +1020,11 @@ def lev_to_db(rlev):
     return 20 * np.log10(rlev)
 
 
-# moved from core.py
 @njit(cache=True)
-def dsa_rescale(infloat):
-    return int(np.round(infloat * 32767 / 150000 * (np.sqrt(2)/2)))
+def dsa_rescale_and_clip(infloat):
+    """rescales input value to output levels and clips to fit into signed 16-bit"""
+    value = int(np.round(infloat * 32767.0 / 371081.0))
+    return min(max(value, -32766), 32766)
 
 
 # Hotspot subroutines in FieldNTSC's compute_line_bursts function,
@@ -919,12 +1032,23 @@ def dsa_rescale(infloat):
 
 
 @njit(cache=True)
-def clb_findnextburst(burstarea, i, endburstarea, threshold):
-    for j in range(i, endburstarea):
+def clb_findbursts(burstarea, i, endburstarea, threshold):
+    out = []
+    
+    j = i
+    while j < endburstarea:
         if np.abs(burstarea[j]) > threshold:
-            return burstarea[j], calczc_do(burstarea, j, 0)
+            pre = burstarea[j]
+            zc = calczc_do(burstarea, j, 0)
+            if zc is not None:
+                out.append((burstarea[j], zc))
+                j = int(zc) + 1
+            else:
+                return out
+        else:
+            j += 1
 
-    return (None, None)
+    return out
 
 
 @njit(cache=True)
@@ -937,12 +1061,17 @@ def distance_from_round(x):
 def write_json(ldd, jsondict, outname):
 
     fp = open(outname + ".tbc.json.tmp", "w")
-    json.dump(jsondict, fp, indent=4 if ldd.verboseVITS else None,
-              separators=(',', ':') if not ldd.verboseVITS else None)
+    json.dump(
+        jsondict,
+        fp,
+        allow_nan=False,
+        indent=4 if ldd.verboseVITS else None,
+        separators=(",", ":") if not ldd.verboseVITS else None,
+    )
     fp.write("\n")
     fp.close()
 
-    os.rename(outname + ".tbc.json.tmp", outname + ".tbc.json")
+    os.replace(outname + ".tbc.json.tmp", outname + ".tbc.json")
 
 
 def jsondump_thread(ldd, outname):
@@ -957,7 +1086,6 @@ def jsondump_thread(ldd, outname):
     def consume(q):
         while True:
             jsondict = q.get()
-
             if jsondict is None:
                 q.task_done()
                 return
@@ -974,13 +1102,17 @@ def jsondump_thread(ldd, outname):
 
     return q
 
+
 class StridedCollector:
     # This keeps a numpy buffer and outputs an fft block and keeps the overlap
     # for the next fft.
-    def __init__(self, blocklen = 65536, stride = 2048):
+    def __init__(self, blocklen=32768, cut_begin=2048, cut_end=0):
         self.buffer = None
         self.blocklen = blocklen
-        self.stride = stride
+
+        self.cut_begin = cut_begin
+        self.cut_end = self.blocklen - cut_end
+        self.stride = cut_begin + cut_end
 
     def add(self, data):
         if self.buffer is None:
@@ -993,14 +1125,20 @@ class StridedCollector:
     def have_block(self):
         return (self.buffer is not None) and (len(self.buffer) >= self.blocklen)
 
+    def cut(self, processed_data):
+        # TODO: assert len(processed_data) == self.blocklen
+
+        return processed_data[self.cut_begin : self.cut_end]
+
     def get_block(self):
         if self.have_block():
-            rv = self.buffer[0:self.blocklen]
-            self.buffer = self.buffer[self.blocklen-self.stride:]
+            rv = self.buffer[0 : self.blocklen]
+            self.buffer = self.buffer[self.blocklen - self.stride :]
 
             return rv
 
         return None
+
 
 if __name__ == "__main__":
     print("Nothing to see here, move along ;)")

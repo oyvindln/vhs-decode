@@ -3,7 +3,7 @@
     main.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2018-2021 Simon Inns
+    Copyright (C) 2018-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -48,7 +48,8 @@ int main(int argc, char *argv[])
     parser.setApplicationDescription(
         "ld-analyse - TBC output analysis\n"
         "\n"
-        "(c)2018-2020 Simon Inns\n"
+        "(c)2018-2022 Simon Inns\n"
+        "(c)2020-2022 Adam Sampson\n"
         "GPLv3 Open-Source - github: https://github.com/happycube/ld-decode");
     parser.addHelpOption();
     parser.addVersionOption();

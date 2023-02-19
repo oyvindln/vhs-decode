@@ -3,7 +3,6 @@
 # Also gives the base for level clamping, and maybe genlocking/vroom prevention
 
 from vhsdecode.utils import (
-    FiltersClass,
     firdes_lowpass,
     firdes_highpass,
     plot_scope,
@@ -11,9 +10,12 @@ from vhsdecode.utils import (
     zero_cross_det,
     StackableMA,
 )
+
+from vhsdecode.linear_filter import FiltersClass, chainfiltfilt_b
 import numpy as np
 from scipy.signal import argrelextrema
 from os import getpid
+from concurrent.futures import ThreadPoolExecutor
 from numba import njit
 
 import lddecode.core as ldd
@@ -27,6 +29,13 @@ def f_to_samples(samp_rate, frequency):
 # from time to samples
 def t_to_samples(samp_rate, time):
     return f_to_samples(samp_rate, 1 / time)
+
+
+# applies a filtfilt to the data over the array of filters
+def _chainfiltfilt(data, filters):
+    for filt in filters:
+        data = filt.filtfilt(data)
+    return data
 
 
 # clips any sync pulse that satisfies min_synclen < pulse_len < max_synclen
@@ -43,38 +52,38 @@ def _safe_sync_clip(sync_ref, data, levels, eq_pulselen):
     clip_from = where_all_picture[where_all_syncs]
     clip_len = locs_len[where_all_syncs]
     for ix, begin in enumerate(clip_from):
-        data[begin: begin + clip_len[ix]] = sync
+        data[begin : begin + clip_len[ix]] = sync
 
     return data
 
 
 # encapsulates the serration search logic
 class VsyncSerration:
-    def __init__(self, fs, sysparams, show_decoded_serration=False):
+    def __init__(self, fs, sysparams, divisor=1, show_decoded_serration=False):
+        self._divisor = divisor
         self.show_decoded = show_decoded_serration
-        self.samp_rate = fs
-        self.SysParams = sysparams
-        self.fv = self.SysParams["FPS"] * 2
-        self.fh = self.SysParams["FPS"] * self.SysParams["frame_lines"]
+        self.samp_rate = fs / self._divisor
+        fv = sysparams["FPS"] * 2
+        fh = sysparams["FPS"] * sysparams["frame_lines"]
 
         # parameter, harmonic limit of the envelope search (with respect of vertical frequency)
-        self.venv_limit = 5
+        venv_limit = 5
         # parameter, divisor of fh for limiting the bandwidth of power_ratio_search()
-        self.serration_limit = 3
+        serration_limit = 3
         # parameter, depth/window of the moving averaging
         ma_depth = 2
         ma_min_watermark = 1
 
         # used on vsync_envelope_simple() (search for video amplitude pinch)
-        iir_vsync_env = firdes_lowpass(self.samp_rate, self.fv * self.venv_limit, 1e3)
+        iir_vsync_env = firdes_lowpass(self.samp_rate, fv * venv_limit, 1e3)
         self.vsyncEnvFilter = FiltersClass(
             iir_vsync_env[0], iir_vsync_env[1], self.samp_rate
         )
 
         # used in power_ratio_search(), it makes a bandpass filter
         # cannot design it as a bandpass with the given constraints
-        iir_serration_base_lo = firdes_highpass(self.samp_rate, self.fh, self.fh)
-        iir_serration_base_hi = firdes_lowpass(self.samp_rate, self.fh, self.fh)
+        iir_serration_base_lo = firdes_highpass(self.samp_rate, fh, fh)
+        iir_serration_base_hi = firdes_lowpass(self.samp_rate, fh, fh)
         self.serrationFilter_base = {
             FiltersClass(
                 iir_serration_base_lo[0], iir_serration_base_lo[1], self.samp_rate
@@ -85,55 +94,56 @@ class VsyncSerration:
         }
 
         iir_serration_envelope_lo = firdes_lowpass(
-            self.samp_rate, self.fh / self.serration_limit, self.fh / 2
+            self.samp_rate, fh / serration_limit, fh / 2
         )
 
         self.serrationFilter_envelope = FiltersClass(
             iir_serration_envelope_lo[0], iir_serration_envelope_lo[1], self.samp_rate
         )
+
         # -- end of uses of power_ratio_search()
 
         # several timing related constants
         self.eq_pulselen = round(
-            t_to_samples(self.samp_rate, self.SysParams["eqPulseUS"] * 1e-6)
+            t_to_samples(self.samp_rate, sysparams["eqPulseUS"] * 1e-6)
         )
-        self.vsynclen = round(f_to_samples(self.samp_rate, self.fv))
-        self.linelen = round(f_to_samples(self.samp_rate, self.fh))
-        line_time = 1 / self.fh
+        self.vsynclen = round(f_to_samples(self.samp_rate, fv))
+        self.linelen = round(f_to_samples(self.samp_rate, fh))
+        line_time = 1 / fh
         vbi_time = 6.5 * line_time
-        self.vbi_time_range = \
-            t_to_samples(self.samp_rate, vbi_time * 3 / 4), \
-            t_to_samples(self.samp_rate, vbi_time * 5 / 4)
+        self.vbi_time_range = t_to_samples(
+            self.samp_rate, vbi_time * 3 / 4
+        ), t_to_samples(self.samp_rate, vbi_time * 5 / 4)
 
         # result storage instances
-        self.levels = \
-            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark), \
-            StackableMA(window_average=ma_depth, min_watermark=ma_min_watermark)  # sync, blanking
+        self.levels = StackableMA(
+            window_average=ma_depth, min_watermark=ma_min_watermark
+        ), StackableMA(
+            window_average=ma_depth, min_watermark=ma_min_watermark
+        )  # sync, blanking
 
         self.sync_level_bias = np.array([])
         self.fieldcount = 0
         self.pid = getpid()
         self.found_serration = False
+        self.executor = ThreadPoolExecutor(max_workers=3)
 
     def getEQpulselen(self):
-        return self.eq_pulselen
+        return self.eq_pulselen * self._divisor
 
-    def getLinelen(self):
-        return self.linelen
+    def get_line_len(self):
+        return self.linelen * self._divisor
 
     # returns the measured sync level and blank level
-    def getLevels(self):
+    def pull_levels(self):
         sync, blank = self.levels[0].pull(), self.levels[1].pull()
         return sync, blank
 
     # returns true if it has levels above the min_watermark
-    def hasLevels(self):
-        return (
-                self.levels[0].has_values()
-                and self.levels[1].has_values()
-        )
+    def has_levels(self):
+        return self.levels[0].has_values() and self.levels[1].has_values()
 
-    def hasSerration(self):
+    def has_serration(self):
         return self.found_serration
 
     # it adds external levels to the stack
@@ -142,16 +152,17 @@ class VsyncSerration:
             self.levels[ix].push(level)
 
     # only used when printing the charts
-    def mutemask(self, raw_locs, blocklen, pulselen):
+    def _mutemask(self, raw_locs, blocklen, pulselen):
         mask = np.zeros(blocklen)
         locs = raw_locs[np.where(raw_locs < blocklen - pulselen)[0]]
         for loc in locs:
-            mask[loc: loc + pulselen] = [1] * pulselen
+            mask[loc : loc + pulselen] = [1] * pulselen
         return mask[:blocklen]
 
     # this may need tweak
-    def vsync_envelope_simple(self, data):
-        hi_part = np.clip(data, a_max=np.max(data), a_min=0)
+    def _vsync_envelope_simple(self, data):
+        # hi_part = np.clip(data, a_max=np.max(data), a_min=0)
+        hi_part = data
         hi_filtered = self.vsyncEnvFilter.filtfilt(hi_part)
         return hi_filtered, np.min(data)
 
@@ -159,35 +170,49 @@ class VsyncSerration:
     # then assembles both halves as one result.
     # It is a hack to avoid edge distortion when using lowpass filters
     # of very low cutoff
-    def vsync_envelope_double(self, data):
+    def _vsync_envelope_double(self, data):
         half = int(len(data) / 2)
 
-        forward = self.vsync_envelope_simple(data)
-        reverse_t = self.vsync_envelope_simple(np.flip(data))
-        reverse = np.flip(reverse_t[0]), reverse_t[1]
+        hi_part = np.clip(data, a_max=None, a_min=0)
+
+        def vsync_env_rev(hp):
+            return np.flip(self.vsyncEnvFilter.filtfilt(np.flip(hp)))
+
+        # Do the two filter operations on separate threads for a speedup.
+        forward_f = self.executor.submit(self._vsync_envelope_simple, hi_part)
+        # reverse_t_f = self.executor.submit(self.vsync_envelope_simple, np.flip(hi_part))
+        reverse_t_f = self.executor.submit(vsync_env_rev, hi_part)
+        forward = forward_f.result()
+        reverse = reverse_t_f.result()
+        # # Non-threaded version:
+        # b_forward = self.vsync_envelope_simple(hi_part)
+        # b_reverse_t = self.vsync_envelope_simple(np.flip(hi_part))
+        # b_reverse = np.flip(b_reverse_t[0]), b_reverse_t[1]
+
         # end of forward + beginning of reverse
-        result = (
-            np.append(reverse[0][:half], forward[0][half:]),
-            forward[1]
-        )
+        # Re-use existing array instead of allocating a new one.
+        # Maybe there's a better way to do this.
+        result_temp = hi_part
+        result_temp[:half] = reverse[:half]
+        result_temp[half:] = forward[0][half:]
+        result = result_temp, forward[1]
+        # # Old version
+        # b_result = (np.append(b_reverse[0][:half], b_forward[0][half:]), b_forward[1])
+
         # dualplot_scope(forward[0], reverse[0])
         # dualplot_scope(result[0], result[1], title="VBI envelope")
         return result
 
-    # applies a filtfilt to the data over the array of filters
-    def chainfiltfilt(self, data, filters):
-        for filt in filters:
-            data = filt.filtfilt(data)
-        return data
-
     # measures the harmonics of the EQ pulses
-    def power_ratio_search(self, data):
-        first_harmonic = np.square(self.chainfiltfilt(data, self.serrationFilter_base))
+    def _power_ratio_search(self, data):
+        first_harmonic = chainfiltfilt_b(data, self.serrationFilter_base)
+        # Make sure we do this in place to avoid allocating an extra array.
+        first_harmonic **= 2
         first_harmonic = self.serrationFilter_envelope.filtfilt(first_harmonic)
         return argrelextrema(first_harmonic, np.less)[0]
 
-    def select_serration(self, where_min, serrations):
-        selected = np.array([], np.int)
+    def _select_serration(self, where_min, serrations):
+        selected = np.array([], np.int64)
         for id, edge in enumerate(serrations):
             for s_min in where_min:
                 next_serration_id = min(id + 1, len(serrations) - 1)
@@ -196,10 +221,10 @@ class VsyncSerration:
         return selected
 
     # fills in missing VBI positions when possible
-    def vsync_arbitrage(self, where_allmin, serrations, datalen):
-        result = np.array([], np.int)
+    def _vsync_arbitrage(self, where_allmin, serrations, datalen):
+        result = np.array([], np.int64)
         if len(where_allmin) > 1:
-            valid_serrations = self.select_serration(where_allmin, serrations)
+            valid_serrations = self._select_serration(where_allmin, serrations)
             for serration in valid_serrations:
                 if (
                     serration - self.vsynclen >= 0
@@ -219,7 +244,7 @@ class VsyncSerration:
         return result
 
     # extracts the level from a valid serration
-    def get_serration_sync_levels(self, serration):
+    def _get_serration_sync_levels(self, serration):
         half_amp = np.mean(serration)
         peaks = np.where(serration > half_amp)[0]
         valleys = np.where(serration <= half_amp)[0]
@@ -227,13 +252,14 @@ class VsyncSerration:
         return levels
 
     # validates the found section as a serration
-    def search_eq_pulses(self, data, pos, linespan=30):
+    def _search_eq_pulses(self, data, pos, linespan=30):
         start, end = max(0, pos - self.linelen * linespan), min(
             len(data) - 1, pos + self.linelen * linespan
         )
         min_block = data[start:end]
-        level = (np.median(min_block) - np.min(min_block)) / 2
-        level += np.min(min_block)
+        min_block_min = np.min(min_block)
+        level = (np.median(min_block) - min_block_min) / 2
+        level += min_block_min
         zero_block = min_block - level
         sync_pulses = zero_cross_det(zero_block)
         diff_sync = np.diff(sync_pulses)
@@ -257,9 +283,9 @@ class VsyncSerration:
             # now calculated at initialization
             if self.vbi_time_range[0] < len(serration) < self.vbi_time_range[1]:
                 self.found_serration = True
-                self.push_levels(self.get_serration_sync_levels(serration))
+                self.push_levels(self._get_serration_sync_levels(serration))
                 if self.show_decoded:
-                    sync, blank = self.getLevels()
+                    sync, blank = self.pull_levels()
                     marker = np.ones(len(serration)) * blank
                     dualplot_scope(
                         serration,
@@ -275,25 +301,33 @@ class VsyncSerration:
     def mean_bias(self):
         return np.mean(self.sync_level_bias)
 
-    def remove_bias(self, data):
+    def _remove_bias(self, data):
         return data - self.sync_level_bias
 
     # this is the start-of-search
-    def vsync_envelope(self, data, padding=1024):  # 0x10000
+    def _vsync_envelope(self, data, padding=1024):  # 0x10000
         padded = np.append(np.flip(data[:padding]), data)
-        forward = self.vsync_envelope_double(padded)
+        forward = self._vsync_envelope_double(padded)
         self.sync_level_bias = forward[1]
-        diff = np.add(forward[0][padding:], -self.sync_level_bias)
+
+        # Optimization - do in place
+        # diff = np.add(forward[0][padding:], -self.sync_level_bias)
+        forward[0][padding:] -= self.sync_level_bias
+        diff = forward[0][padding:]
+        # Since we modified this, make sure it's not re-used accidentaly.
+        del forward
         where_allmin = argrelextrema(diff, np.less)[0]
         if len(where_allmin) > 0:
-            serrations = self.power_ratio_search(padded)
-            where_min = self.vsync_arbitrage(where_allmin, serrations, len(padded))
+            serrations = self._power_ratio_search(padded)
+            where_min = self._vsync_arbitrage(where_allmin, serrations, len(padded))
             serration_locs = list()
             if len(where_min) > 0:
                 mask_len = self.linelen * 5
                 state = False
+
                 for w_min in where_min:
-                    state, serr_loc, serr_len = self.search_eq_pulses(data, w_min)
+                    state, serr_loc, serr_len = self._search_eq_pulses(data, w_min)
+
                     if state:
                         serration_locs.append(serr_loc)
                         mask_len = serr_len - serr_loc
@@ -301,15 +335,15 @@ class VsyncSerration:
                 if self.show_decoded:
                     data_copy = data.copy()  # self.remove_bias(data)
                     if len(serration_locs) > 0:
-                        mask = self.mutemask(
+                        mask = self._mutemask(
                             np.array(serration_locs), len(data_copy), mask_len
                         )
                         dualplot_scope(
                             data_copy,
                             np.clip(
-                                mask * max(data_copy),
-                                a_max=max(data_copy),
-                                a_min=min(data_copy),
+                                mask * np.amax(data_copy),
+                                a_max=np.amax(data_copy),
+                                a_min=np.amin(data_copy),
                             ),
                             title="VBI position",
                         )
@@ -329,14 +363,14 @@ class VsyncSerration:
     # this runs the measures
     def work(self, data):
         self.found_serration = False
-        self.vsync_envelope(data)
-        if self.hasLevels() and self.found_serration:
+        self._vsync_envelope(data[:: self._divisor])
+        if self.has_levels() and self.found_serration:
             ldd.logger.debug(
                 "VBI serration levels %d - Sync tip: %.02f kHz, Blanking (ire0): %.02f kHz"
                 % (
                     self.levels[0].size(),
-                    self.getLevels()[0] / 1e3,
-                    self.getLevels()[1] / 1e3,
+                    self.pull_levels()[0] / 1e3,
+                    self.pull_levels()[1] / 1e3,
                 )
             )
         elif self.fieldcount % 10 == 0:
@@ -348,6 +382,8 @@ class VsyncSerration:
 
     # safe clips the bottom of the sync pulses, but not the picture area
     def safe_sync_clip(self, sync_ref, data):
-        if self.hasLevels():
-            data = _safe_sync_clip(sync_ref, data, self.getLevels(), self.eq_pulselen)
+        if self.has_levels():
+            data = _safe_sync_clip(
+                sync_ref, data, self.pull_levels(), self.getEQpulselen()
+            )
         return data

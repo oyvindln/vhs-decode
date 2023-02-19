@@ -31,17 +31,9 @@
 class ClosedCaption
 {
 public:
-    struct CcData {
-        uchar byte0;
-        uchar byte1;
-        bool isValid;
-    };
-
-    CcData getData(const SourceVideo::Data &lineData, LdDecodeMetaData::VideoParameters videoParameters);
-
-private:
-    bool isEvenParity(uchar data);
-    QVector<bool> getTransitionMap(const SourceVideo::Data &lineData, qint32 zcPoint);
+    bool decodeLine(const SourceVideo::Data& lineData,
+                    const LdDecodeMetaData::VideoParameters& videoParameters,
+                    LdDecodeMetaData::Field& fieldMetadata);
 };
 
 #endif // CLOSEDCAPTION_H

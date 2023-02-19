@@ -55,7 +55,6 @@ public:
 protected:
     void forwardFFTTile(qint32 tileX, qint32 tileY, qint32 tileZ, const QVector<SourceField> &inputFields);
     void inverseFFTTile(qint32 tileX, qint32 tileY, qint32 tileZ, qint32 startFieldIndex, qint32 endFieldIndex);
-    template <TransformMode MODE>
     void applyFilter();
     void overlayFFTFrame(qint32 positionX, qint32 positionY,
                          const QVector<SourceField> &inputFields, qint32 fieldIndex,

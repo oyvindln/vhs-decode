@@ -3,7 +3,7 @@
     stacker.h
 
     ld-disc-stacker - Disc stacking for ld-decode
-    Copyright (C) 2020 Simon Inns
+    Copyright (C) 2020-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 

@@ -44,7 +44,7 @@ void DropOutCorrect::run()
     QVector<LdDecodeMetaData::Field> secondFieldMetadata;
     bool reverse, intraField, overCorrect;
     QVector<qint32> availableSourcesForFrame;
-    QVector<qreal> sourceFrameQuality;
+    QVector<double> sourceFrameQuality;
 
     // Statistics
     Statistics statistics;
@@ -123,7 +123,7 @@ void DropOutCorrect::correctField(const QVector<QVector<DropOutLocation>> &thisF
                                   const QVector<QVector<DropOutLocation>> &otherFieldDropouts,
                                   QVector<SourceVideo::Data> &thisFieldData, const QVector<SourceVideo::Data> &otherFieldData,
                                   bool thisFieldIsFirst, bool intraField, const QVector<qint32> &availableSourcesForFrame,
-                                  const QVector<qreal> &sourceFrameQuality, Statistics &statistics)
+                                  const QVector<double> &sourceFrameQuality, Statistics &statistics)
 {
     for (qint32 dropoutIndex = 0; dropoutIndex < thisFieldDropouts[0].size(); dropoutIndex++) {
         Replacement replacement, chromaReplacement;
@@ -257,7 +257,7 @@ DropOutCorrect::Replacement DropOutCorrect::findReplacementLine(const QVector<QV
                                                                 qint32 dropOutIndex, bool thisFieldIsFirst, bool matchChromaPhase,
                                                                 bool isColourBurst, bool intraField,
                                                                 const QVector<qint32> &availableSourcesForFrame,
-                                                                const QVector<qreal> &sourceFrameQuality)
+                                                                const QVector<double> &sourceFrameQuality)
 {
     // Define the minimum step size to use when searching for replacement
     // lines, and the offset to the nearest replacement line in the other
@@ -267,7 +267,7 @@ DropOutCorrect::Replacement DropOutCorrect::findReplacementLine(const QVector<QV
         // We're not trying to match the chroma phase, so any line will do.
         stepAmount = 1;
         otherFieldOffset = -1;
-    } else if (videoParameters[0].isSourcePal) {
+    } else if (videoParameters[0].system == PAL || videoParameters[0].system == PAL_M) {
         // For PAL: [Poynton ch44 p529]
         //
         // - Subcarrier has 283.7516 cycles per line, so there's a (nearly) 90
@@ -406,7 +406,7 @@ DropOutCorrect::Replacement DropOutCorrect::findReplacementLine(const QVector<QV
 void DropOutCorrect::findPotentialReplacementLine(const QVector<QVector<DropOutLocation>> &targetDropouts, qint32 targetIndex,
                                                   const QVector<QVector<DropOutLocation>> &sourceDropouts, bool isSameField,
                                                   qint32 sourceOffset, qint32 stepAmount,
-                                                  qint32 sourceNo, const QVector<qreal> &sourceFrameQuality,
+                                                  qint32 sourceNo, const QVector<double> &sourceFrameQuality,
                                                   QVector<Replacement> &candidates)
 {    
     // Calculate the start source line, applying sourceOffset to find a line with the right chroma phase
@@ -488,10 +488,12 @@ void DropOutCorrect::correctDropOut(const DropOutLocation &dropOut,
         Filters filters;
         QVector<quint16> lineBuf(videoParameters[0].fieldWidth);
         auto filterLineBuf = [&] {
-            if (videoParameters[0].isSourcePal) {
+            if (videoParameters[0].system == PAL) {
                 filters.palLumaFirFilter(lineBuf.data(), lineBuf.size());
-            } else {
+            } else if (videoParameters[0].system == NTSC) {
                 filters.ntscLumaFirFilter(lineBuf.data(), lineBuf.size());
+            } else {
+                filters.palMLumaFirFilter(lineBuf.data(), lineBuf.size());
             }
         };
 

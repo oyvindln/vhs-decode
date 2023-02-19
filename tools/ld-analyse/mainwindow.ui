@@ -53,7 +53,7 @@
            <x>0</x>
            <y>0</y>
            <width>969</width>
-           <height>559</height>
+           <height>576</height>
           </rect>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_2">
@@ -404,6 +404,22 @@
             </widget>
            </item>
            <item>
+            <widget class="QPushButton" name="sourcesPushButton">
+             <property name="minimumSize">
+              <size>
+               <width>110</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="toolTip">
+              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Select between multiple sources&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+             </property>
+             <property name="text">
+              <string>Y+C Sources</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QPushButton" name="fieldOrderPushButton">
              <property name="minimumSize">
               <size>
@@ -434,7 +450,7 @@
      <x>0</x>
      <y>0</y>
      <width>991</width>
-     <height>29</height>
+     <height>22</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -443,6 +459,7 @@
     </property>
     <addaction name="actionOpen_TBC_file"/>
     <addaction name="actionReload_TBC"/>
+    <addaction name="actionSave_JSON"/>
     <addaction name="separator"/>
     <addaction name="actionSave_frame_as_PNG"/>
     <addaction name="separator"/>
@@ -453,12 +470,15 @@
      <string>Window</string>
     </property>
     <addaction name="actionDropout_analysis"/>
+    <addaction name="actionVisible_Dropout_analysis"/>
     <addaction name="actionSNR_analysis"/>
     <addaction name="actionWhite_SNR_analysis"/>
     <addaction name="actionVBI"/>
     <addaction name="actionLine_scope"/>
+    <addaction name="actionVectorscope"/>
     <addaction name="actionClosed_Captions"/>
     <addaction name="separator"/>
+    <addaction name="actionVideo_parameters"/>
     <addaction name="actionChroma_decoder_configuration"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
@@ -510,6 +530,14 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+L</string>
+   </property>
+  </action>
+  <action name="actionVectorscope">
+   <property name="text">
+    <string>Vectorscope...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+U</string>
    </property>
   </action>
   <action name="actionVBI">
@@ -613,17 +641,33 @@
     <string>Closed Captions...</string>
    </property>
   </action>
+  <action name="actionVideo_parameters">
+   <property name="text">
+    <string>Video parameters...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+P</string>
+   </property>
+  </action>
   <action name="actionChroma_decoder_configuration">
    <property name="text">
     <string>Chroma decoder configuration...</string>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+K</string>
+   </property>
   </action>
   <action name="actionReload_TBC">
    <property name="text">
-    <string>Reload TBC...</string>
+    <string>Reload TBC</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+A</string>
+   </property>
+  </action>
+  <action name="actionSave_JSON">
+   <property name="text">
+    <string>Save JSON</string>
    </property>
   </action>
   <action name="actionWhite_SNR_analysis">
@@ -632,6 +676,11 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+T</string>
+   </property>
+  </action>
+  <action name="actionVisible_Dropout_analysis">
+   <property name="text">
+    <string>Visible Dropout analysis...</string>
    </property>
   </action>
  </widget>

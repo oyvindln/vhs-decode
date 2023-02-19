@@ -3,7 +3,7 @@
     frame.h
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -31,11 +31,11 @@
 class Frame
 {
 public:
-    Frame(const qint32 &seqFrameNumber = -1, const qint32 &vbiFrameNumber = -1, const bool &isPictureStop = false,
-          const bool &isPullDown = false, const bool &isLeadInOrOut = false, const bool &isMarkedForDeletion = false,
-          const qreal &frameQuality = 0, const bool &isPadded = false, const bool &isClvOffset = false,
-          const qint32 &firstField = -1, const qint32 &secondField = -1,
-          const qint32 &firstFieldPhase = -1, const qint32 &secondFieldPhase = -1);
+    Frame(const qint32 seqFrameNumber = -1, const qint32 vbiFrameNumber = -1, const bool isPictureStop = false,
+          const bool isPullDown = false, const bool isLeadInOrOut = false, const bool isMarkedForDeletion = false,
+          const double frameQuality = 0, const bool isPadded = false, const bool isClvOffset = false,
+          const qint32 firstField = -1, const qint32 secondField = -1,
+          const qint32 firstFieldPhase = -1, const qint32 secondFieldPhase = -1);
     ~Frame() = default;
     Frame(const Frame &) = default;
     Frame &operator=(const Frame &) = default;
@@ -47,7 +47,7 @@ public:
     bool isPullDown() const;
     bool isLeadInOrOut() const;
     bool isMarkedForDeletion() const;
-    qreal frameQuality() const;
+    double frameQuality() const;
     bool isPadded() const;
     bool isClvOffset() const;
     qint32 firstField() const;
@@ -62,7 +62,7 @@ public:
     void isPullDown(bool value);
     void isLeadInOrOut(bool value);
     void isMarkedForDeletion(bool value);
-    void frameQuality(qreal value);
+    void frameQuality(double value);
     void isPadded(bool value);
     void isClvOffset(bool value);
     void firstField(qint32 value);
@@ -80,7 +80,7 @@ private:
     bool m_isPullDown;
     bool m_isLeadInOrOut;
     bool m_isMarkedForDeletion;
-    qreal m_frameQuality;
+    double m_frameQuality;
     bool m_isPadded;
     bool m_isClvOffset;
     qint32 m_firstField;

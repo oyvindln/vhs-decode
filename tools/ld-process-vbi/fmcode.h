@@ -28,23 +28,14 @@
 #include "sourcevideo.h"
 #include "lddecodemetadata.h"
 
+// Decoder for NTSC LaserDisc FM code lines.
+// Specified in IEC 60587-1986 section 10.2.
 class FmCode
 {
 public:
-    struct FmDecode {
-        quint64 receiverClockSyncBits;
-        quint64 videoFieldIndicator;
-        quint64 leadingDataRecognitionBits;
-        quint64 data;
-        quint64 dataParityBit;
-        quint64 trailingDataRecognitionBits;
-    };
-
-    FmCode::FmDecode fmDecoder(const SourceVideo::Data &lineData, LdDecodeMetaData::VideoParameters videoParameters);
-
-private:
-    bool isEvenParity(quint64 data);
-    QVector<bool> getTransitionMap(const SourceVideo::Data &lineData, qint32 zcPoint);
+    bool decodeLine(const SourceVideo::Data &lineData,
+                    const LdDecodeMetaData::VideoParameters& videoParameters,
+                    LdDecodeMetaData::Field& fieldMetadata);
 };
 
 #endif // FMCODE_H

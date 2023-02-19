@@ -7,13 +7,16 @@
     <x>0</x>
     <y>0</y>
     <width>460</width>
-    <height>514</height>
+    <height>637</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Chroma Decoder Configuration</string>
   </property>
   <layout class="QVBoxLayout" name="outerVerticalLayout">
+   <property name="sizeConstraint">
+    <enum>QLayout::SetFixedSize</enum>
+   </property>
    <item>
     <widget class="QLabel" name="chromaGainLabel">
      <property name="text">
@@ -23,6 +26,18 @@
    </item>
    <item>
     <widget class="QSlider" name="chromaGainHorizontalSlider">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>400</width>
+       <height>0</height>
+      </size>
+     </property>
      <property name="maximum">
       <number>200</number>
      </property>
@@ -93,6 +108,19 @@
     </widget>
    </item>
    <item>
+    <spacer name="verticalSpacer_1">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>15</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
     <widget class="QTabWidget" name="standardTabs">
      <property name="currentIndex">
       <number>1</number>
@@ -147,17 +175,10 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>15</height>
           </size>
          </property>
         </spacer>
-       </item>
-       <item>
-        <widget class="QCheckBox" name="thresholdModeCheckBox">
-         <property name="text">
-          <string>Use threshold comparison mode</string>
-         </property>
-        </widget>
        </item>
        <item>
         <spacer name="verticalSpacer_2">
@@ -167,7 +188,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>15</height>
           </size>
          </property>
         </spacer>
@@ -207,7 +228,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>15</height>
           </size>
          </property>
         </spacer>
@@ -234,7 +255,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>0</height>
           </size>
          </property>
         </spacer>
@@ -291,7 +312,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>15</height>
           </size>
          </property>
         </spacer>
@@ -318,20 +339,6 @@
         </widget>
        </item>
        <item>
-        <widget class="QCheckBox" name="colorLpfCheckBox">
-         <property name="text">
-          <string>Use chroma post-filter</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QCheckBox" name="colorLpfHqCheckBox">
-         <property name="text">
-          <string>Use full bandwidth Q channel filter</string>
-         </property>
-        </widget>
-       </item>
-       <item>
         <spacer name="verticalSpacer_5">
          <property name="orientation">
           <enum>Qt::Vertical</enum>
@@ -339,7 +346,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>15</height>
           </size>
          </property>
         </spacer>
@@ -376,7 +383,7 @@
          <property name="sizeHint" stdset="0">
           <size>
            <width>20</width>
-           <height>40</height>
+           <height>0</height>
           </size>
          </property>
         </spacer>
@@ -385,25 +392,12 @@
      </widget>
     </widget>
    </item>
-   <item>
-    <spacer name="verticalSpacer_1">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
-   </item>
   </layout>
  </widget>
  <resources/>
  <connections/>
  <buttongroups>
-  <buttongroup name="palFilterButtonGroup"/>
   <buttongroup name="ntscFilterButtonGroup"/>
+  <buttongroup name="palFilterButtonGroup"/>
  </buttongroups>
 </ui>

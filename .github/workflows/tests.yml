@@ -6,8 +6,8 @@ on:
   release:
 
 jobs:
-  tests:
-    name: Build and test
+  qt5:
+    name: Build with Qt 5
     runs-on: ubuntu-20.04
     steps:
 
@@ -22,61 +22,67 @@ jobs:
       timeout-minutes: 10
       run: |
         sudo apt-get update
-        # This list is from: https://github.com/happycube/ld-decode/wiki/Installation
-        sudo apt-get install -y --no-install-recommends clang libfann-dev python3-numpy python3-scipy python3-matplotlib git qt5-default libqwt-qt5-dev libfftw3-dev python3-tk python3-pandas python3-numba libavformat-dev libavcodec-dev libavutil-dev ffmpeg openssl pv
+        # Based on: https://github.com/happycube/ld-decode/wiki/Installation
+        # Added: cmake libqt5opengl5-dev libqt5svg5-dev
+        sudo apt-get install -y --no-install-recommends git cmake make python3-distutils python3-numpy python3-scipy python3-matplotlib cython3 qt5-default libqt5opengl5-dev libqt5svg5-dev libqwt-qt5-dev libfftw3-dev python3-numba libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+
+    - name: Set up build dir
+      timeout-minutes: 1
+      run: mkdir obj && ln -s ../testdata obj/testdata
+
+    - name: Configure
+      timeout-minutes: 5
+      run: cd obj && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUSE_QT_VERSION=5 ..
 
     - name: Build
       timeout-minutes: 15
-      run: make prefix=/usr
+      run: make -C obj VERBOSE=1
 
     - name: Install
       timeout-minutes: 5
-      run: make install prefix=/usr DESTDIR=/tmp/staging
+      run: make -C obj install DESTDIR=/tmp/staging && ls -lR /tmp/staging
 
-    - name: Run testfilter
+    - name: Run tests
+      timeout-minutes: 10
+      run: cd obj && ctest --output-on-failure
+
+  qt6:
+    # XXX This builds without Qwt as Ubuntu 22.04 doesn't have it for Qt 6
+    name: Build with Qt 6
+    runs-on: ubuntu-22.04
+    steps:
+
+    - uses: actions/checkout@v2
+
+    - uses: actions/checkout@v2
+      with:
+        repository: happycube/ld-decode-testdata
+        path: testdata
+
+    - name: Install dependencies
+      timeout-minutes: 10
+      run: |
+        sudo apt-get update
+        # Based on: https://github.com/happycube/ld-decode/wiki/Installation
+        # Added: cmake qt6-base-dev libgl-dev (needed by QtGui)
+        sudo apt-get install -y --no-install-recommends git cmake make python3-distutils python3-numpy python3-scipy python3-matplotlib cython3 qt6-base-dev libgl-dev libfftw3-dev python3-numba libavformat-dev libavcodec-dev libavutil-dev ffmpeg
+
+    - name: Set up build dir
+      timeout-minutes: 1
+      run: mkdir obj && ln -s ../testdata obj/testdata
+
+    - name: Configure
       timeout-minutes: 5
-      run: tools/library/filter/testfilter/testfilter
+      run: cd obj && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DUSE_QT_VERSION=6 -DUSE_QWT=OFF ..
 
-    - name: Run testvbidecoder
+    - name: Build
+      timeout-minutes: 15
+      run: make -C obj VERBOSE=1
+
+    - name: Install
       timeout-minutes: 5
-      run: tools/library/tbc/testvbidecoder/testvbidecoder
+      run: make -C obj install DESTDIR=/tmp/staging && ls -lR /tmp/staging
 
-    - name: Decode NTSC CAV
+    - name: Run tests
       timeout-minutes: 10
-      run: |
-        scripts/test-decode \
-          --decoder mono --decoder ntsc2d --decoder ntsc3d \
-          --expect-frames 29 \
-          --expect-bpsnr 43.3 \
-          --expect-vbi 9151563,15925840,15925840 \
-          --expect-efm-samples 40572 \
-          testdata/ve-snw-cut.lds
-
-    - name: Decode NTSC CLV
-      timeout-minutes: 10
-      run: |
-        scripts/test-decode \
-          --expect-frames 4 \
-          --expect-bpsnr 37.6 \
-          --expect-vbi 9167913,15785241,15785241 \
-          testdata/issues/176/issue176.lds
-
-    - name: Decode PAL CAV
-      timeout-minutes: 10
-      run: |
-        scripts/test-decode --pal \
-          --decoder mono --decoder pal2d --decoder transform2d --decoder transform3d \
-          --expect-frames 4 \
-          --expect-bpsnr 38.4 \
-          --expect-vbi 9151527,16065688,16065688 \
-          --expect-efm-samples 5292 \
-          testdata/pal/jason-testpattern.lds
-
-    - name: Decode PAL CLV
-      timeout-minutes: 10
-      run: |
-        scripts/test-decode --pal --no-efm \
-          --expect-frames 9 \
-          --expect-bpsnr 30.3 \
-          --expect-vbi 0,8449774,8449774 \
-          testdata/pal/kagemusha-leadout-cbar.ldf
+      run: cd obj && ctest --output-on-failure

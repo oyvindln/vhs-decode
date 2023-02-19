@@ -78,6 +78,11 @@ int main(int argc, char *argv[])
                                        QCoreApplication::translate("main", "Pack 16-bit data into 10-bit"));
     parser.addOption(showPackOption);
 
+    // Option to unpack 10-bit data with RIFF WAV headers (-r)
+    QCommandLineOption showRIFFOption(QStringList() << "r" << "riff",
+                                        QCoreApplication::translate("main", "Unpack 10-bit data into 16-bit with RIFF WAV headers (use this ONLY for FlaCCL)"));
+    parser.addOption(showRIFFOption);
+
     // Process the command line arguments given by the user
     parser.process(a);
 
@@ -87,11 +92,15 @@ int main(int argc, char *argv[])
     // Get the configured settings from the parser
     bool isUnpacking = parser.isSet(showUnpackOption);
     bool isPacking = parser.isSet(showPackOption);
+    bool isRIFF = parser.isSet(showRIFFOption);
     QString inputFileName = parser.value(sourceVideoFileOption);
     QString outputFileName = parser.value(targetVideoFileOption);
 
     bool modeUnpack = true;
     if (isPacking) modeUnpack = false;
+
+    bool modeRIFF = false;
+    if (isRIFF) modeRIFF = true;
 
     // Check that both pack and unpack are not set
     if (isUnpacking && isPacking) {
@@ -100,8 +109,15 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Check that RIFF option is not set with pack (only unpack)
+    if (isRIFF && ! isUnpacking) {
+        // Quit with error
+        qCritical("You can only write RIFF headers with --unpack (-u)");
+        return -1;
+    }
+
     // Initialise the data conversion object
-    DataConverter dataConverter(inputFileName, outputFileName, !modeUnpack);
+    DataConverter dataConverter(inputFileName, outputFileName, !modeUnpack, modeRIFF);
 
     // Process the data conversion
     dataConverter.process();

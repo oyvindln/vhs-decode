@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=dd86 decode tools
+Exec=dd86 %f
+Terminal=false
+Icon=64-analyse
+Type=Application
+Categories=AudioVideo;Video

@@ -3,7 +3,8 @@
     main.cpp
 
     ld-export-metadata - Export JSON metadata into other formats
-    Copyright (C) 2020 Adam Sampson
+    Copyright (C) 2020-2023 Adam Sampson
+    Copyright (C) 2021 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,8 +28,10 @@
 #include <QtGlobal>
 #include <QCommandLineParser>
 
+#include "audacity.h"
 #include "csv.h"
 #include "ffmetadata.h"
+#include "closedcaptions.h"
 
 #include "logging.h"
 #include "lddecodemetadata.h"
@@ -51,7 +54,8 @@ int main(int argc, char *argv[])
     parser.setApplicationDescription(
                 "ld-export-metadata - Export JSON metadata into other formats\n"
                 "\n"
-                "(c)2020 Adam Sampson\n"
+                "(c)2020-2023 Adam Sampson\n"
+                "(c)2021 Simon Inns\n"
                 "GPLv3 Open-Source - github: https://github.com/happycube/ld-decode");
     parser.addHelpOption();
     parser.addVersionOption();
@@ -73,10 +77,20 @@ int main(int argc, char *argv[])
                                           QCoreApplication::translate("main", "file"));
     parser.addOption(writeVbiCsvOption);
 
+    QCommandLineOption writeAudacityLabelsOption("audacity-labels",
+                                                 QCoreApplication::translate("main", "Write navigation information as Audacity labels"),
+                                                 QCoreApplication::translate("main", "file"));
+    parser.addOption(writeAudacityLabelsOption);
+
     QCommandLineOption writeFfmetadataOption("ffmetadata",
                                              QCoreApplication::translate("main", "Write navigation information as FFMETADATA1"),
                                              QCoreApplication::translate("main", "file"));
     parser.addOption(writeFfmetadataOption);
+
+    QCommandLineOption writeClosedCaptionsOption("closed-captions",
+                                             QCoreApplication::translate("main", "Write closed captions as Scenarist SCC V1.0 format"),
+                                             QCoreApplication::translate("main", "file"));
+    parser.addOption(writeClosedCaptionsOption);
 
     // -- Positional arguments --
 
@@ -121,9 +135,23 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
+    if (parser.isSet(writeAudacityLabelsOption)) {
+        const QString &fileName = parser.value(writeAudacityLabelsOption);
+        if (!writeAudacityLabels(metaData, fileName)) {
+            qCritical() << "Failed to write output file:" << fileName;
+            return 1;
+        }
+    }
     if (parser.isSet(writeFfmetadataOption)) {
         const QString &fileName = parser.value(writeFfmetadataOption);
         if (!writeFfmetadata(metaData, fileName)) {
+            qCritical() << "Failed to write output file:" << fileName;
+            return 1;
+        }
+    }
+    if (parser.isSet(writeClosedCaptionsOption)) {
+        const QString &fileName = parser.value(writeClosedCaptionsOption);
+        if (!writeClosedCaptions(metaData, fileName)) {
             qCritical() << "Failed to write output file:" << fileName;
             return 1;
         }

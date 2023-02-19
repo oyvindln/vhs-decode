@@ -3,8 +3,8 @@
     chromadecoderconfigdialog.cpp
 
     ld-analyse - TBC output analysis
-    Copyright (C) 2019-2021 Simon Inns
-    Copyright (C) 2020-2021 Adam Sampson
+    Copyright (C) 2019-2022 Simon Inns
+    Copyright (C) 2020-2022 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -87,12 +87,12 @@ ChromaDecoderConfigDialog::~ChromaDecoderConfigDialog()
     delete ui;
 }
 
-void ChromaDecoderConfigDialog::setConfiguration(bool _isSourcePal, const PalColour::Configuration &_palConfiguration,
+void ChromaDecoderConfigDialog::setConfiguration(VideoSystem _system, const PalColour::Configuration &_palConfiguration,
                                                  const Comb::Configuration &_ntscConfiguration,
                                                  const OutputWriter::Configuration &_outputConfiguration)
 {
-    double yNRLevel = _isSourcePal ? palConfiguration.yNRLevel : ntscConfiguration.yNRLevel;
-    isSourcePal = _isSourcePal;
+    double yNRLevel = _system == NTSC ? ntscConfiguration.yNRLevel : palConfiguration.yNRLevel;
+    system = _system;
     palConfiguration = _palConfiguration;
     ntscConfiguration = _ntscConfiguration;
     outputConfiguration = _outputConfiguration;
@@ -109,10 +109,10 @@ void ChromaDecoderConfigDialog::setConfiguration(bool _isSourcePal, const PalCol
     ntscConfiguration.chromaPhase = palConfiguration.chromaPhase;
 
     // Select the tab corresponding to the current standard automatically
-    if (isSourcePal) {
-        ui->standardTabs->setCurrentWidget(ui->palTab);
-    } else {
+    if (system == NTSC) {
         ui->standardTabs->setCurrentWidget(ui->ntscTab);
+    } else {
+        ui->standardTabs->setCurrentWidget(ui->palTab);
     }
 
     updateDialog();
@@ -136,6 +136,9 @@ const OutputWriter::Configuration &ChromaDecoderConfigDialog::getOutputConfigura
 
 void ChromaDecoderConfigDialog::updateDialog()
 {
+    const bool isSourcePal = system == PAL || system == PAL_M;
+    const bool isSourceNtsc = system == NTSC;
+
     // Shared settings
 
     ui->chromaGainHorizontalSlider->setEnabled(true);
@@ -174,16 +177,13 @@ void ChromaDecoderConfigDialog::updateDialog()
     }
 
     const bool isTransform = (palConfiguration.chromaFilter != PalColour::palColourFilter);
-    const bool isThresholdMode = (palConfiguration.transformMode == TransformPal::thresholdMode);
-    ui->thresholdModeCheckBox->setEnabled(isSourcePal && isTransform);
-    ui->thresholdModeCheckBox->setChecked(isThresholdMode);
 
-    ui->thresholdLabel->setEnabled(isSourcePal && isTransform && isThresholdMode);
+    ui->thresholdLabel->setEnabled(isSourcePal && isTransform);
 
-    ui->thresholdHorizontalSlider->setEnabled(isSourcePal && isTransform && isThresholdMode);
+    ui->thresholdHorizontalSlider->setEnabled(isSourcePal && isTransform);
     ui->thresholdHorizontalSlider->setValue(static_cast<qint32>(palConfiguration.transformThreshold * 100));
 
-    ui->thresholdValueLabel->setEnabled(isSourcePal && isTransform && isThresholdMode);
+    ui->thresholdValueLabel->setEnabled(isSourcePal && isTransform);
     ui->thresholdValueLabel->setText(QString::number(palConfiguration.transformThreshold, 'f', 2));
 
     ui->showFFTsCheckBox->setEnabled(isSourcePal && isTransform);
@@ -193,8 +193,6 @@ void ChromaDecoderConfigDialog::updateDialog()
     ui->simplePALCheckBox->setChecked(palConfiguration.simplePAL);
 
     // NTSC settings
-
-    const bool isSourceNtsc = !isSourcePal;
 
     ui->phaseCompCheckBox->setEnabled(isSourceNtsc);
     ui->phaseCompCheckBox->setChecked(ntscConfiguration.phaseCompensation);
@@ -219,12 +217,6 @@ void ChromaDecoderConfigDialog::updateDialog()
 
     ui->showMapCheckBox->setEnabled(isSourceNtsc && ntscConfiguration.dimensions == 3);
     ui->showMapCheckBox->setChecked(ntscConfiguration.showMap);
-
-    ui->colorLpfCheckBox->setEnabled(isSourceNtsc);
-    ui->colorLpfCheckBox->setChecked(ntscConfiguration.colorlpf);
-
-    ui->colorLpfHqCheckBox->setEnabled(isSourceNtsc && ntscConfiguration.colorlpf);
-    ui->colorLpfHqCheckBox->setChecked(ntscConfiguration.colorlpf_hq);
 
     ui->cNRLabel->setEnabled(isSourceNtsc);
 
@@ -261,17 +253,6 @@ void ChromaDecoderConfigDialog::on_palFilterButtonGroup_buttonClicked(QAbstractB
         palConfiguration.chromaFilter = PalColour::transform2DFilter;
     } else {
         palConfiguration.chromaFilter = PalColour::transform3DFilter;
-    }
-    updateDialog();
-    emit chromaDecoderConfigChanged();
-}
-
-void ChromaDecoderConfigDialog::on_thresholdModeCheckBox_clicked()
-{
-    if (ui->thresholdModeCheckBox->isChecked()) {
-        palConfiguration.transformMode = TransformPal::thresholdMode;
-    } else {
-        palConfiguration.transformMode = TransformPal::levelMode;
     }
     updateDialog();
     emit chromaDecoderConfigChanged();
@@ -324,19 +305,6 @@ void ChromaDecoderConfigDialog::on_adaptiveCheckBox_clicked()
 void ChromaDecoderConfigDialog::on_showMapCheckBox_clicked()
 {
     ntscConfiguration.showMap = ui->showMapCheckBox->isChecked();
-    emit chromaDecoderConfigChanged();
-}
-
-void ChromaDecoderConfigDialog::on_colorLpfCheckBox_clicked()
-{
-    ntscConfiguration.colorlpf = ui->colorLpfCheckBox->isChecked();
-    updateDialog();
-    emit chromaDecoderConfigChanged();
-}
-
-void ChromaDecoderConfigDialog::on_colorLpfHqCheckBox_clicked()
-{
-    ntscConfiguration.colorlpf_hq = ui->colorLpfHqCheckBox->isChecked();
     emit chromaDecoderConfigChanged();
 }
 

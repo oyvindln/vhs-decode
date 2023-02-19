@@ -8,9 +8,9 @@ try:
 
     use_samplerate = True
 except ImportError as e:
-    print("[chromasep.py] WARN: Cannot find samplerate, processing will be slower")
-    print("exec:\n\tsudo pip3 install samplerate")
-    print("(to fix this inconvenience) %s" % e)
+    # print("[chromasep.py] WARN: Cannot find samplerate, processing will be slower")
+    # print("exec:\n\tsudo pip3 install samplerate")
+    # print("(to fix this inconvenience) %s" % e)
     use_samplerate = False
 
 
@@ -70,6 +70,8 @@ class ChromaSepClass:
 
         delayed = np.roll(downsampled, self.delay)
         combed = np.multiply(np.add(downsampled, delayed), 0.5)
+        del downsampled
+        del delayed
 
         result = self.method(
             combed,

@@ -3,7 +3,7 @@
     discmap.h
 
     ld-discmap - TBC and VBI alignment and correction
-    Copyright (C) 2019-2020 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QFileInfo>
 #include <QtMath>
 
 // TBC library includes
@@ -43,7 +44,7 @@ public:
     DiscMap(const DiscMap &) = default;
     DiscMap &operator=(const DiscMap &) = default;
 
-    DiscMap(const QFileInfo &metadataFileInfo, const bool &reverseFieldOrder, const bool &noStrict);
+    DiscMap(const QFileInfo &metadataFileInfo, const bool reverseFieldOrder, const bool noStrict);
 
     QString filename() const;
     bool valid() const;
@@ -60,7 +61,7 @@ public:
     qint32 numberOfPulldowns() const;
     bool isPictureStop(qint32 frameNumber) const;
     bool isLeadInOut(qint32 frameNumber) const;
-    qreal frameQuality(qint32 frameNumber) const;
+    double frameQuality(qint32 frameNumber) const;
     bool isPadded(qint32 frameNumber) const;
     bool isClvOffset(qint32 frameNumber) const;
     bool isPhaseCorrect(qint32 frameNumber) const;
@@ -99,8 +100,10 @@ private:
     qint32 m_videoFieldLength;
     qint32 m_audioFieldByteLength;
     qint32 m_audioFieldSampleLength;
+    QString m_discType;
+    QString m_videoSystemDescription;
 
-    QVector<Frame> m_frames;
+    std::vector<Frame> m_frames;
     LdDecodeMetaData *ldDecodeMetaData;
 
     bool isNtscAmendment2ClvFrameNumber(qint32 frameNumber);

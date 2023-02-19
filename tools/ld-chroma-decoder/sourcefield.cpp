@@ -67,7 +67,7 @@ void SourceField::loadFields(SourceVideo &sourceVideo, LdDecodeMetaData &ldDecod
             fields[i].data = sourceVideo.getVideoField(firstFieldNumber);
             fields[i + 1].data = sourceVideo.getVideoField(secondFieldNumber);
 
-            if (videoParameters.isSourcePal && videoParameters.isSubcarrierLocked) {
+            if ((videoParameters.system == PAL || videoParameters.system == PAL_M) && videoParameters.isSubcarrierLocked) {
                 // With subcarrier-locked 4fSC PAL sampling, we have four
                 // "extra" samples over the course of the frame, so the two
                 // fields will be horizontally misaligned by two samples. Shift

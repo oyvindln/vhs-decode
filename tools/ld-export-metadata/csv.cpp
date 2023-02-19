@@ -64,7 +64,7 @@ bool writeVitsCsv(LdDecodeMetaData &metaData, const QString &fileName)
     outStream << '\n';
 
     for (qint32 fieldNumber = 1; fieldNumber <= metaData.getNumberOfFields(); fieldNumber++) {
-        LdDecodeMetaData::Field field = metaData.getField(fieldNumber);
+        const LdDecodeMetaData::Field &field = metaData.getField(fieldNumber);
         outStream << escapedString(QString::number(field.seqNo)) << ",";
         outStream << escapedString(QString::number(field.isFirstField)) << ",";
         outStream << escapedString(QString::number(field.syncConf)) << ",";
@@ -111,8 +111,8 @@ bool writeVbiCsv(LdDecodeMetaData &metaData, const QString &fileName)
         qint32 secondFieldNumber = metaData.getSecondFieldNumber(frameNumber);
 
         // Get the field metadata
-        LdDecodeMetaData::Field firstField = metaData.getField(firstFieldNumber);
-        LdDecodeMetaData::Field secondField = metaData.getField(secondFieldNumber);
+        const LdDecodeMetaData::Field &firstField = metaData.getField(firstFieldNumber);
+        const LdDecodeMetaData::Field &secondField = metaData.getField(secondFieldNumber);
 
         qint32 vbi16_1, vbi17_1, vbi18_1;
         qint32 vbi16_2, vbi17_2, vbi18_2;

@@ -3,7 +3,7 @@
     f2framestoaudio.h
 
     ld-process-efm - EFM data decoder
-    Copyright (C) 2019 Simon Inns
+    Copyright (C) 2019-2022 Simon Inns
 
     This file is part of ld-decode-tools.
 
@@ -27,6 +27,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <vector>
 
 #include "Datatypes/f2frame.h"
 #include "Datatypes/f1frame.h"
@@ -48,9 +49,9 @@ public:
         TrackTime frameCurrent;
     };
 
-    QVector<F1Frame> process(QVector<F2Frame> f2FramesIn, bool _debugState, bool _noTimeStamp);
-    Statistics getStatistics();
-    void reportStatistics();
+    const std::vector<F1Frame> &process(const std::vector<F2Frame> &f2FramesIn, bool _debugState, bool _noTimeStamp);
+    const Statistics &getStatistics() const;
+    void reportStatistics() const;
     void reset();
 
 private:
@@ -67,8 +68,8 @@ private:
 
     StateMachine currentState;
     StateMachine nextState;
-    QVector<F2Frame> f2FrameBuffer;
-    QVector<F1Frame> f1FramesOut;
+    std::vector<F2Frame> f2FrameBuffer;
+    std::vector<F1Frame> f1FramesOut;
     bool waitingForData;
     TrackTime lastDiscTime;
 

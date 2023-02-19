@@ -115,7 +115,7 @@ bool CorrectorPool::process()
     }
 
     // Show the processing speed to the user
-    qreal totalSecs = (static_cast<qreal>(totalTimer.elapsed()) / 1000.0);
+    double totalSecs = (static_cast<double>(totalTimer.elapsed()) / 1000.0);
     qInfo() << "Dropout correction complete -" << lastFrameNumber << "frames in" << totalSecs << "seconds (" <<
                lastFrameNumber / totalSecs << "FPS )";
 
@@ -137,7 +137,7 @@ bool CorrectorPool::getInputFrame(qint32& frameNumber,
                                   QVector<qint32>& secondFieldNumber, QVector<SourceVideo::Data>& secondFieldVideoData, QVector<LdDecodeMetaData::Field>& secondFieldMetadata,
                                   QVector<LdDecodeMetaData::VideoParameters>& videoParameters,
                                   bool& _reverse, bool& _intraField, bool& _overCorrect,
-                                  QVector<qint32>& availableSourcesForFrame, QVector<qreal>& sourceFrameQuality)
+                                  QVector<qint32>& availableSourcesForFrame, QVector<double>& sourceFrameQuality)
 {
     QMutexLocker locker(&inputMutex);
 
@@ -180,8 +180,8 @@ bool CorrectorPool::getInputFrame(qint32& frameNumber,
             secondFieldNumber[sourceNo] = ldDecodeMetaData[sourceNo]->getSecondFieldNumber(frameNumber);
 
             // Determine the frame quality (currently this is based on frame average black SNR)
-            qreal firstFrameSnr = ldDecodeMetaData[sourceNo]->getField(firstFieldNumber[sourceNo]).vitsMetrics.bPSNR;
-            qreal secondFrameSnr = ldDecodeMetaData[sourceNo]->getField(secondFieldNumber[sourceNo]).vitsMetrics.bPSNR;
+            double firstFrameSnr = ldDecodeMetaData[sourceNo]->getField(firstFieldNumber[sourceNo]).vitsMetrics.bPSNR;
+            double secondFrameSnr = ldDecodeMetaData[sourceNo]->getField(secondFieldNumber[sourceNo]).vitsMetrics.bPSNR;
             sourceFrameQuality[sourceNo] = (firstFrameSnr + secondFrameSnr) / 2.0;
 
             qDebug().nospace() << "CorrectorPool::getInputFrame(): Source #0 fields are " <<
@@ -195,8 +195,8 @@ bool CorrectorPool::getInputFrame(qint32& frameNumber,
             secondFieldNumber[sourceNo] = ldDecodeMetaData[sourceNo]->getSecondFieldNumber(currentSourceFrameNumber);
 
             // Determine the frame quality (currently this is based on frame average black SNR)
-            qreal firstFrameSnr = ldDecodeMetaData[sourceNo]->getField(firstFieldNumber[sourceNo]).vitsMetrics.bPSNR;
-            qreal secondFrameSnr = ldDecodeMetaData[sourceNo]->getField(secondFieldNumber[sourceNo]).vitsMetrics.bPSNR;
+            double firstFrameSnr = ldDecodeMetaData[sourceNo]->getField(firstFieldNumber[sourceNo]).vitsMetrics.bPSNR;
+            double secondFrameSnr = ldDecodeMetaData[sourceNo]->getField(secondFieldNumber[sourceNo]).vitsMetrics.bPSNR;
             sourceFrameQuality[sourceNo] = (firstFrameSnr + secondFrameSnr) / 2.0;
 
             qDebug().nospace() << "CorrectorPool::getInputFrame(): Source #" << sourceNo << " has VBI frame number " << currentVbiFrame <<
@@ -295,10 +295,10 @@ bool CorrectorPool::setOutputFrame(qint32 frameNumber,
         }
 
         // Show debug
-        qreal avgReplacementDistance = 0;
+        double avgReplacementDistance = 0;
         if (outputFrame.sameSourceConcealment + outputFrame.multiSourceConcealment +  outputFrame.multiSourceCorrection > 0) {
-            avgReplacementDistance = static_cast<qreal>(outputFrame.totalReplacementDistance) /
-                            static_cast<qreal>(outputFrame.sameSourceConcealment + outputFrame.multiSourceConcealment +
+            avgReplacementDistance = static_cast<double>(outputFrame.totalReplacementDistance) /
+                            static_cast<double>(outputFrame.sameSourceConcealment + outputFrame.multiSourceConcealment +
                                                outputFrame.multiSourceCorrection);
             qDebug().nospace() << "Processed frame " << outputFrameNumber << " with " << outputFrame.sameSourceConcealment +
                         outputFrame.multiSourceConcealment +
@@ -358,8 +358,8 @@ bool CorrectorPool::setMinAndMaxVbiFrames()
         // Using sequential frame numbering starting from 1
         for (qint32 seqFrame = 1; seqFrame <= ldDecodeMetaData[sourceNumber]->getNumberOfFrames(); seqFrame++) {
             // Get the VBI data and then decode
-            QVector<qint32> vbi1 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getFirstFieldNumber(seqFrame)).vbiData;
-            QVector<qint32> vbi2 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getSecondFieldNumber(seqFrame)).vbiData;
+            auto vbi1 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getFirstFieldNumber(seqFrame)).vbiData;
+            auto vbi2 = ldDecodeMetaData[sourceNumber]->getFieldVbi(ldDecodeMetaData[sourceNumber]->getSecondFieldNumber(seqFrame)).vbiData;
             VbiDecoder::Vbi vbi = vbiDecoder.decodeFrame(vbi1[0], vbi1[1], vbi1[2], vbi2[0], vbi2[1], vbi2[2]);
 
             // Look for a complete, valid CAV picture number or CLV time-code
