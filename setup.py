@@ -20,7 +20,7 @@ setup(
         'Topic :: Multimedia :: Video :: Capture',
     ],
     setup_requires=['cython'],
-    packages=['lddecode', 'vhsdecode', 'vhsdecode/addons', 'vhsdecode/format_defs', 'cvbsdecode'],
+    packages=['lddecode', 'vhsdecode', 'vhsdecode/addons', 'vhsdecode/format_defs', 'cvbsdecode', 'vhsdecode/hifi'],
     scripts=[
         'cx-expander',
         'ld-cut',
@@ -28,6 +28,7 @@ setup(
         'scripts/ld-compress',
         'vhs-decode',
         'cvbs-decode',
+        'hifi-decode',
     ],
 
     ext_modules=cythonize(['vhsdecode/*.pyx'], language_level=3),
