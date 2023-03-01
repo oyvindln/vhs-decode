@@ -98,7 +98,7 @@ class ChromaAFC:
     # returns the measurement simulation to fit the correction equation
     def tableset(self, sample_size, points=256):
         ldd.logger.info("Linearizing chroma AFC, please wait ...")
-        means = np.empty([2, 2], dtype=np.float)
+        means = np.empty([2, 2], dtype=float)
         min_f, max_f = self.get_band_tolerance()
         for ix, freq in enumerate(
             np.linspace(self.color_under * min_f, self.color_under * max_f, num=points)
