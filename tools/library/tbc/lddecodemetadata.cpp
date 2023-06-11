@@ -76,11 +76,21 @@ static constexpr VideoSystemDefaults palMDefaults {
     ntscDefaults.firstActiveFrameLine, ntscDefaults.lastActiveFrameLine,
 };
 
+static constexpr VideoSystemDefaults secamDefaults {
+    SECAM,
+    "SECAM",
+    (283.75 * 15625) + 25, // TODO FIX!!!
+    palDefaults.minActiveFrameLine,
+    palDefaults.firstActiveFieldLine, palDefaults.lastActiveFieldLine,
+    palDefaults.firstActiveFrameLine, palDefaults.lastActiveFrameLine,
+};
+
 // These must be in the same order as enum VideoSystem
 static constexpr VideoSystemDefaults VIDEO_SYSTEM_DEFAULTS[] = {
     palDefaults,
     ntscDefaults,
     palMDefaults,
+    secamDefaults,
 };
 
 // Return appropriate defaults for the selected video system
