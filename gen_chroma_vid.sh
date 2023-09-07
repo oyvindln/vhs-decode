@@ -8,7 +8,7 @@ chroma_phase=0
 output_format="yuv422p10le"
 monochrome=0
 chroma_decoder=""
-video_aspect=""
+aspect_ratio=""
 video_codec="ffv1"
 video_container="mkv"
 video_gop="1"
@@ -238,13 +238,13 @@ if [ "$chroma_decoder" = "ntsc1d" ] || [ "$chroma_decoder" = "ntsc2d" ] || [ "$c
 	videosystem="ntsc"
 elif [ "$chroma_decoder" = "pal2d" ] || [ "$chroma_decoder" = "transform2d" ] || [ "$chroma_decoder" = "transform3d" ]; then
 	videosystem="pal"
-	fi
 fi
 
 if [ "$videosystem" = "" ]; then
 	# Very dumb way of checking if the source is PAL
 	# There is probably a better way of doing this...
 	pal_found="$(head "$input_tbc_json" | grep -c -e \\\"PAL\\\" -e \\\"PAL-M\\\" -e \\\"isSourcePal\\\":true)"
+
 	if [ "$pal_found" = 1 ]; then
 		videosystem="pal"
 	else
@@ -256,7 +256,9 @@ if [ "$aspect_ratio" = "" ]; then
 	# Very dumb way of checking if the source has WSS 16:9 Anamorphic Widescreen flagging
 	# There is probably a better way of doing this...
 	wss_found="$(head "$input_tbc_json" | grep -c -e \\\"isWidescreen\\\":true)"
-	if [ "$wss_found" = 1 ]; then
+fi
+
+if [ "$wss_found" = 1 ]; then
 		aspect_ratio="-aspect 16:9"
 	else
 		aspect_ratio="-aspect 4:3"
