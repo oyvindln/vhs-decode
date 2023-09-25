@@ -45,13 +45,13 @@ blocks:
     start: '10'
     step: '0.05'
     stop: '14'
-    value: '12.35'
+    value: '12.45'
     widget: counter_slider
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1728, 1160.0]
+    coordinate: [1392, 8.0]
     rotation: 0
     state: true
 - name: chroma_range_red
@@ -66,22 +66,20 @@ blocks:
     start: '10'
     step: '0.05'
     stop: '14'
-    value: '12.85'
+    value: '12.90'
     widget: counter_slider
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1576, 1160.0]
+    coordinate: [1240, 8.0]
     rotation: 0
     state: true
 - name: colordelay
   id: variable
   parameters:
-    comment: '885 with band pass enabled
-
-      1100 without band pass enabled'
-    value: 1080+sample_shift
+    comment: 1120 with band pass enabled
+    value: 1070+sample_shift
   states:
     bus_sink: false
     bus_source: false
@@ -93,7 +91,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: 250e-8
+    value: 150e-8
   states:
     bus_sink: false
     bus_source: false
@@ -185,7 +183,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: '2'
+    value: '0'
   states:
     bus_sink: false
     bus_source: false
@@ -1044,7 +1042,7 @@ blocks:
     alias: ''
     append: 'False'
     comment: ''
-    file: YUV.bin
+    file: yuv-outfile_sf0.bin
     type: byte
     unbuffered: 'False'
     vlen: '1'
@@ -1052,7 +1050,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [3112, 488.0]
+    coordinate: [3136, 520.0]
     rotation: 0
     state: enabled
 - name: blocks_file_source_0_0
@@ -1062,7 +1060,7 @@ blocks:
     alias: ''
     begin_tag: pmt.PMT_NIL
     comment: ''
-    file: .tbc
+    file: tbcfile.tbc
     length: '0'
     maxoutbuf: '0'
     minoutbuf: '0'
@@ -1086,7 +1084,7 @@ blocks:
     comment: 'Offset can be set to fix pink
 
       1135*626 is an offset of one frame'
-    file: _chroma.tbc
+    file: tbcfile_chroma.tbc
     length: '0'
     maxoutbuf: '0'
     minoutbuf: '0'
@@ -3060,7 +3058,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [752, 784.0]
+    coordinate: [752, 768.0]
     rotation: 180
     state: enabled
 - name: virtual_sink_3
