@@ -9,11 +9,14 @@ def fill_rfparams_vhs_shared(rfparams):
 
     # PAL and NTSC uses the same main de-emphasis
     # Temporary video emphasis filter constants
-    # Ideally we would calculate this based on tau and 'x' value, for now
-    # it's eyeballed based on graph and output.
-    rfparams["deemph_mid"] = 273755.82
-    rfparams["deemph_gain"] = 13.9794
-    rfparams["deemph_q"] = 0.4613901
+    # The values are calculated based on the VHS spec IEC 774-1 (1994), page 67
+    # A first-order shelf filter is given with these parameters:
+    #  RC time constant: 1.3µs
+    #  resistor divider ratio: 4:1 (=> gain factor 5)
+
+    rfparams["deemph_mid"] = 273755.82  # sqrt(gain_factor)/(2*pi*r*c)
+    rfparams["deemph_gain"] = 13.9794   # 20*log10(gain_factor)
+    rfparams["deemph_q"] = 0.462088186  # 1/sqrt(sqrt(gain_factor) + 1/sqrt(gain_factor) + 2)
 
     # Parameters for high-pass filter used for non-linear deemphasis, these are
     # probably not correct.
