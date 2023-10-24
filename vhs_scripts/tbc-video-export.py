@@ -194,19 +194,12 @@ class DecoderSettings:
         return decoder_opts
 
     def get_chroma_opts(self):
-        """Generate ld-chroma-decoder opts for luma."""
+        """Generate ld-chroma-decoder opts for chroma."""
         decoder_opts = []
 
-        # set default chroma gain if unset
-        if self.program_opts.chroma_gain is None:
-            if self.video_system is VideoSystem.PAL:
-                decoder_opts.append(["--chroma-gain", "1.5"])
-            elif self.video_system is VideoSystem.NTSC:
-                decoder_opts.append(["--chroma-gain", "2.0"])
-        else:
-            decoder_opts.append(
-                self.convert_opt(self.program_opts, "chroma_gain", "--chroma-gain")
-            )
+        decoder_opts.append(
+            self.convert_opt(self.program_opts, "chroma_gain", "--chroma-gain")
+        )
 
         decoder_opts.append(
             self.convert_opt(self.program_opts, "chroma_nr", "--chroma-nr")
@@ -686,8 +679,9 @@ class TBCVideoExport:
         decoder_opts.add_argument(
             "--chroma-gain",
             type=float,
+            default=1.0,
             metavar="float",
-            help="Gain factor applied to chroma components (default: 1.5 for PAL, 2.0 for NTSC).",
+            help="Gain factor applied to chroma components.",
         )
 
         decoder_opts.add_argument(
