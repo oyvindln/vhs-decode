@@ -4,6 +4,7 @@ from numba import njit
 import lddecode.core as ldd
 import lddecode.utils as lddu
 from lddecode.utils import inrange
+from lddecode.utils import hz_to_output_array
 
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
@@ -76,7 +77,7 @@ def field_class_from_formats(system: str, tape_format: str):
         elif tape_format == "VIDEO8" or tape_format == "HI8":
             field_class = FieldPALVideo8
         else:
-            if tape_format != "VHS":
+            if tape_format != "VHS" and tape_format != "VHSHQ":
                 ldd.logger.info(
                     "Tape format unimplemented for PAL, using VHS field class."
                 )
@@ -93,7 +94,7 @@ def field_class_from_formats(system: str, tape_format: str):
         elif tape_format == "VIDEO8" or tape_format == "HI8":
             field_class = FieldNTSCVideo8
         else:
-            if tape_format != "VHS":
+            if tape_format != "VHS" and tape_format != "VHSHQ":
                 ldd.logger.info(
                     "Tape format unimplemented for NTSC, using VHS field class."
                 )
@@ -365,6 +366,27 @@ class FieldShared:
         else:
             self.field_number = 0
         super(FieldShared, self).process()
+
+    def hz_to_output(self, input):
+        if type(input) == np.ndarray:
+            return hz_to_output_array(
+                input,
+                self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ int(self.isFirstField)],
+                self.rf.DecoderParams["hz_ire"],
+                self.rf.SysParams["outputZero"],
+                self.rf.DecoderParams["vsync_ire"],
+                self.out_scale
+            )
+
+        reduced = (input - self.rf.DecoderParams["ire0"] - self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ int(self.isFirstField)]) / self.rf.DecoderParams["hz_ire"]
+        reduced -= self.rf.DecoderParams["vsync_ire"]
+
+        return np.uint16(
+            np.clip(
+                (reduced * self.out_scale) + self.rf.SysParams["outputZero"], 0, 65535
+            )
+            + 0.5
+        )
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldShared, self).downscale(

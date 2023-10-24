@@ -587,6 +587,7 @@ class VHSRFDecode(ldd.RFDecode):
         self.DecoderParams["ire0"] = self.SysParams["ire0"]
         self.DecoderParams["hz_ire"] = self.SysParams["hz_ire"]
         self.DecoderParams["vsync_ire"] = self.SysParams["vsync_ire"]
+        self.DecoderParams["track_ire0_offset"] = self.SysParams.get("track_ire0_offset", [0, 0])
 
         write_chroma = is_color_under = vhs_formats.is_color_under(tape_format)
 
@@ -622,7 +623,7 @@ class VHSRFDecode(ldd.RFDecode):
             rf_options.get("disable_right_hsync", False),
             rf_options.get("sync_clip", False),
             rf_options.get("disable_dc_offset", False),
-            tape_format == "VHS",
+            tape_format == "VHS" or tape_format == "VHSHQ",
             # Always use this if we are decoding TYPEC since it doesn't have normal vsync.
             # also enable by default with EIAJ since that was typically used with a primitive sync gen
             # which output not quite standard vsync.

@@ -27,6 +27,7 @@ from vhsdecode.cmdcommons import (
 
 supported_tape_formats = {
     "VHS",
+    "VHSHQ",
     "SVHS",
     "UMATIC",
     "UMATIC_HI",
@@ -72,7 +73,7 @@ def main(args=None, use_gui=False):
         metavar="tape_format",
         default="VHS",
         choices=supported_tape_formats,
-        help="Tape format, currently VHS (Default), SVHS, UMATIC, UMATIC_HI, BETAMAX, BETAMAX_HIFI, VIDEO8, HI8 ,EIAJ, VCR, VCR_LP, TYPEC and TYPEB, are supported",
+        help="Tape format, currently VHS (Default), VHSHQ, SVHS, UMATIC, UMATIC_HI, BETAMAX, BETAMAX_HIFI, VIDEO8, HI8 ,EIAJ, VCR, VCR_LP, TYPEC and TYPEB, are supported",
     )
     parser.add_argument(
         "--params_file",

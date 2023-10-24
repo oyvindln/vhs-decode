@@ -173,8 +173,18 @@ def get_sysparams_pal_svhs(sysparams_pal):
     # 0 IRE level after demodulation
     SysParams_PAL_SVHS["ire0"] = 7e6 - (SysParams_PAL_SVHS["hz_ire"] * 100)
 
+    # One track has an offset of f_h/2
+    # SysParams_PAL_SVHS["track_ire0_offset"] = [7812.5, 0]
+
     return SysParams_PAL_SVHS
 
+def get_sysparams_pal_vhshq(sysparams_pal):
+    SysParams_PAL_VHSHQ = get_sysparams_pal_vhs(sysparams_pal)
+
+    # One track has an offset of f_h/2
+    SysParams_PAL_VHSHQ["track_ire0_offset"] = [7812.5, 0]
+
+    return SysParams_PAL_VHSHQ
 
 def get_rfparams_ntsc_vhs(rfparams_ntsc):
     """Get RF params for NTSC VHS"""
@@ -261,8 +271,18 @@ def get_sysparams_ntsc_svhs(sysparams_ntsc):
     # 0 IRE level after demodulation
     SysParams_NTSC_SVHS["ire0"] = 7e6 - (SysParams_NTSC_SVHS["hz_ire"] * 100)
 
+    # One track has an offset of f_h/2
+    # SysParams_NTSC_SVHS["track_ire0_offset"] = [7867, 0]
+
     return SysParams_NTSC_SVHS
 
+def get_sysparams_ntsc_vhshq(sysparams_ntsc):
+    SysParams_NTSC_VHSHQ = get_sysparams_ntsc_vhs(sysparams_ntsc)
+
+    # One track has an offset of f_h/2
+    SysParams_NTSC_VHSHQ["track_ire0_offset"] = [7867, 0]
+
+    return SysParams_NTSC_VHSHQ
 
 def get_rfparams_mpal_vhs(rfparams_ntsc):
     params = get_rfparams_ntsc_vhs(rfparams_ntsc)
