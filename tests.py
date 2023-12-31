@@ -4,6 +4,8 @@ import numpy as np
 
 import vhsdecode.process as process
 import vhsdecode.utils as utils
+from vhsdecode.sync import calczc as c_calczc
+import matplotlib.pyplot as plt
 
 
 class DemodTest(unittest.TestCase):
@@ -32,11 +34,15 @@ class DemodTest(unittest.TestCase):
         print("min: ", sync_ire_abs)
 
         max_demod = demod[1000 : (decoder.blocklen // 2) - 1000]
-        np.testing.assert_allclose(max_demod, np.full(len(max_demod), max_hz), rtol=1.5e-04, atol=20)
+        np.testing.assert_allclose(
+            max_demod, np.full(len(max_demod), max_hz), rtol=1.5e-04, atol=20
+        )
         min_demod = demod[(decoder.blocklen // 2) + 1000 : decoder.blocklen - 1000]
         # Demodulated signal fluctuates more at the sync end than at the top end,
         # so allowing a little more tolerance here.
-        np.testing.assert_allclose(min_demod, np.full(len(min_demod), min_hz), rtol=3e-04, atol=20)
+        np.testing.assert_allclose(
+            min_demod, np.full(len(min_demod), min_hz), rtol=3e-04, atol=20
+        )
 
     def test_ire_ntsc(self):
         """Check that the IRE of the output corresponds to the correct frequencies."""
@@ -62,11 +68,15 @@ class DemodTest(unittest.TestCase):
         print("min: ", sync_ire_abs)
 
         max_demod = demod[1000 : (decoder.blocklen // 2) - 1000]
-        np.testing.assert_allclose(max_demod, np.full(len(max_demod), max_hz), rtol=1e-04, atol=20)
+        np.testing.assert_allclose(
+            max_demod, np.full(len(max_demod), max_hz), rtol=1e-04, atol=20
+        )
         min_demod = demod[(decoder.blocklen // 2) + 1000 : decoder.blocklen - 1000]
         # Demodulated signal fluctuates more at the sync end than at the top end,
         # so allowing a little more tolerance here.
-        np.testing.assert_allclose(min_demod, np.full(len(min_demod), min_hz), rtol=1e-04, atol=50)
+        np.testing.assert_allclose(
+            min_demod, np.full(len(min_demod), min_hz), rtol=1e-04, atol=50
+        )
 
 
 def test_sync(filename, num_pulses=None, blank_approx=None, sync_approx=None):
@@ -84,7 +94,9 @@ def test_sync(filename, num_pulses=None, blank_approx=None, sync_approx=None):
     # process.VHSDecode("infile", "outfile", ,inputfreq=samplerate_mhz, system="PAL", tape_format="VHS")
     rf_options = {}
     rf_options["level_detect_divisor"] = 2
-    rfdecoder = process.VHSRFDecode(inputfreq=samplerate_mhz, system="PAL", tape_format="VHS", rf_options=rf_options)
+    rfdecoder = process.VHSRFDecode(
+        inputfreq=samplerate_mhz, system="PAL", tape_format="VHS", rf_options=rf_options
+    )
 
     demod_05_data = np.loadtxt(filename)
 
@@ -99,7 +111,7 @@ def test_sync(filename, num_pulses=None, blank_approx=None, sync_approx=None):
     pulses = rfdecoder.resync.get_pulses(field)
 
     if num_pulses:
-        assert(len(pulses) == num_pulses)
+        assert len(pulses) == num_pulses
 
     measured_sync, measured_blank = rfdecoder.resync._field_state.pull_levels()
 
@@ -130,7 +142,9 @@ class SyncTest(unittest.TestCase):
         blank = 4130000
         sync = 3840000
         print("pal good")
-        test_sync("PAL_GOOD.txt.gz", num_pulses=458, blank_approx=blank, sync_approx=sync)
+        test_sync(
+            "PAL_GOOD.txt.gz", num_pulses=458, blank_approx=blank, sync_approx=sync
+        )
 
     def test_sync_pal_noisy(self):
         blank = 4121000
@@ -140,6 +154,29 @@ class SyncTest(unittest.TestCase):
 
     def test_find_pulses(self):
         test_find_pulses("PAL_GOOD.txt.gz", 458)
+
+
+class ZCTest(unittest.TestCase):
+    def test_calczc(self):
+        data = np.array([8.0, 4.0, 1.0, 8.0, 1.0, 4.0, 8.0])
+        data2 = np.array([8.0, 4.0, 4.0, 8.0, 30.0, 99.0, 8.0])
+
+        zc = c_calczc(data, 0, 3.0, edge=-1, count=len(data))
+        zc2 = c_calczc(data, 2, 3.0, edge=1, count=len(data))
+
+        zc3 = c_calczc(data2, 0, 3.0, edge=-1, count=len(data))
+        zc4 = c_calczc(data2, 0, 3.0, edge=1, count=len(data))
+        assert zc4 is None
+
+        # fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+        # ax1.plot(data)
+        # ax1.axvline(zc, color="#FF0000")
+        # ax1.axvline(zc2, color="#FFFF00")
+        # ax1.axhline(3.0)
+        # ax2.plot(data2)
+        # ax2.axvline(zc3)
+        # plt.show()
 
 
 if __name__ == "__main__":

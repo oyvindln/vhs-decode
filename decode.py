@@ -7,7 +7,7 @@ from importlib import import_module
 
 
 def print_options():
-    print("Options are vhs, cvbs")
+    print("Options are vhs, cvbs, ld, hifi")
 
 
 def main(argv):
@@ -16,6 +16,9 @@ def main(argv):
         return
 
     # This seems a bit hacky but it works
+    # use pop so the arg gets removed from the list
+    # this means the command line parser
+    # that is ran later won't see this argument.
     to_run = sys.argv.pop(1).lower()
 
     if to_run == "vhs":
@@ -26,9 +29,14 @@ def main(argv):
         from cvbsdecode.main import main as cvbsmain
 
         cvbsmain()
-    elif to_run == 'ld':
+    elif to_run == "ld":
         from lddecode.main import main as ldmain
+
         ldmain(sys.argv[1:])
+    elif to_run == "hifi":
+        from vhsdecode.hifi.main import main as hifimain
+
+        hifimain()
     else:
         print_options()
 

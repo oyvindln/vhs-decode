@@ -29,6 +29,11 @@
 #include <cstring>
 #include <cassert>
 
+#ifdef _WIN32
+	#include <io.h>
+	#include <fcntl.h>
+#endif
+
 #include "../logger.hpp"
 #include "OneBitADC.hpp"
 #include "Reclocker.hpp"
@@ -52,6 +57,11 @@ void doHelp(const std::string &app) {
 
 
 int main(int argc, char *argv[]) {
+
+	#ifdef _WIN32
+	_setmode(_fileno(stdout), O_BINARY);
+	_setmode(_fileno(stdin), O_BINARY);	
+	#endif
     int slidingAvgLength = 1e3;
 
     // todo 8/16bit and little-/big-endian switches? leave it to sox?

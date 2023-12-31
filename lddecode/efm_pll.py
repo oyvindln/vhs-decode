@@ -58,7 +58,7 @@ def computeefmfilter(freq_hz=40000000, blocklen=65536):
 
     """Compute filter coefficients for the given FFTFilter."""
     # Anything above the highest frequency is left as zero.
-    coeffs = np.zeros(blocklen, dtype=np.complex)
+    coeffs = np.zeros(blocklen, dtype=complex)
 
     # Generate the frequency-domain coefficients by cubic interpolation between the equaliser values.
     a_interp = spi.interp1d(freqs, amp, kind="cubic")

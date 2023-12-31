@@ -66,6 +66,19 @@ const std::vector<F2Frame> &F3ToF2Frames::process(const std::vector<F3Frame> &f3
         Section section;
         section.setData(sectionData);
 
+        // Check the timestamp is plausible. There's a 1/65536 chance of
+        // corrupt data making it through the CRC, so if the timestamp is
+        // clearly wrong then the rest of the Q data should be ignored too.
+        if (section.getQMode() == 1 || section.getQMode() == 4) {
+            const TrackTime currentDiscTime = section.getQMetadata().qMode1And4.discTime;
+            const qint32 framesSinceLast = currentDiscTime.getDifference(statistics.initialDiscTime.getTime());
+            // A CD/LaserDisc side shouldn't be more than 100 minutes long
+            if (framesSinceLast > (100 * 60 * 75)) {
+                if (debugOn) qDebug().noquote() << "F3ToF2Frames::process(): Implausible section time stamp" << currentDiscTime.getTimeAsQString() << "given initial time" << statistics.initialDiscTime.getTimeAsQString() << "- ignoring section Q data";
+                section = Section();
+            }
+        }
+
         // Check the audio preemp flag (false = pre-emp audio)
         if (section.getQMode() == 1 || section.getQMode() == 4) {
             if (!section.getQMetadata().qControl.isNoPreempNotPreemp) statistics.preempFrames++;

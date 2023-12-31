@@ -31,10 +31,16 @@
 #include <QString>
 #include <QCommandLineParser>
 
+#ifdef _WIN32
+    #include <io.h>
+    #include <fcntl.h>
+#endif
+
 // Prototypes
 void debugOutputHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg);
 void setDebug(bool state);
 void setQuiet(bool state);
+void setBinaryMode(void);
 void openDebugFile(QString filename);
 void closeDebugFile(void);
 void addStandardDebugOptions(QCommandLineParser &parser);

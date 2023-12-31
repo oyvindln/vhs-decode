@@ -20,6 +20,7 @@ from vhsdecode.process import parent_system
 
 from lddecode.core import npfft
 
+
 def chroma_to_u16(chroma):
     """Scale the chroma output array to a 16-bit value for output."""
     S16_ABS_MAX = 32767
@@ -241,7 +242,12 @@ class FieldPALCVBS(ldd.FieldPAL):
         return linelocs
 
     def refine_linelocs_hsync(self):
-        return sync.refine_linelocs_hsync(self, self.linebad)
+        if not self.rf.options.skip_hsync_refine:
+            return sync.refine_linelocs_hsync(
+                self, self.linebad, 0
+            )  # TODO fix last param once it's actually used.
+        else:
+            return self.linelocs1.copy()
 
     def _determine_field_number(self):
         """Using LD code as it should work on stable sources, but may not work on stuff like vhs."""
@@ -269,6 +275,13 @@ class FieldPALCVBS(ldd.FieldPAL):
 class FieldNTSCCVBS(ldd.FieldNTSC):
     def __init__(self, *args, **kwargs):
         super(FieldNTSCCVBS, self).__init__(*args, **kwargs)
+
+    def refine_linelocs_hsync(self):
+        if not self.rf.options.skip_hsync_refine:
+            # TODO: test and use modified variant.
+            return super(FieldNTSCCVBS, self).refine_linelocs_hsync()
+        else:
+            return self.linelocs1.copy()
 
     def _refine_linelocs_burst(self, linelocs=None):
         """Standard impl works for stable sources, we may need to override this for
@@ -301,8 +314,7 @@ class FieldMPALCVBS(FieldNTSCCVBS):
         super(FieldMPALCVBS, self).__init__(*args, **kwargs)
 
     def refine_linelocs_burst(self, linelocs=None):
-        """Not used for PALM.
-        """
+        """Not used for PALM."""
         if linelocs is None:
             linelocs = self.linelocs2
         else:
@@ -311,6 +323,12 @@ class FieldMPALCVBS(FieldNTSCCVBS):
         self.fieldPhaseID = 0
 
         return linelocs
+
+
+def _demodcache_dummy(self, *args, **kwargs):
+    self.ended = True
+    pass
+
 
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
@@ -331,6 +349,12 @@ class CVBSDecode(ldd.LDdecode):
         rf_options={},
         extra_options={},
     ):
+        # monkey patch init with a dummy to prevent calling set_start_method twice on macos
+        # and not create extra threads.
+        # This is kinda hacky and should be sorted in a better way ideally.
+        temp_init = ldd.DemodCache.__init__
+        ldd.DemodCache.__init__ = _demodcache_dummy
+
         super(CVBSDecode, self).__init__(
             fname_in,
             fname_out,
@@ -364,8 +388,11 @@ class CVBSDecode(ldd.LDdecode):
         else:
             raise Exception("Unknown video system!", system)
 
+        # Restore init functino now that superclass constructor is finished.
+        ldd.DemodCache.__init__ = temp_init
+
         self.demodcache = ldd.DemodCache(
-            self.rf, self.infile, self.freader, num_worker_threads=self.numthreads
+            self.rf, self.infile, self.freader, None, num_worker_threads=self.numthreads
         )
 
     # Override to avoid NaN in JSON.
@@ -412,18 +439,21 @@ class CVBSDecode(ldd.LDdecode):
     def computeMetricsNTSC(self, metrics, f, fp=None):
         return None
 
-    def build_json(self, f):
-        # TODO: Make some shared function/class for stuff that is the same in cvbs and vhs-decode
+    def build_json(self):
+        # for f in self.fieldstack:
+        #    if f:
+        #        break
+        ## TODO: Make some shared function/class for stuff that is the same in cvbs and vhs-decode
         try:
-            if not f:
-                # Make sure we don't fail if the last attempted field failed to decode
-                # Might be better to fix this elsewhere.
-                f = self.prevfield
-            jout = super(CVBSDecode, self).build_json(f)
+            # if not f:
+            #    # Make sure we don't fail if the last attempted field failed to decode
+            #    # Might be better to fix this elsewhere.
+            #    f = self.prevfield
+            jout = super(CVBSDecode, self).build_json()
 
             if self.rf.color_system == "MPAL":
-                #jout["videoParameters"]["isSourcePal"] = True
-                #jout["videoParameters"]["isSourcePalM"] = True
+                # jout["videoParameters"]["isSourcePal"] = True
+                # jout["videoParameters"]["isSourcePalM"] = True
                 jout["videoParameters"]["system"] = "PAL-M"
 
             return jout
@@ -435,14 +465,16 @@ class CVBSDecode(ldd.LDdecode):
 
 class CVBSDecodeInner(ldd.RFDecode):
     def __init__(self, inputfreq=40, system="NTSC", tape_format="VHS", rf_options={}):
-
         # Make sure delays are populated with something
         # TODO: Fix this properly.
         self.computedelays()
 
         # First init the rf decoder normally.
         super(CVBSDecodeInner, self).__init__(
-            inputfreq, parent_system(system), decode_analog_audio=False, has_analog_audio=False
+            inputfreq,
+            parent_system(system),
+            decode_analog_audio=False,
+            has_analog_audio=False,
         )
 
         self._color_system = system
@@ -464,12 +496,13 @@ class CVBSDecodeInner(ldd.RFDecode):
 
         # Make (intentionally) mutable copies of HZ<->IRE levels
         # (NOTE: used by upstream functions, we use a namedtuple to keep const values already)
-        self.DecoderParams['ire0']  = self.SysParams['ire0']
-        self.DecoderParams['hz_ire'] = self.SysParams['hz_ire']
-        self.DecoderParams['vsync_ire'] = self.SysParams['vsync_ire']
+        self.DecoderParams["ire0"] = self.SysParams["ire0"]
+        self.DecoderParams["hz_ire"] = self.SysParams["hz_ire"]
+        self.DecoderParams["vsync_ire"] = self.SysParams["vsync_ire"]
 
         # TEMP just set this high so it doesn't mess with anything.
         self.DecoderParams["video_lpf_freq"] = 6400000
+        self.DecoderParams["video_deemp_strength"] = 1
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
@@ -524,13 +557,19 @@ class CVBSDecodeInner(ldd.RFDecode):
         self.demods = 0
 
         if self._chroma_trap:
-            self._chroma_sep_class = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+            self._chroma_sep_class = ChromaSepClass(
+                self.freq_hz, self.SysParams["fsc_mhz"]
+            )
         self._options = namedtuple(
             "Options",
             [
                 "disable_right_hsync",
+                "skip_hsync_refine",
             ],
-        )(not rf_options.get("rhs_hsync", False))
+        )(
+            not rf_options.get("rhs_hsync", False),
+            rf_options.get("skip_hsync_refine", False),
+        )
 
     @property
     def options(self):

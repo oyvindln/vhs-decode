@@ -6,7 +6,7 @@ FILTER_COMPLEX="[1:v]format=yuv422p10le[chroma];[0:v][chroma]mergeplanes=0x00111
 
 # Append audio track captured over line input or with external sound recorder, skip if absent:
 if [ -f "$1.wav" ] ; then
-  ffmpeg -hide_banner -thread_queue_size 4096 \
+  ffmpeg -hide_banner -thread_queue_size 1024 \
   -color_range tv \
   -i <( \
         ld-dropout-correct -i "$1.tbc" --output-json /dev/null - | \
@@ -19,10 +19,10 @@ if [ -f "$1.wav" ] ; then
   -itsoffset -00:00:00.000 -i "$1.wav" \
   -filter_complex "$FILTER_COMPLEX" \
   -map "[output]":v -c:v ffv1 -coder 1 -context 1 -g 30 -level 3 -slices 16 -slicecrc 1 -top 1 \
-  -pixel_format yuv422p10le -color_range tv -color_primaries bt470bg -color_trc gamma28 \
+  -pixel_format yuv422p10le -color_range tv -color_primaries bt470bg -color_trc bt709 \
   -colorspace bt470bg -aspect 4:3 -c:a flac -compression_level 12 -map 2:a? -shortest -y "$1.mkv"
 else
-  ffmpeg -hide_banner -thread_queue_size 4096 \
+  ffmpeg -hide_banner -thread_queue_size 1024 \
   -color_range tv \
   -i <( \
     ld-dropout-correct -i "$1.tbc" --output-json /dev/null - | \

@@ -8,6 +8,7 @@ add_library(lddecode-library STATIC
     tbc/sourceaudio.cpp
     tbc/sourcevideo.cpp
     tbc/vbidecoder.cpp
+    tbc/videoiddecoder.cpp
     tbc/vitcdecoder.cpp
 )
 

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/video-tbc">
+    <comment>CVBS video file</comment>
+    <glob pattern="*.tbc"/>
+  </mime-type>
+</mime-info>

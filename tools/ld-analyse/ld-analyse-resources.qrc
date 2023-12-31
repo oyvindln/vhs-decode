@@ -1,5 +1,7 @@
 <RCC>
     <qresource prefix="/icons">
+		<file>Graphics/16-analyse.png</file>
+		<file>Graphics/32-analyse.png</file>
         <file>Graphics/64-analyse.png</file>
         <file>Graphics/128-analyse.png</file>
         <file>Graphics/256-analyse.png</file>

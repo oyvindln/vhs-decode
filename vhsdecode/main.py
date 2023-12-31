@@ -1,7 +1,9 @@
+import argparse
+import os
 import sys
 import signal
 import traceback
-import argparse
+import time
 
 import numpy
 
@@ -23,7 +25,22 @@ from vhsdecode.cmdcommons import (
     get_extra_options,
 )
 
-supported_tape_formats = {"VHS", "SVHS", "UMATIC", "BETAMAX", "VIDEO8", "HI8"}
+supported_tape_formats = {
+    "VHS",
+    "VHSHQ",
+    "SVHS",
+    "UMATIC",
+    "UMATIC_HI",
+    "BETAMAX",
+    "BETAMAX_HIFI",
+    "VIDEO8",
+    "HI8",
+    "EIAJ",
+    "VCR",
+    "VCR_LP",
+    "TYPEC",
+    "TYPEB",
+}
 
 
 def main(args=None, use_gui=False):
@@ -56,7 +73,15 @@ def main(args=None, use_gui=False):
         metavar="tape_format",
         default="VHS",
         choices=supported_tape_formats,
-        help="Tape format, currently VHS (Default), SVHS, UMATIC, BETAMAX VIDEO8, HI8 are supported",
+        help="Tape format, currently VHS (Default), VHSHQ, SVHS, UMATIC, UMATIC_HI, BETAMAX, BETAMAX_HIFI, VIDEO8, HI8 ,EIAJ, VCR, VCR_LP, TYPEC and TYPEB, are supported",
+    )
+    parser.add_argument(
+        "--params_file",
+        type=argparse.FileType("r"),
+        dest="params_file",
+        metavar="params_file_json",
+        default=None,
+        help="Override format/system parameters with specified json file.",
     )
     luma_group = parser.add_argument_group("Luma decoding options")
     luma_group.add_argument(
@@ -106,7 +131,15 @@ def main(args=None, use_gui=False):
         dest="nldeemp",
         action="store_true",
         default=False,
-        help="Enable non-linear deemphasis, can help reduce ringing and oversharpening. (WIP).",
+        help="Enable primitive clipping non-linear deemphasis, can help reduce ringing and oversharpening. (WIP).",
+    )
+    luma_group.add_argument(
+        "--sd",
+        "--sub_deemphasis",
+        dest="subdeemp",
+        action="store_true",
+        default=False,
+        help="Enable non-linear sub deemphasis. (WIP).",
     )
     luma_group.add_argument(
         "--y_comb",
@@ -144,14 +177,20 @@ def main(args=None, use_gui=False):
         help="Re-check chroma phase on every field. (No effect on U-matic)",
     )
     chroma_group.add_argument(
-        "-nocomb",
         "--no_comb",
         dest="disable_comb",
         action="store_true",
         default=False,
         help="Disable internal chroma comb filter.",
     )
-    plot_options = "demodblock, deemphasis"
+    chroma_group.add_argument(
+        "--skip_chroma",
+        dest="skip_chroma",
+        action="store_true",
+        default=False,
+        help="Don't output chroma even for formats that may have it and possibly skip some of the chroma processing.",
+    )
+    plot_options = "demodblock, deemphasis, raw_pulses, line_locs"
     debug_group.add_argument(
         "--dp",
         "--debug_plot",
@@ -196,7 +235,7 @@ def main(args=None, use_gui=False):
         dest="fallback_vsync",
         action="store_true",
         default=False,
-        help="Enable vsync detect fallback. Will be enabled by default once more tested, so expect this option to change.",
+        help="Enable vsync detect fallback. Will be enabled by default once more tested, so expect this option to change. Always enabled when using TypeC tape format",
     )
     debug_group.add_argument(
         "--use_saved_levels",
@@ -204,6 +243,13 @@ def main(args=None, use_gui=False):
         action="store_true",
         default=False,
         help="Try re-using video levels detected from the first decoded fields instead of re-calculating each frame. Will be done by default once well tested",
+    )
+    debug_group.add_argument(
+        "--export_raw_tbc",
+        dest="export_raw_tbc",
+        action="store_true",
+        default=False,
+        help="export a raw TBC without deemphasis applied for filter tuning",
     )
     dodgroup = parser.add_argument_group("Dropout detection options")
     dodgroup.add_argument(
@@ -246,10 +292,30 @@ def main(args=None, use_gui=False):
 
     filename, outname, firstframe, req_frames = get_basics(args)
 
+    if not args.overwrite:
+        conflicts_ext = [".tbc", "_chroma.tbc", ".log", ".tbc.json"]
+        conflicts = []
+
+        for ext in conflicts_ext:
+            if os.path.isfile(outname + ext):
+                conflicts.append(outname + ext)
+
+        if conflicts:
+            print(
+                "Existing decode files found, remove them or run command with --overwrite"
+            )
+            for conflict in conflicts:
+                print("\t", conflict)
+            sys.exit(1)
+
     system = select_system(args)
     sample_freq = select_sample_freq(args)
 
     loader_input_freq = sample_freq if not args.no_resample else None
+    if sample_freq == 40 and (filename.endswith(".lds") or filename.endswith(".ldf")):
+        # Needs to be set to 0 so the loader does not try to resample.
+        # TODO: Fix this properly
+        loader_input_freq = None
 
     if not args.no_resample:
         sample_freq = 40
@@ -258,7 +324,12 @@ def main(args=None, use_gui=False):
         loader = lddu.make_loader(filename, loader_input_freq)
     except ValueError as e:
         print(e)
-        exit(1)
+        sys.exit(1)
+
+    # Note: Fallback to ffmpeg, not .lds format
+    # Temporary workaround until this is sorted upstream.
+    if loader is lddu.load_packed_data_4_40 and not filename.endswith(".lds"):
+        loader = lddu.LoadFFmpeg()
 
     dod_threshold_p = f.DEFAULT_THRESHOLD_P_DDD
     if args.cxadc or args.cxadc3 or args.cxadc_tenbit or args.cxadc3_tenbit:
@@ -274,7 +345,9 @@ def main(args=None, use_gui=False):
     rf_options["disable_diff_demod"] = args.disable_diff_demod
     rf_options["disable_dc_offset"] = not args.enable_dc_offset
     rf_options["disable_comb"] = args.disable_comb
+    rf_options["skip_chroma"] = args.skip_chroma
     rf_options["nldeemp"] = args.nldeemp
+    rf_options["subdeemp"] = args.subdeemp
     rf_options["y_comb"] = args.y_comb
     rf_options["cafc"] = args.cafc
     rf_options["sync_clip"] = args.sync_clip
@@ -282,8 +355,11 @@ def main(args=None, use_gui=False):
     rf_options["level_detect_divisor"] = args.level_detect_divisor
     rf_options["fallback_vsync"] = args.fallback_vsync
     rf_options["saved_levels"] = args.saved_levels
+    rf_options["skip_hsync_refine"] = args.skip_hsync_refine
+    rf_options["export_raw_tbc"] = args.export_raw_tbc
 
     extra_options = get_extra_options(args, not use_gui)
+    extra_options["params_file"] = args.params_file
 
     # Wrap the LDdecode creation so that the signal handler is not taken by sub-threads,
     # allowing SIGINT/control-C's to be handled cleanly
@@ -343,17 +419,25 @@ def main(args=None, use_gui=False):
     jsondumper = lddu.jsondump_thread(vhsd, outname)
 
     def cleanup():
-        jsondumper.put(vhsd.build_json(vhsd.curfield))
+        jsondumper.put(vhsd.build_json())
         vhsd.close()
         jsondumper.put(None)
+
+    # TODO: Put the stuff below this in a function so we can re-use for both vhs and cvbs
+
+    # seconddecode is taken so that setup time is not included in FPS calculation
+    firstdecode = time.time()
+    seconddecode = None
 
     while not done and vhsd.fields_written < (req_frames * 2):
         try:
             f = vhsd.readfield()
+            if not seconddecode:
+                seconddecode = time.time()
         except KeyboardInterrupt:
             print("Terminated, saving JSON and exiting")
             cleanup()
-            exit(1)
+            sys.exit(1)
         except Exception as err:
             print(
                 "\nERROR - please paste the following into a bug report:",
@@ -364,15 +448,28 @@ def main(args=None, use_gui=False):
             print("Exception:", err, " Traceback:", file=sys.stderr)
             traceback.print_tb(err.__traceback__)
             cleanup()
-            exit(1)
+            sys.exit(1)
 
         if f is None:
-            # or (args.ignoreleadout == False and vhsd.leadOut == True):
             done = True
+        else:
+            f.prevfield = None
 
         if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
-            jsondumper.put(vhsd.build_json(vhsd.curfield))
+            jsondumper.put(vhsd.build_json())
 
-    print("saving JSON and exiting")
+    if vhsd.fields_written:
+        timeused = time.time() - firstdecode
+        timeused2 = time.time() - seconddecode
+        frames = vhsd.fields_written // 2
+        fps = frames / timeused2
+
+        print(
+            f"\nCompleted: saving JSON and exiting.  Took {timeused:.2f} seconds to decode {frames} frames ({fps:.2f} FPS post-setup)",
+            file=sys.stderr,
+        )
+    else:
+        print(f"\nCompleted without handling any frames.", file=sys.stderr)
+
     cleanup()
-    exit(0)
+    sys.exit(0)

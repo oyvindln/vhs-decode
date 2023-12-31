@@ -43,7 +43,7 @@ def samplerate_resample(data, n, d, converter_type="linear"):
 
 
 class ChromaSepClass:
-    def __init__(self, fs, fsc, converter_type="linear"):
+    def __init__(self, fs, fsc, logger, converter_type="linear"):
         self.fs = fs
         self.fsc = fsc
         self.converter_type = converter_type
@@ -56,6 +56,7 @@ class ChromaSepClass:
         if use_samplerate:
             self.method = samplerate_resample
         else:
+            logger.warning("Cannot find samplerate, processing will be significantly slower with --ct active. Consider installing the python samplerate library.")
             self.method = signal_resample
 
     # It resamples the luminance data to self.multiplier * fsc

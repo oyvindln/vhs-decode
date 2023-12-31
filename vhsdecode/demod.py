@@ -4,7 +4,7 @@ import numpy as np
 import vhsdecode.hilbert as hilbert_test
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def replace_spikes(demod, demod_diffed, max_value, replace_start=8, replace_end=30):
     """Go through and replace spikes and some samples after them with data
     from the diff demod pass"""
@@ -22,7 +22,7 @@ def replace_spikes(demod, demod_diffed, max_value, replace_start=8, replace_end=
     return demod
 
 
-@njit(cache=True)
+@njit(cache=True, nogil=True)
 def smooth_spikes(demod, max_value):
     """Go through spikes above max value and replace with the average of the neighbours."""
     too_high = max_value

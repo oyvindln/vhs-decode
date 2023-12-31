@@ -92,6 +92,9 @@ def detect_dropouts_rf(field, dod_options):
     hysteresis = dod_options.dod_hysteresis
 
     threshold = 0.0
+    field_average = np.mean(field.data["video"]["envelope"])
+    # Store the average for later.
+    field.rf.field_averages.rf_level.push(field_average)
     if threshold_abs is not None:
         threshold = threshold_abs
     else:
@@ -99,7 +102,6 @@ def detect_dropouts_rf(field, dod_options):
         # This may not be ideal on a field with a lot of droputs,
         # so we may want to use statistics of the previous averages
         # to avoid the threshold ending too low.
-        field_average = np.mean(field.data["video"]["envelope"])
         threshold = field_average * threshold_p
 
     errlist = []

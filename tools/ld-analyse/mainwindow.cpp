@@ -382,8 +382,10 @@ void MainWindow::showFrame()
     }
 
     // Update the VBI dialogue
-    if (vbiDialog->isVisible()) vbiDialog->updateVbi(tbcSource.getFrameVbi(),
-                                                     tbcSource.getIsFrameVbiValid());
+    if (vbiDialog->isVisible()) {
+        vbiDialog->updateVbi(tbcSource.getFrameVbi(), tbcSource.getIsFrameVbiValid());
+        vbiDialog->updateVideoId(tbcSource.getFrameVideoId(), tbcSource.getIsFrameVideoIdValid());
+    }
 
     // Add the QImage to the QLabel in the dialogue
     ui->frameViewerLabel->clear();
@@ -591,6 +593,7 @@ void MainWindow::on_actionVBI_triggered()
 {
     // Show the VBI dialogue
     vbiDialog->updateVbi(tbcSource.getFrameVbi(), tbcSource.getIsFrameVbiValid());
+    vbiDialog->updateVideoId(tbcSource.getFrameVideoId(), tbcSource.getIsFrameVideoIdValid());
     vbiDialog->show();
 }
 

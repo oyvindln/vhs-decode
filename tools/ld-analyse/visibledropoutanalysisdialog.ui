@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>VIsible Dropout Loss Analysis</string>
+   <string>Visible Dropout Loss Analysis</string>
   </property>
   <layout class="QHBoxLayout" name="horizontalLayout_2">
    <item>

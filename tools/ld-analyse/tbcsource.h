@@ -37,6 +37,7 @@
 #include "lddecodemetadata.h"
 #include "linenumber.h"
 #include "vbidecoder.h"
+#include "videoiddecoder.h"
 #include "vitcdecoder.h"
 #include "filters.h"
 
@@ -103,6 +104,8 @@ public:
 
     VbiDecoder::Vbi getFrameVbi();
     bool getIsFrameVbiValid();
+    VideoIdDecoder::VideoId getFrameVideoId();
+    bool getIsFrameVideoIdValid();
     VitcDecoder::Vitc getFrameVitc();
     bool getIsFrameVitcValid();
 
@@ -174,6 +177,7 @@ private:
 
     // VBI decoders
     VbiDecoder vbiDecoder;
+    VideoIdDecoder videoIdDecoder;
     VitcDecoder vitcDecoder;
 
     // Background loader globals

@@ -27,6 +27,7 @@
 #include "closedcaption.h"
 #include "decoderpool.h"
 #include "fmcode.h"
+#include "videoid.h"
 #include "vitccode.h"
 #include "whiteflag.h"
 
@@ -77,6 +78,10 @@ void VbiLineDecoder::run()
             // Get the white flag from field line 11
             WhiteFlag whiteFlag;
             whiteFlag.decodeLine(getFieldLine(sourceFieldData, 11, videoParameters), videoParameters, fieldMetadata);
+
+            // Get IEC 61880 data from field line 20
+            VideoID videoID;
+            videoID.decodeLine(getFieldLine(sourceFieldData, 20, videoParameters), videoParameters, fieldMetadata);
 
             fieldMetadata.ntsc.inUse = true;
         }

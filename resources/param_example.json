@@ -1,0 +1,8 @@
+{
+   "sys_params":{
+      "burst_abs_ref":5000
+   },
+   "rf_params":{
+      "video_lpf_freq":3000000
+   }
+}

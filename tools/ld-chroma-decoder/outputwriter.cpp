@@ -148,7 +148,11 @@ QByteArray OutputWriter::getStreamHeader() const
     }
 
     // Field order
-    str << " It";
+    if (videoParameters.firstActiveFrameLine % 2 ^ topPadLines % 2) {
+        str << " Ib";
+    } else {
+        str << " It";
+    }
 
     // Pixel aspect ratio
     // XXX Can this be computed, in case the width has been adjusted?

@@ -21,7 +21,7 @@
   </property>
   <property name="windowIcon">
    <iconset resource="ld-analyse-resources.qrc">
-    <normaloff>:/icons/Graphics/128-analyse.png</normaloff>:/icons/Graphics/128-analyse.png</iconset>
+    <normaloff>:/icons/Graphics/16-analyse.png</normaloff>:/icons/Graphics/16-analyse.png</iconset>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>

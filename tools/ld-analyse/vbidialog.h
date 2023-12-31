@@ -29,6 +29,7 @@
 
 #include "lddecodemetadata.h"
 #include "vbidecoder.h"
+#include "videoiddecoder.h"
 
 namespace Ui {
 class VbiDialog;
@@ -43,11 +44,13 @@ public:
     ~VbiDialog();
 
     void updateVbi(VbiDecoder::Vbi vbi, bool isVbiValid);
+    void updateVideoId(VideoIdDecoder::VideoId videoid, bool isVideoIdValid);
 
 private:
     Ui::VbiDialog *ui;
 
     VbiDecoder vbiDecoder;
+    VideoIdDecoder videoIdDecoder;
 };
 
 #endif // VBIDIALOG_H

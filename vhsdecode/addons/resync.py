@@ -52,7 +52,6 @@ def check_levels(data, old_sync, new_sync, new_blank, vsync_hz_ref, hz_ire, full
 
 # search for black level on back porch
 def _pulses_blacklevel(demod_05, freq_mhz: float, pulses, vsync_locs, synclevel):
-
     if not vsync_locs or len(vsync_locs) == 0:
         return None
 
@@ -192,7 +191,9 @@ def _fallback_vsync_loc_means(
         demod_05 ([type]): Video data to get levels from.
         pulses ([type]): List of detected pulses
         sample_freq_mhz (float): Sample frequency of the data in mhz
-        len_threshold (int): only use pulses longer than this threshold.
+        min_len (int): only use pulses longer than this threshold.
+        max_len (int): don't use pulses longer than this threshold.
+
 
     Returns:
         [type]: a list of vsync locations in the list of pulses and a list of mean values
@@ -278,8 +279,7 @@ class FieldState:
 
 
 class Resync:
-    def __init__(self, fs, sysparams, divisor=1, debug=False):
-
+    def __init__(self, fs, sysparams, sysparams_const, divisor=1, debug=False):
         self.divisor = divisor
         self.debug = debug
         self.samp_rate = fs
@@ -291,8 +291,23 @@ class Resync:
         self.eq_pulselen = self._vsync_serration.getEQpulselen()
         self.linelen = self._vsync_serration.get_line_len()
         self.use_serration = True
+        # This should be enough to cover all "long" pulses,
+        # longest variant being ones where all of vsync is just one long pulse.
+        self._long_pulse_max = self.linelen * 5
+        # Last half-way point between blank/sync we used when looking for pulses.
+        self._last_pulse_threshold = findpulses_range(
+            sysparams_const, sysparams_const.vsync_hz
+        )
 
         # self._temp_c = 0
+
+    @property
+    def long_pulse_max(self):
+        return self._long_pulse_max
+
+    @property
+    def last_pulse_threshold(self):
+        return self._last_pulse_threshold
 
     def has_levels(self):
         return self._field_state.has_levels()
@@ -346,7 +361,6 @@ class Resync:
     def pulses_levels(
         self, field, sp, pulses, pulse_level=0, store_in_field_state=False
     ):
-
         vsync_len_px = field.usectoinpx(sp.vsync_pulse_us)
         min_len = vsync_len_px * 0.8
         max_len = vsync_len_px * 1.2
@@ -383,24 +397,25 @@ class Resync:
         if blacklevel < synclevel:
             blacklevel = math.nan
 
-        # if store_in_field_state:
-        #     import matplotlib.pyplot as plt
+        if False:
+            # store_in_field_state:
+            import matplotlib.pyplot as plt
 
-        #     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        #     fig.set_size_inches(40, 10)
-        #     plt.text(1, 1, "black: %s sync: %s" % (blacklevel, synclevel))
-        #     ax1.plot(field.data["video"]["demod_05"])
-        #     ax1.axhline(synclevel)
-        #     ax1.axhline(pulse_level, color="#00FF00")
-        #     if blacklevel is not math.nan:
-        #         ax1.axhline(blacklevel, color="#000000")
-        #     for p in pulses:
-        #         ax2.axvline(p.start, color="#00FF00")
-        #         ax2.axvline(p.start + p.len, color="#0000FF")
-        #     for loc in vsync_locs:
-        #         ax2.axvline(pulses[loc].start, color="#FF0000")
-        #     # ax2.plot(self.Filters["FVideo05"])
-        #     plt.show()
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+            fig.set_size_inches(40, 10)
+            plt.text(1, 1, "black: %s sync: %s" % (blacklevel, synclevel))
+            ax1.plot(field.data["video"]["demod_05"])
+            ax1.axhline(synclevel)
+            ax1.axhline(pulse_level, color="#00FF00")
+            if blacklevel is not math.nan:
+                ax1.axhline(blacklevel, color="#000000")
+            for ps in pulses:
+                ax2.axvline(ps.start, color="#00FF00")
+                ax2.axvline(ps.start + ps.len, color="#0000FF")
+            for loc in vsync_locs:
+                ax2.axvline(pulses[loc].start, color="#FF0000")
+            # ax2.plot(self.Filters["FVideo05"])
+            plt.show()
 
         if np.isnan(blacklevel).any() or np.isnan(synclevel).any():
             ldd.logger.debug("blacklevel or synclevel had a NaN!")
@@ -412,12 +427,17 @@ class Resync:
                 return None, None
         else:
             # Make sure these levels are sane before using them.
-            if self.level_check(
-                field.rf.sysparams_const,
-                synclevel,
-                blacklevel,
-                field.data["video"]["demod_05"],
-                False,
+            # Also don't save if we only found 1 or 2 vsyncs in case
+            # they were false positives.
+            if (
+                self.level_check(
+                    field.rf.sysparams_const,
+                    synclevel,
+                    blacklevel,
+                    field.data["video"]["demod_05"],
+                    True,
+                )
+                and len(vsync_means) > 3
             ):
                 if store_in_field_state:
                     self._field_state.set_levels(synclevel, blacklevel)
@@ -429,18 +449,18 @@ class Resync:
 
     def findpulses(self, sync_ref, high):
         return _findpulses_numba(
-            sync_ref, high, self.eq_pulselen * 1 / 8, self.linelen * 3
+            sync_ref, high, self.eq_pulselen * 1 / 8, self.long_pulse_max
         )
 
     def _findpulses_arr(self, sync_ref, high):
         return _findpulses_numba_raw(
-            sync_ref, high, self.eq_pulselen * 1 / 8, self.linelen * 3
+            sync_ref, high, self.eq_pulselen * 1 / 8, self.long_pulse_max
         )
 
-    def _findpulses_arr_reduced(self, sync_ref, high, divisor):
+    def _findpulses_arr_reduced(self, sync_ref, high, divisor, sp):
         """Run findpulses using only every divisor samples"""
         min_len = (self.eq_pulselen * 1 / 8) / divisor
-        max_len = (self.linelen * 5 / 8) / divisor
+        max_len = (self.long_pulse_max) / divisor
 
         pulses_starts, pulses_lengths = _findpulses_numba_raw(
             sync_ref[::divisor], high, min_len, max_len
@@ -451,7 +471,9 @@ class Resync:
 
         return pulses_starts, pulses_lengths
 
-    def add_pulselevels_to_serration_measures(self, field, demod_05, sp):
+    def add_pulselevels_to_serration_measures(
+        self, field, demod_05, sp, check_long=False
+    ):
         if self._vsync_serration.has_serration():
             sync, blank = self._vsync_serration.pull_levels()
         else:
@@ -460,15 +482,20 @@ class Resync:
             min_sync = np.min(demod_05)
             retries = 30
             min_vsync_check = field.usectoinpx(sp.vsync_pulse_us) * 0.8
+            long_pulse_min = field.usectoinpx(sp.vsync_pulse_us) * 2.6
+            long_pulse_max = self.long_pulse_max
+
             num_assumed_vsyncs_prev = 0
+            long_pulses_prev = 0
             prev_min_sync = min_sync
             found_candidate = False
             check_next = True
             while retries > 0:
                 pulse_hz_min, pulse_hz_max = findpulses_range(sp, min_sync)
                 pulses_starts, pulses_lengths = self._findpulses_arr_reduced(
-                    demod_05, pulse_hz_max, self.divisor
+                    demod_05, pulse_hz_max, self.divisor, sp
                 )
+
                 # this number might need calculation
                 if len(pulses_lengths) > 200:
                     # Check that at least 2 pulses are long enough to be vsync to avoid noise
@@ -476,22 +503,43 @@ class Resync:
                     num_assumed_vsyncs = len(
                         pulses_lengths[pulses_lengths > min_vsync_check]
                     )
-                    if len(pulses_lengths[pulses_lengths > min_vsync_check]) > 4:
-                        if num_assumed_vsyncs == 12 and not check_next:
+
+                    long_pulses = 0
+
+                    if check_long and num_assumed_vsyncs <= 2:
+                        # If requested, we also do checks for "long" pulses found in non-standard vsync.
+                        long_pulses = len(
+                            pulses_lengths[
+                                inrange(pulses_lengths, long_pulse_min, long_pulse_max)
+                            ]
+                        )
+
+                    if num_assumed_vsyncs > 4 or long_pulses >= 1:
+                        if (
+                            num_assumed_vsyncs == 12 or long_pulses == 2
+                        ) and not check_next:
+                            # if we have exactly 12 vsyncs meaning we likely found all of them and no more
+                            # (or 2 long pulses) we are likely good.
                             break
                         elif (
                             not found_candidate
                             or num_assumed_vsyncs > num_assumed_vsyncs_prev
+                            or long_pulses > long_pulses_prev
                         ):
+                            # We found a set with at least some vsyncs or long pulses...
                             found_candidate = True
                             num_assumed_vsyncs_prev = num_assumed_vsyncs
+                            long_pulses_prev = long_pulses
                             prev_min_sync = min_sync
+                            # ...so do one more iteration to see if we get closer to the expected number,
+                            # if not use the currently found levels.
                             check_next = True
                         elif (
                             num_assumed_vsyncs < num_assumed_vsyncs_prev
+                            or long_pulses < long_pulses_prev
                             or check_next is False
                         ):
-                            # Use previous
+                            # We found less so go back to previous levels and end the search.
                             min_sync = prev_min_sync
                             pulse_hz_min, pulse_hz_max = findpulses_range(sp, min_sync)
                             pulses_starts, pulses_lengths = self._findpulses_arr(
@@ -514,6 +562,7 @@ class Resync:
 
         # the tape chewing test passed, then it should find sync
         pulse_hz_min, pulse_hz_max = findpulses_range(sp, sync, blank_hz=blank)
+
         pulses = self.findpulses(demod_05, pulse_hz_max)
 
         if False:
@@ -599,7 +648,9 @@ class Resync:
             # measures the serration levels if possible
             self._vsync_serration.work(sync_reference)
             # adds the sync and blanking levels from the back porch
-            self.add_pulselevels_to_serration_measures(field, sync_reference, sp)
+            self.add_pulselevels_to_serration_measures(
+                field, sync_reference, sp, field.rf.options.fallback_vsync
+            )
 
         # safe clips the bottom of the sync pulses but leaves picture area unchanged
         # NOTE: Disabled for now as it doesn't seem to have much purpose at the moment and can
@@ -673,5 +724,7 @@ class Resync:
             ):
                 field.data["video"]["demod_05"] = sync_reference - new_sync + vsync_hz
                 field.data["video"]["demod"] = demod_data - new_sync + vsync_hz
+
+        self._last_pulse_threshold = pulse_hz_max
 
         return self.findpulses(field.data["video"]["demod_05"], pulse_hz_max)

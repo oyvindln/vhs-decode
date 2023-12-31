@@ -140,6 +140,8 @@ public:
         bool isFmCodeDataValid = false;
         qint32 fmCodeData = 0;
         bool fieldFlag = false;
+        bool isVideoIdDataValid = false;
+        qint32 videoIdData = 0;
         bool whiteFlag = false;
 
         void read(JsonReader &reader, ClosedCaption &closedCaption);

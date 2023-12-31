@@ -4,20 +4,22 @@ from numba import njit
 import lddecode.core as ldd
 import lddecode.utils as lddu
 from lddecode.utils import inrange
+from lddecode.utils import hz_to_output_array
 
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
 from vhsdecode.doc import detect_dropouts_rf
 from vhsdecode.addons.resync import Pulse
 from vhsdecode.chroma import (
-    decode_chroma_vhs,
-    decode_chroma_betamax,
-    decode_chroma_umatic,
-    decode_chroma_video8,
+    decode_chroma_simple,
+    decode_chroma,
     get_field_phase_id,
     try_detect_track_vhs_pal,
-    try_detect_track_vhs_ntsc,
+    try_detect_track_ntsc,
+    try_detect_track_betamax_pal,
 )
+
+from vhsdecode.debug_plot import plot_data_and_pulses
 
 NO_PULSES_FOUND = 1
 
@@ -39,7 +41,7 @@ NO_PULSES_FOUND = 1
 
 
 # Can't use numba here due to clip being a recent addition.
-#@njit(cache=True)
+# @njit(cache=True)
 def y_comb(data, line_len, limit):
     """Basic Y comb filter, essentially just blending a line with it's neighbours, limited to some maximum
     Utilized for Betamax, VHS LP etc as the half-shift in those formats helps put crosstalk on opposite phase on
@@ -57,16 +59,25 @@ def y_comb(data, line_len, limit):
 def field_class_from_formats(system: str, tape_format: str):
     field_class = None
     if system == "PAL":
-        if tape_format == "UMATIC":
+        if (
+            tape_format == "UMATIC"
+            or tape_format == "UMATIC_HI"
+            or tape_format == "EIAJ"
+            or tape_format == "VCR"
+            or tape_format == "VCR_LP"
+        ):
+            # These use simple chroma downconversion and filters.
             field_class = FieldPALUMatic
+        elif tape_format == "TYPEC" or tape_format == "TYPEB":
+            field_class = FieldPALTypeC
         elif tape_format == "SVHS":
             field_class = FieldPALSVHS
         elif tape_format == "BETAMAX":
             field_class = FieldPALBetamax
         elif tape_format == "VIDEO8" or tape_format == "HI8":
-            field_class = FieldNTSCVideo8
+            field_class = FieldPALVideo8
         else:
-            if tape_format != "VHS":
+            if tape_format != "VHS" and tape_format != "VHSHQ":
                 ldd.logger.info(
                     "Tape format unimplemented for PAL, using VHS field class."
                 )
@@ -74,14 +85,16 @@ def field_class_from_formats(system: str, tape_format: str):
     elif system == "NTSC":
         if tape_format == "UMATIC":
             field_class = FieldNTSCUMatic
+        elif tape_format == "TYPEC" or tape_format == "TYPEB":
+            field_class = FieldNTSCTypeC
         elif tape_format == "SVHS":
             field_class = FieldNTSCSVHS
-        elif tape_format == "BETAMAX":
+        elif tape_format == "BETAMAX" or tape_format == "BETAMAX_HIFI":
             field_class = FieldNTSCBetamax
         elif tape_format == "VIDEO8" or tape_format == "HI8":
             field_class = FieldNTSCVideo8
         else:
-            if tape_format != "VHS":
+            if tape_format != "VHS" and tape_format != "VHSHQ":
                 ldd.logger.info(
                     "Tape format unimplemented for NTSC, using VHS field class."
                 )
@@ -95,65 +108,6 @@ def field_class_from_formats(system: str, tape_format: str):
         raise Exception("Unknown video system!", system)
 
     return field_class
-
-
-def get_line0_fallback(valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, _system):
-    """
-    Try a more primitive way of locating line 0 if the normal approach fails.
-    Currently we basically just look for the first long pulse that could be start of vsync pulses in
-    e.g a 240p/280p signal
-    """
-
-    PULSE_START = 0
-    PULSE_LEN = 1
-
-    long_pulses = list(
-        filter(
-            lambda p: inrange(p[PULSE_LEN], lt_vsync[0], lt_vsync[1] * 10), raw_pulses
-        )
-    )
-
-    if False:
-        # len(validpulses) > 300:
-        import matplotlib.pyplot as plt
-
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
-        ax1.plot(demod_05)
-
-        for raw_pulse in long_pulses:
-            ax2.axvline(raw_pulse.start, color="#910000")
-            ax2.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
-
-        # for valid_pulse in long_pulses:
-        #     color = (
-        #         "#FF0000"
-        #         if valid_pulse[0] == 2
-        #         else "#00FF00"
-        #         if valid_pulse[0] == 1
-        #         else "#0F0F0F"
-        #     )
-        #     ax3.axvline(valid_pulse[1][0], color=color)
-        #     ax3.axvline(valid_pulse[1][0] + valid_pulse[1][1], color="#009900")
-
-        plt.show()
-    if long_pulses:
-        # Offset from start of first vsync to first line
-        # NOTE: Not technically to first line but to the loc that would be expected for getLine0.
-        # May need a different value for NTSC, may need tweaking..
-        offset = linelen * 3
-        line_0 = long_pulses[0][PULSE_START] - offset
-        # If we see exactly 2 groups of 3 long pulses, assume that we are dealing with a 240p/288p signal and
-        # use the second group as loc of last line
-        last_lineloc = (
-            long_pulses[3][PULSE_START] - offset
-            if len(long_pulses) == 6
-            and long_pulses[3][PULSE_START] - long_pulses[2][PULSE_START]
-            > (lt_vsync[1] * 10)
-            else None
-        )
-        return line_0, last_lineloc, True
-    else:
-        return None, None, None
 
 
 P_HSYNC, P_EQPL1, P_VSYNC, P_EQPL2, P_EQPL, P_OTHER_S, P_OTHER_L = range(7)
@@ -215,6 +169,91 @@ def _is_valid_seq(type_list, num_pulses):
         (P_VSYNC, num_pulses),
         (P_EQPL, num_pulses),
     ]
+
+
+def get_line0_fallback(valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses):
+    """
+    Try a more primitive way of locating line 0 if the normal approach fails.
+    This doesn't actually fine line 0, rather it locates the approx position of the last vsync before vertical blanking
+    as the later code is designed to work off of that.
+    Currently we basically just look for the first "long" pulse that could be start of vsync pulses in
+    e.g a 240p/280p signal (that is, a pulse that is at least vsync pulse length.)
+    """
+
+    PULSE_START = 0
+    PULSE_LEN = 1
+
+    # TODO: get max len from field.
+    long_pulses = list(
+        filter(
+            lambda p: inrange(p[PULSE_LEN], lt_vsync[0], lt_vsync[1] * 10), raw_pulses
+        )
+    )
+
+    if False:
+        # len(validpulses) > 300:
+        import matplotlib.pyplot as plt
+
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
+        ax1.plot(demod_05)
+
+        for raw_pulse in long_pulses:
+            ax2.axvline(raw_pulse.start, color="#910000")
+            ax2.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
+
+        # for valid_pulse in long_pulses:
+        #     color = (
+        #         "#FF0000"
+        #         if valid_pulse[0] == 2
+        #         else "#00FF00"
+        #         if valid_pulse[0] == 1
+        #         else "#0F0F0F"
+        #     )
+        #     ax3.axvline(valid_pulse[1][0], color=color)
+        #     ax3.axvline(valid_pulse[1][0] + valid_pulse[1][1], color="#009900")
+
+        plt.show()
+    if long_pulses:
+        # Offset from start of first vsync to first line
+        # NOTE: Not technically to first line but to the loc that would be expected for getLine0.
+        # may need tweaking..
+
+        first_long_pulse_pos = long_pulses[0][PULSE_START]
+
+        line_0 = None
+        # TODO: Optimize this
+        # TODO: This will not give the correct result if the last hsync is damaged somehow, need
+        # to add some compensation for that case.
+        # Look for the last vsync before the vsync area as that is what
+        # the other functions want.
+        for p in valid_pulses:
+            if p[1][PULSE_START] > first_long_pulse_pos:
+                break
+            if p[0] == P_HSYNC:
+                line_0 = p[1][PULSE_START]
+
+        if line_0 is None:
+            ldd.logger.info(
+                "WARNING, line0 hsync not found, guessing something, result may be garbled."
+            )
+            line_0 = first_long_pulse_pos - (3 * linelen)
+
+        offset = num_eq_pulses * linelen
+
+        # If we see exactly 2 groups of 3 long pulses, assume that we are dealing with a 240p/288p signal and
+        # use the second group as loc of last line
+        # TODO: we also have examples where vsync is one very long pulse, need to sort that too here.
+        # TODO: Needs to be validated properly on 240p/288p input
+        last_lineloc = (
+            long_pulses[3][PULSE_START] - offset
+            if len(long_pulses) == 6
+            and long_pulses[3][PULSE_START] - long_pulses[2][PULSE_START]
+            > (lt_vsync[1] * 10)
+            else None
+        )
+        return line_0, last_lineloc, True
+    else:
+        return None, None, None
 
 
 def _run_vblank_state_machine(raw_pulses, line_timings, num_pulses, in_line_len):
@@ -317,6 +356,48 @@ def _run_vblank_state_machine(raw_pulses, line_timings, num_pulses, in_line_len)
 
 
 class FieldShared:
+    def process(self):
+        if self.prevfield:
+            if self.readloc > self.prevfield.readloc:
+                self.field_number = self.prevfield.field_number + 1
+            else:
+                self.field_number = self.prevfield.field_number
+                ldd.logger.debug("readloc loc didn't advance.")
+        else:
+            self.field_number = 0
+        super(FieldShared, self).process()
+
+    def hz_to_output(self, input):
+        if type(input) == np.ndarray:
+            if self.rf.options.export_raw_tbc:
+                return input.astype(np.single)
+            else:
+                
+                return hz_to_output_array(
+                    input,
+                    self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ (self.field_number % 2)],
+                    self.rf.DecoderParams["hz_ire"],
+                    self.rf.SysParams["outputZero"],
+                    self.rf.DecoderParams["vsync_ire"],
+                    self.out_scale
+                )
+
+        # Not sure what situations will cause input to not be a ndarray.
+
+        if self.rf.options.export_raw_tbc:
+            # Not sure if this will work.
+            return np.single(input)
+
+        reduced = (input - self.rf.DecoderParams["ire0"] - self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ (self.field_number % 2)]) / self.rf.DecoderParams["hz_ire"]
+        reduced -= self.rf.DecoderParams["vsync_ire"]
+
+        return np.uint16(
+            np.clip(
+                (reduced * self.out_scale) + self.rf.SysParams["outputZero"], 0, 65535
+            )
+            + 0.5
+        )
+
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldShared, self).downscale(
             final=False, *args, **kwargs
@@ -341,7 +422,7 @@ class FieldShared:
             self.data["video"]["demod_05"],
             self.lt_vsync,
             self.inlinelen,
-            self.rf.system,
+            self.rf.SysParams["numPulses"]
         )
         # Not needed after this.
         del self.lt_vsync
@@ -355,10 +436,6 @@ class FieldShared:
         a = _run_vblank_state_machine(
             pulses, LT, self.rf.SysParams["numPulses"], self.inlinelen
         )
-        # b = super(FieldShared, self).run_vblank_state_machine(pulses, LT)
-        # print("A : ", a)
-        # print("B : ", b)
-        # exit(0)
         return a
 
     def refinepulses(self):
@@ -432,19 +509,23 @@ class FieldShared:
         self.rawpulses = self.rf.resync.get_pulses(self, check_levels)
         # self.rawpulses = self.getpulses()
         if self.rawpulses is None or len(self.rawpulses) == 0:
-            return NO_PULSES_FOUND
+            return NO_PULSES_FOUND, None
 
         self.validpulses = validpulses = self.refinepulses()
+        meanlinelen = self.computeLineLen(validpulses)
+        self.meanlinelen = meanlinelen
 
         # line0loc, lastlineloc, self.isFirstField = self.getLine0(validpulses)
-        return self.getLine0(validpulses)
+        # NOTE: This seems to get the position of the last normal vsync before the vertical blanking interval rather than line0
+        # (which is only the same thing on the top field of 525-line system signals)
+        return self.getLine0(validpulses, meanlinelen), meanlinelen
 
     def compute_linelocs(self):
         has_levels = self.rf.resync.has_levels()
         # Skip vsync serration/level detect if we already have levels from a previous field and
         # the option is enabled.
         do_level_detect = not self.rf.options.saved_levels or not has_levels
-        res = self._try_get_pulses(do_level_detect)
+        res, meanlinelen = self._try_get_pulses(do_level_detect)
         if (
             res == NO_PULSES_FOUND or res[0] == None or self.sync_confidence == 0
         ) and not do_level_detect:
@@ -452,7 +533,7 @@ class FieldShared:
             # and level detection was skipped, try again
             # running the full level detection
             ldd.logger.debug("Search for pulses failed, re-checking levels")
-            res = self._try_get_pulses(True)
+            res, meanlinelen = self._try_get_pulses(True)
 
         if res == NO_PULSES_FOUND:
             ldd.logger.error("Unable to find any sync pulses, jumping 100 ms")
@@ -497,30 +578,41 @@ class FieldShared:
             lastlineloc_or_0 = 0.0
             self.skipdetected = False
 
+        if self.rf.debug_plot and self.rf.debug_plot.is_plot_requested("raw_pulses"):
+            plot_data_and_pulses(
+                self.data["video"]["demod"],
+                raw_pulses=self.rawpulses,
+                threshold=self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2),
+            )
+        # threshold=self.rf.resync.last_pulse_threshold
+
         if line0loc is None:
             if self.initphase is False:
                 ldd.logger.error("Unable to determine start of field - dropping field")
             return None, None, self.inlinelen * 100
 
-        meanlinelen = self.computeLineLen(validpulses)
-        self.meanlinelen = meanlinelen
-
         # If we don't have enough data at the end, move onto the next field
         lastline = (self.rawpulses[-1].start - line0loc) / meanlinelen
+        if self.rf.debug_plot and self.rf.debug_plot.is_plot_requested("raw_pulses"):
+            plot_data_and_pulses(
+                self.data["video"]["demod"],
+                raw_pulses=self.rawpulses,
+                extra_lines=[line0loc, lastlineloc_or_0],
+            )
+
         if lastline < proclines:
             if self.prevfield is not None:
+                ldd.logger.info(
+                    "lastline = %s, proclines = %s, meanlinelen = %s, line0loc = %s)",
+                    lastline,
+                    proclines,
+                    meanlinelen,
+                    line0loc,
+                )
                 ldd.logger.info("lastline < proclines , skipping a tiny bit")
             return None, None, max(line0loc - (meanlinelen * 20), self.inlinelen)
 
-        # Numba prefers we use a numba typed list, or we will get
-        # deprection warnings.
-        # validpulses_typed = TypedList()
-        # Need to initialize this manually as constructor didn't take
-        # arguments in older versions of numba.
-        # [validpulses_typed.append(p) for p in validpulses]
-        # TODO: Seems lists in numba are a bit wonky still so disabling for now.
-
-        linelocs_dict, linelocs_dist = sync.valid_pulses_to_linelocs(
+        linelocs_dict, _ = sync.valid_pulses_to_linelocs(
             validpulses,
             line0loc,
             self.skipdetected,
@@ -532,16 +624,18 @@ class FieldShared:
 
         rv_err = np.full(proclines, False)
 
-        # Convert dictionary into list, then fill in gaps
-        linelocs = [
-            linelocs_dict[l] if l in linelocs_dict else -1 for l in range(0, proclines)
-        ]
+        # Convert dictionary into array, then fill in gaps
+        linelocs = np.asarray(
+            [
+                linelocs_dict[l] if l in linelocs_dict else -1
+                for l in range(0, proclines)
+            ]
+        )
         linelocs_filled = linelocs.copy()
 
         self.linelocs0 = linelocs.copy()
 
         if linelocs_filled[0] < 0:
-            # logger.info("linelocs_filled[0] < 0, %s", linelocs_filled)
             next_valid = None
             for i in range(0, self.outlinecount + 1):
                 if linelocs[i] > 0:
@@ -616,58 +710,17 @@ class FieldShared:
 
         # *finally* done :)
 
-        rv_ll = [linelocs_filled[l] for l in range(0, proclines)]
+        rv_ll = np.asarray([linelocs_filled[l] for l in range(0, proclines)])
 
         # ldd.logger.info("line0loc %s %s", int(line0loc), int(self.meanlinelen))
 
-        if False:
-            # len(validpulses) > 300:
-            import matplotlib.pyplot as plt
-
-            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
-            ax1.plot(self.data["video"]["demod"])
-
-            # (
-            #     sync,
-            #     blank,
-            # ) = (
-            #     self.rf.resync.FieldState.getLevels()
-            # )  # self.rf.resync.VsyncSerration.getLevels()
-
-            # ax1.axhline(sync, color="#FF0000")
-            # ax1.axhline(blank, color="#00FF00")
-
-            # for raw_pulse in self.rawpulses:
-            #     ax1.axvline(raw_pulse.start, color="#910000")
-            #     ax1.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
-
-            # for valid_pulse in validpulses:
-            #     if valid_pulse[0] != 0:
-            #         color = "#FF0000" if valid_pulse[0] == 2 else "#00FF00"
-            #         ax1.axvline(valid_pulse[1][0], color=color)
-            #         ax1.axvline(valid_pulse[1][0] + valid_pulse[1][1], color="#009900")
-
-            # ax1.axvline(line0loc, color="000000")
-
-            # ax2.plot(np.diff(self.data["video"]["demod_05"]))
-
-            pulselen = np.zeros_like(self.data["video"]["demod_05"])
-            for valid_pulse in validpulses:
-                pulselen[
-                    valid_pulse[1][0] : valid_pulse[1][0] + valid_pulse[1][1]
-                ] = valid_pulse[1][1]
-
-            ax2.plot(pulselen)
-
-            # for p in linelocs_dict.values():
-            #    ax3.axvline(p)
-            # ldd.logger.info("p %s", p)
-            for ll in rv_ll:
-                ax3.axvline(ll)
-
-            # ax1.axhline(self.pulse_hz_min, color="#00FFFF")
-            # ax1.axhline(self.pulse_hz_max, color="#000000")
-            plt.show()
+        if self.rf.debug_plot and self.rf.debug_plot.is_plot_requested("line_locs"):
+            plot_data_and_pulses(
+                self.data["video"]["demod"],
+                raw_pulses=self.rawpulses,
+                linelocs=linelocs,
+                pulses=validpulses,
+            )
 
         if self.vblank_next is None:
             nextfield = linelocs_filled[self.outlinecount - 7]
@@ -677,7 +730,12 @@ class FieldShared:
         return rv_ll, rv_err, nextfield
 
     def refine_linelocs_hsync(self):
-        return sync.refine_linelocs_hsync(self, self.linebad)
+        if not self.rf.options.skip_hsync_refine:
+            return sync.refine_linelocs_hsync(
+                self, self.linebad, self.rf.resync.last_pulse_threshold
+            )
+        else:
+            return self.linelocs1.copy()
 
         if False:
             import timeit
@@ -1023,12 +1081,12 @@ class FieldPALVHS(FieldPALShared):
         dsout, dsaudio, dsefm = super(FieldPALVHS, self).downscale(
             final=final, *args, **kwargs
         )
-        dschroma = decode_chroma_vhs(self)
+        dschroma = decode_chroma(self, self.rf.DecoderParams["chroma_rotation"])
 
         return (dsout, dschroma), dsaudio, dsefm
 
     def try_detect_track(self):
-        return try_detect_track_vhs_pal(self)
+        return try_detect_track_vhs_pal(self, self.rf.DecoderParams["chroma_rotation"])
 
 
 class FieldPALSVHS(FieldPALVHS):
@@ -1046,7 +1104,7 @@ class FieldPALUMatic(FieldPALShared):
         dsout, dsaudio, dsefm = super(FieldPALUMatic, self).downscale(
             final=final, *args, **kwargs
         )
-        dschroma = decode_chroma_umatic(self)
+        dschroma = decode_chroma_simple(self)
 
         return (dsout, dschroma), dsaudio, dsefm
 
@@ -1056,7 +1114,7 @@ class FieldPALBetamax(FieldPALShared):
         super(FieldPALBetamax, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        # ldd.logger.info("try_detect_track not implemented for beta yet!")
+        test = try_detect_track_betamax_pal(self)
         return 0, False
 
     def downscale(self, final=False, *args, **kwargs):
@@ -1064,7 +1122,9 @@ class FieldPALBetamax(FieldPALShared):
             final=final, *args, **kwargs
         )
 
-        dschroma = decode_chroma_betamax(self)
+        dschroma = decode_chroma(
+            self, chroma_rotation=self.rf.DecoderParams["chroma_rotation"]
+        )
 
         return (dsout, dschroma), dsaudio, dsefm
 
@@ -1074,17 +1134,33 @@ class FieldPALVideo8(FieldPALShared):
         super(FieldPALVideo8, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        ldd.logger.info("try_detect_track not implemented for video8 yet!")
-        return 0, False
+        # PAL Video8 uses the same chroma phase rotation setup as PAL VHS.
+        return try_detect_track_vhs_pal(self, self.rf.DecoderParams["chroma_rotation"])
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldPALVideo8, self).downscale(
             final=final, *args, **kwargs
         )
 
-        dschroma = decode_chroma_video8(self)
+        dschroma = decode_chroma(
+            self,
+            chroma_rotation=self.rf.DecoderParams["chroma_rotation"],
+            do_chroma_deemphasis=True,
+        )
 
         return (dsout, dschroma), dsaudio, dsefm
+
+
+class FieldPALTypeC(FieldPALShared, ldd.FieldPAL):
+    def __init__(self, *args, **kwargs):
+        super(FieldPALTypeC, self).__init__(*args, **kwargs)
+
+    def downscale(self, final=False, *args, **kwargs):
+        dsout, dsaudio, dsefm = super(FieldPALTypeC, self).downscale(
+            final=final, *args, **kwargs
+        )
+
+        return (dsout, None), dsaudio, dsefm
 
 
 class FieldNTSCVHS(FieldNTSCShared):
@@ -1092,7 +1168,7 @@ class FieldNTSCVHS(FieldNTSCShared):
         super(FieldNTSCVHS, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        return try_detect_track_vhs_ntsc(self)
+        return try_detect_track_ntsc(self, self.rf.DecoderParams["chroma_rotation"])
 
     def downscale(self, final=False, *args, **kwargs):
         """Downscale the channels and upconvert chroma to standard color carrier frequency."""
@@ -1100,7 +1176,7 @@ class FieldNTSCVHS(FieldNTSCShared):
             final=final, *args, **kwargs
         )
 
-        dschroma = decode_chroma_vhs(self)
+        dschroma = decode_chroma(self, self.rf.DecoderParams["chroma_rotation"])
 
         self.fieldPhaseID = get_field_phase_id(self)
 
@@ -1119,14 +1195,14 @@ class FieldNTSCBetamax(FieldNTSCShared):
         super(FieldNTSCBetamax, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        return 0, False
+        return try_detect_track_ntsc(self, self.rf.DecoderParams["chroma_rotation"])
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldNTSCBetamax, self).downscale(
             final=final, *args, **kwargs
         )
 
-        dschroma = decode_chroma_betamax(self)
+        dschroma = decode_chroma(self, self.rf.DecoderParams["chroma_rotation"])
 
         return (dsout, dschroma), dsaudio, dsefm
 
@@ -1136,7 +1212,7 @@ class FieldMPALVHS(FieldNTSCVHS):
         super(FieldMPALVHS, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        return try_detect_track_vhs_pal(self)
+        return try_detect_track_vhs_pal(self, self.rf.DecoderParams["chroma_rotation"])
 
 
 class FieldNTSCUMatic(FieldNTSCShared):
@@ -1147,11 +1223,25 @@ class FieldNTSCUMatic(FieldNTSCShared):
         dsout, dsaudio, dsefm = super(FieldNTSCUMatic, self).downscale(
             final=final, *args, **kwargs
         )
-        dschroma = decode_chroma_umatic(self)
+        dschroma = decode_chroma_simple(self)
 
         self.fieldPhaseID = get_field_phase_id(self)
 
         return (dsout, dschroma), dsaudio, dsefm
+
+
+class FieldNTSCTypeC(FieldShared, ldd.FieldNTSC):
+    def __init__(self, *args, **kwargs):
+        super(FieldNTSCTypeC, self).__init__(*args, **kwargs)
+
+    def downscale(self, final=False, *args, **kwargs):
+        dsout, dsaudio, dsefm = super(FieldNTSCTypeC, self).downscale(
+            final=final, *args, **kwargs
+        )
+
+        # self.fieldPhaseID = get_field_phase_id(self)
+
+        return (dsout, None), dsaudio, dsefm
 
 
 class FieldNTSCVideo8(FieldNTSCShared):
@@ -1159,8 +1249,7 @@ class FieldNTSCVideo8(FieldNTSCShared):
         super(FieldNTSCVideo8, self).__init__(*args, **kwargs)
 
     def try_detect_track(self):
-        ldd.logger.info("track detection not implemented for 8mm!")
-        return 0, False
+        return try_detect_track_ntsc(self, self.rf.DecoderParams["chroma_rotation"])
 
     def downscale(self, final=False, *args, **kwargs):
         """Downscale the channels and upconvert chroma to standard color carrier frequency."""
@@ -1168,7 +1257,9 @@ class FieldNTSCVideo8(FieldNTSCShared):
             final=final, *args, **kwargs
         )
 
-        dschroma = decode_chroma_video8(self)
+        dschroma = decode_chroma(
+            self, self.rf.DecoderParams["chroma_rotation"], do_chroma_deemphasis=True
+        )
 
         self.fieldPhaseID = get_field_phase_id(self)
 
@@ -1186,6 +1277,6 @@ class FieldMESECAMVHS(FieldPALShared):
         dsout, dsaudio, dsefm = super(FieldMESECAMVHS, self).downscale(
             final=final, *args, **kwargs
         )
-        dschroma = decode_chroma_vhs(self, False)
+        dschroma = decode_chroma_simple(self)
 
         return (dsout, dschroma), dsaudio, dsefm

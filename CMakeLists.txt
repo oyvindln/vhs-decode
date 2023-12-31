@@ -35,7 +35,7 @@ endif()
 
 option(BUILD_PYTHON
     "Build and install ld-decode's Python library and tools"
-    ON
+    OFF
 )
 
 # Check for dependencies
@@ -84,9 +84,14 @@ if(USE_QWT)
     endif()
 endif()
 
-pkg_check_modules(FFTW REQUIRED IMPORTED_TARGET
-    fftw3
-)
+pkg_check_modules(FFTW IMPORTED_TARGET fftw3)
+if(FFTW_FOUND)
+    # .....
+    set(FFTW_INCLUDE_DIR ${FFTW_INCLUDE_DIRS})
+    set(FFTW_LIBRARY PkgConfig::FFTW)
+else()
+    find_package(FFTW REQUIRED)
+endif()
 
 # Get the Git branch and revision
 

@@ -1,5 +1,6 @@
 [build-system]
 requires = ["setuptools>=61", "setuptools_scm>=6.2", "wheel", "Cython", "numpy"]
+# requires = ["setuptools>=61", "wheel", "Cython", "numpy"]
 # build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,26 +14,28 @@ classifiers = [
     "Topic :: Multimedia :: Video",
 ]
 dependencies = [
-    "numpy>=1.17","numba>=0.48","scipy>=1.3","samplerate", "static-ffmpeg", "cython"
+    "numpy>=1.17","numba>=0.48","scipy>=1.3","samplerate", "static-ffmpeg", "cython", "pyhht", "soundfile", "zmq"
 ]
 dynamic = ["version"]
+# version = "0.2.1dev0"
 
 [project.optional-dependencies]
 
-#[project.scripts]
-#my-script = "my_package.module:function"
+[project.scripts]
+ld-decode = "lddecode.main:main"
+vhs-decode = "vhsdecode.main:main"
+cvbs-decode = "cvbsdecode.main:main"
+hifi-decode = "vhsdecode.hifi.main:main"
+
+#[console_scripts]
+# TODO: These should maybe be made modules too
+#ld-cut = "ld-cut"
+#cx-expander = "cx-expander"
+#tbc-video-export = "tbc-video-export"
 
 [project.urls]
 Homepage = "https://www.domesday86.com"
 
-
-
-[console_scripts]
-ld-decode = "lddecode:main"
-vhs-decode = "vhsdecode:main"
-cvbs-decode = "cvbsdecode:main"
-
 [tool.setuptools_scm]
 write_to = "vhsdecode/_version.py"
 local_scheme = "no-local-version"
-

@@ -1,15 +1,22 @@
 """Module containing parameters for VHS and SVHS"""
 
+PAL_ROTATION = [0, -1]
+NTSC_ROTATION = [-1, 1]
+
 
 def fill_rfparams_vhs_shared(rfparams):
     """Fill in parameters that are shared between systems for VHS"""
 
     # PAL and NTSC uses the same main de-emphasis
     # Temporary video emphasis filter constants
-    # Ideally we would calculate this based on tau and 'x' value, for now
-    # it's eyeballed based on graph and output.
-    rfparams["deemph_mid"] = 260000
-    rfparams["deemph_gain"] = 14
+    # The values are calculated based on the VHS spec IEC 774-1 (1994), page 67
+    # A first-order shelf filter is given with these parameters:
+    #  RC time constant: 1.3µs
+    #  resistor divider ratio: 4:1 (=> gain factor 5)
+
+    rfparams["deemph_mid"] = 273755.82  # sqrt(gain_factor)/(2*pi*r*c)
+    rfparams["deemph_gain"] = 13.9794   # 20*log10(gain_factor)
+    rfparams["deemph_q"] = 0.462088186  # 1/sqrt(sqrt(gain_factor) + 1/sqrt(gain_factor) + 2)
 
     # Parameters for high-pass filter used for non-linear deemphasis, these are
     # probably not correct.
@@ -34,7 +41,7 @@ def fill_rfparams_svhs_shared(rfparams):
     rfparams["video_lpf_extra"] = 9210000
     rfparams["video_lpf_extra_order"] = 3
 
-    rfparams["video_hpf_extra"] = 1520000
+    rfparams["video_hpf_extra"] = 1720000
     rfparams["video_hpf_extra_order"] = 3
 
     # Low-pass filter on Y after demodulation
@@ -45,6 +52,14 @@ def fill_rfparams_svhs_shared(rfparams):
     rfparams["boost_bpf_high"] = 8400000
     # Multiplier for the boosted signal to add in.
     rfparams["boost_bpf_mult"] = 1.1
+
+    # SVHS uses the emphasis curve from VHS + an additional sub-emphasis filter
+    # The latter isn't properly implemented yet but
+    # adjusting the corner frequency here makes it look a bit closer
+    # than just using the values for VHS, it needs to be properly
+    # sorted though.
+    rfparams["deemph_mid"] = 350000
+    #rfparams["deemph_gain"] = 14
 
 
 def get_rfparams_pal_vhs(rfparams_pal):
@@ -106,6 +121,8 @@ def get_rfparams_pal_vhs(rfparams_pal):
     # RFParams_PAL_VHS["nonlinear_highpass_limit_h"] = 5000
     # RFParams_PAL_VHS["nonlinear_highpass_limit_l"] = -20000
 
+    RFParams_PAL_VHS["chroma_rotation"] = PAL_ROTATION
+
     fill_rfparams_vhs_shared(RFParams_PAL_VHS)
 
     return RFParams_PAL_VHS
@@ -138,9 +155,6 @@ def get_rfparams_pal_svhs(sysparams_pal):
 
     fill_rfparams_svhs_shared(RFParams_PAL_SVHS)
 
-    RFParams_PAL_SVHS["deemph_mid"] = 260000
-    RFParams_PAL_SVHS["deemph_gain"] = 10
-
     RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -250000
@@ -159,8 +173,18 @@ def get_sysparams_pal_svhs(sysparams_pal):
     # 0 IRE level after demodulation
     SysParams_PAL_SVHS["ire0"] = 7e6 - (SysParams_PAL_SVHS["hz_ire"] * 100)
 
+    # One track has an offset of f_h/2
+    # SysParams_PAL_SVHS["track_ire0_offset"] = [7812.5, 0]
+
     return SysParams_PAL_SVHS
 
+def get_sysparams_pal_vhshq(sysparams_pal):
+    SysParams_PAL_VHSHQ = get_sysparams_pal_vhs(sysparams_pal)
+
+    # One track has an offset of f_h/2
+    SysParams_PAL_VHSHQ["track_ire0_offset"] = [7812.5, 0]
+
+    return SysParams_PAL_VHSHQ
 
 def get_rfparams_ntsc_vhs(rfparams_ntsc):
     """Get RF params for NTSC VHS"""
@@ -172,7 +196,7 @@ def get_rfparams_ntsc_vhs(rfparams_ntsc):
     RFParams_NTSC_VHS["video_bpf_low"] = 1500000
     RFParams_NTSC_VHS["video_bpf_high"] = 5300000
 
-    RFParams_NTSC_VHS["video_bpf_order"] = 1
+    RFParams_NTSC_VHS["video_bpf_order"] = 2
 
     RFParams_NTSC_VHS["video_lpf_extra"] = 6080000
     RFParams_NTSC_VHS["video_lpf_extra_order"] = 3
@@ -188,6 +212,8 @@ def get_rfparams_ntsc_vhs(rfparams_ntsc):
 
     # NTSC color under carrier is 40H
     RFParams_NTSC_VHS["color_under_carrier"] = (525 * (30 / 1.001)) * 40
+
+    RFParams_NTSC_VHS["chroma_rotation"] = NTSC_ROTATION
 
     # Upper frequency of bandpass to filter out chroma from the rf signal.
     RFParams_NTSC_VHS["chroma_bpf_upper"] = 1400000
@@ -237,7 +263,6 @@ def get_rfparams_ntsc_svhs(rfparams_ntsc):
 
 
 def get_sysparams_ntsc_svhs(sysparams_ntsc):
-
     SysParams_NTSC_SVHS = get_sysparams_ntsc_vhs(sysparams_ntsc)
 
     # frequency/ire IRE change pr frequency (Is this labeled correctly?)
@@ -246,13 +271,24 @@ def get_sysparams_ntsc_svhs(sysparams_ntsc):
     # 0 IRE level after demodulation
     SysParams_NTSC_SVHS["ire0"] = 7e6 - (SysParams_NTSC_SVHS["hz_ire"] * 100)
 
+    # One track has an offset of f_h/2
+    # SysParams_NTSC_SVHS["track_ire0_offset"] = [7867, 0]
+
     return SysParams_NTSC_SVHS
 
+def get_sysparams_ntsc_vhshq(sysparams_ntsc):
+    SysParams_NTSC_VHSHQ = get_sysparams_ntsc_vhs(sysparams_ntsc)
+
+    # One track has an offset of f_h/2
+    SysParams_NTSC_VHSHQ["track_ire0_offset"] = [7867, 0]
+
+    return SysParams_NTSC_VHSHQ
 
 def get_rfparams_mpal_vhs(rfparams_ntsc):
     params = get_rfparams_ntsc_vhs(rfparams_ntsc)
     # Same as NTSC other than color carrier
     params["color_under_carrier"] = 631.337e3
+    params["chroma_rotation"] = PAL_ROTATION
 
     return params
 
@@ -284,6 +320,7 @@ def get_rfparams_mesecam_vhs(rfparams_pal):
     # Average of the two carriers specified, need to check if this works correctly
     # and calculate exact value
     params["color_under_carrier"] = (654300 + 810500) / 2
+    params["chroma_rotation"] = None
 
     return params
 

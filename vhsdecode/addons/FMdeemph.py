@@ -5,7 +5,10 @@
 """
 import math
 from scipy.signal import butter
+from numba import njit
 
+
+@njit(cache=True)
 def gen_high_shelf(f0, dbgain, qfactor, fs):
     """Generate high shelving filter coeficcients (digital).
     f0: The center frequency where the gain in decibel is at half the maximum value.
@@ -30,6 +33,34 @@ def gen_high_shelf(f0, dbgain, qfactor, fs):
     a0 = (a + 1) - (a - 1) * cosw0 + 2 * asquared * alpha
     a1 = 2 * ((a - 1) - (a + 1) * cosw0)
     a2 = (a + 1) - (a - 1) * cosw0 - 2 * asquared * alpha
+    return [b0, b1, b2], [a0, a1, a2]
+
+
+@njit(cache=True)
+def gen_low_shelf(f0, dbgain, qfactor, fs):
+    """Generate low shelving filter coeficcients (digital).
+    f0: The center frequency where the gain in decibel is at half the maximum value.
+       Normalized to sampling frequency, i.e output will be filter from 0 to 2pi.
+    dbgain: gain at the top of the shelf in decibels
+    qfactor: determines shape of filter TODO: Document better
+    fs: sampling frequency
+
+    TODO: Generate based on -3db
+    Based on: https://www.w3.org/2011/audio/audio-eq-cookbook.html
+    """
+    a = 10 ** (dbgain / 40.0)
+    w0 = 2 * math.pi * (f0 / fs)
+    alpha = math.sin(w0) / (2 * qfactor)
+
+    cosw0 = math.cos(w0)
+    asquared = math.sqrt(a)
+
+    b0 = a * ((a + 1) - (a - 1) * cosw0 + 2 * asquared * alpha)
+    b1 = 2 * a * ((a - 1) - (a + 1) * cosw0)
+    b2 = a * ((a + 1) - (a - 1) * cosw0 - 2 * asquared * alpha)
+    a0 = (a + 1) + (a - 1) * cosw0 + 2 * asquared * alpha
+    a1 = -2 * ((a - 1) + (a + 1) * cosw0)
+    a2 = (a + 1) + (a - 1) * cosw0 - 2 * asquared * alpha
     return [b0, b1, b2], [a0, a1, a2]
 
 
@@ -137,7 +168,6 @@ class FMDeEmphasisC:
     """
 
     def __init__(self, fs, tau=1.25e-6):
-
         # Digital corner frequency
         w_c = 1.0 / tau
 
@@ -165,7 +195,9 @@ class FMDeEmphasisC:
 class FMDeEmphasis:
     def __init__(self, fs, tau=1.25e-6):
         f = 1 / (2 * math.pi * tau)
-        self.btaps, self.ataps = butter(N=1, Wn=f, btype='lowpass', analog=False, output='ba', fs=fs)
+        self.btaps, self.ataps = butter(
+            N=1, Wn=f, btype="lowpass", analog=False, output="ba", fs=fs
+        )
 
     def get(self):
         return self.btaps, self.ataps

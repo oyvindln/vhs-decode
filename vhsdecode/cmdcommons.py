@@ -1,5 +1,6 @@
 import argparse
 import lddecode.utils as lddu
+import sys
 
 DDD_FREQ = 40
 CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
@@ -47,7 +48,7 @@ def common_parser_gui(meta_title):
     return common_parser_gui_inner(meta_title)
 
 
-def common_parser_cli(meta_title, default_threads=4):
+def common_parser_cli(meta_title, default_threads=5):
     parser = argparse.ArgumentParser(description=meta_title)
     parser.add_argument("infile", metavar="infile", type=str, help="source file")
     parser.add_argument(
@@ -100,6 +101,13 @@ def common_parser_inner(parser, use_gui=False, default_threads=4):
         type=int,
         default=99999999,
         help="limit length to n frames",
+    )
+    file_options_group.add_argument(
+        "--overwrite",
+        dest="overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing decode files.",
     )
     input_format_group = parser.add_argument_group("Input format")
     input_format_group.add_argument(
@@ -225,6 +233,13 @@ def common_parser_inner(parser, use_gui=False, default_threads=4):
         default=False,
         help="Set log legel to DEBUG.",
     )
+    debug_group.add_argument(
+        "--skip_hsync_refine",
+        dest="skip_hsync_refine",
+        action="store_true",
+        default=False,
+        help="Skip refining line locations using hsync - less accurate line start detection but may avoid issues in some cases..",
+    )
     return parser, debug_group
 
 
@@ -246,7 +261,6 @@ def select_sample_freq(args):
 
 
 def select_system(args):
-
     if args.pal:
         system = "PAL"
     elif args.palm:
@@ -262,15 +276,15 @@ def select_system(args):
 
     if args.pal and args.ntsc:
         print("ERROR: Can only be PAL or NTSC")
-        exit(1)
+        sys.exit(1)
 
     if args.palm and args.pal:
         print("ERROR: Can only be PAL-M or PAL")
-        exit(1)
+        sys.exit(1)
 
     if args.palm and args.ntsc:
         print("ERROR: Can only be PAL-M or NTSC")
-        exit(1)
+        sys.exit(1)
 
     return system
 

@@ -2,6 +2,7 @@ import math
 import os
 import time
 import numpy as np
+import threading
 import traceback
 import scipy.signal as sps
 from collections import namedtuple
@@ -15,7 +16,7 @@ from vhsdecode.chroma import demod_chroma_filt
 
 import vhsdecode.formats as vhs_formats
 
-# from vhsdecode.addons.FMdeemph import FMDeEmphasis
+from vhsdecode.addons.FMdeemph import FMDeEmphasis
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.addons.resync import Resync
@@ -26,9 +27,22 @@ from vhsdecode.demod import replace_spikes, unwrap_hilbert, smooth_spikes
 from vhsdecode.field import field_class_from_formats
 from vhsdecode.video_eq import VideoEQ
 from vhsdecode.doc import DodOptions
+from vhsdecode.field_averages import FieldAverage
+from vhsdecode.load_params_json import override_params
+from vhsdecode.nonlinear_filter import sub_deemphasis
+from vhsdecode.compute_video_filters import (
+    gen_video_main_deemp_fft_params,
+    gen_video_lpf_params,
+    gen_nonlinear_bandpass_params,
+    gen_nonlinear_amplitude_lpf,
+    create_sub_emphasis_params,
+    NONLINEAR_AMP_LPF_FREQ_DEFAULT,
+)
+from vhsdecode.demodcache import DemodCacheTape
 
 
 def parent_system(system):
+    """Returns 'PAL' for 625 line systems and 'NTSC' for 525-line systems"""
     if system == "MPAL":
         parent_system = "NTSC"
     elif system == "MESECAM" or system == "SECAM":
@@ -47,9 +61,16 @@ def _computefilters_dummy(self):
     # Needs to be defined here as it's referenced in constructor.
     self.Filters["F05_offset"] = 32
 
+
 # HACK - override this in a hacky way for now to skip generating some filters we don't use.
 # including one that requires > 20 mhz sample rate.
 ldd.RFDecode.computefilters = _computefilters_dummy
+
+
+def _demodcache_dummy(self, *args, **kwargs):
+    self.ended = True
+    pass
+
 
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
@@ -73,6 +94,11 @@ class VHSDecode(ldd.LDdecode):
         extra_options={},
         debug_plot=None,
     ):
+        # monkey patch init with a dummy to prevent calling set_start_method twice on macos
+        # and not create extra threads.
+        # This is kinda hacky and should be sorted in a better way ideally.
+        temp_init = ldd.DemodCache.__init__
+        ldd.DemodCache.__init__ = _demodcache_dummy
 
         super(VHSDecode, self).__init__(
             fname_in,
@@ -89,7 +115,7 @@ class VHSDecode(ldd.LDdecode):
 
         # Adjustment for output to avoid clipping.
         self.level_adjust = level_adjust
-        # Overwrite the rf decoder with the VHS-altered one
+        # Overwrite the rf  with the VHS-altered one
         self.rf = VHSRFDecode(
             system=system,
             tape_format=tape_format,
@@ -98,21 +124,24 @@ class VHSDecode(ldd.LDdecode):
             extra_options=extra_options,
             debug_plot=debug_plot,
         )
-        self.rf.chroma_last_field = -1
-        self.rf.chroma_tbc_buffer = np.array([])
+
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
         self.FieldClass = field_class_from_formats(system, tape_format)
 
-        self.demodcache = ldd.DemodCache(
+        # Restore init functino now that superclass constructor is finished.
+        ldd.DemodCache.__init__ = temp_init
+
+        self.demodcache = DemodCacheTape(
             self.rf,
             self.infile,
             self.freader,
+            self.rf_opts,
             num_worker_threads=self.numthreads,
         )
 
-        if fname_out is not None:
+        if fname_out is not None and self.rf.options.write_chroma:
             self.outfile_chroma = open(fname_out + "_chroma.tbc", "wb")
         else:
             self.outfile_chroma = None
@@ -168,11 +197,13 @@ class VHSDecode(ldd.LDdecode):
         self.fieldinfo.append(fi)
 
         self.outfile_video.write(picturey)
-        self.outfile_chroma.write(picturec)
+        if self.rf.options.write_chroma:
+            self.outfile_chroma.write(picturec)
         self.fields_written += 1
 
     def close(self):
-        setattr(self, "outfile_chroma", None)
+        if self.rf.options.write_chroma:
+            setattr(self, "outfile_chroma", None)
         super(VHSDecode, self).close()
 
     def computeMetricsPAL(self, metrics, f, fp=None):
@@ -181,13 +212,13 @@ class VHSDecode(ldd.LDdecode):
     def computeMetricsNTSC(self, metrics, f, fp=None):
         return None
 
-    def build_json(self, f):
+    def build_json(self):
         try:
-            if not f:
-                # Make sure we don't fail if the last attempted field failed to decode
-                # Might be better to fix this elsewhere.
-                f = self.prevfield
-            jout = super(VHSDecode, self).build_json(f)
+            # if not f:
+            #    # Make sure we don't fail if the last attempted field failed to decode
+            #    # Might be better to fix this elsewhere.
+            #    f = self.prevfield
+            jout = super(VHSDecode, self).build_json()
 
             black = jout["videoParameters"]["black16bIre"]
             white = jout["videoParameters"]["white16bIre"]
@@ -206,79 +237,154 @@ class VHSDecode(ldd.LDdecode):
             return None
 
     def readfield(self, initphase=False):
-        # pretty much a retry-ing wrapper around decodefield with MTF checking
-        self.prevfield = self.curfield
         done = False
         adjusted = False
-        redo = False
+        redo = None
+
+        if len(self.fieldstack) >= 2:
+            self.fieldstack.pop(-1)
 
         while done is False:
             if redo:
-                # Only allow one redo, no matter what
-                done = True
+                # Drop existing thread
+                self.decodethread = None
 
-            self.fieldloc = self.fdoffset
-            f, offset = self.decodefield(initphase=initphase)
-
-            if f is None:
-                if offset is None:
-                    # EOF, probably
-                    return None
-
-            self.fdoffset += offset
-
-            if f is not None and f.valid:
-                picture, audio, efm = f.downscale(
-                    linesout=self.output_lines, final=True, audio=self.analog_audio
+                # Start new thread
+                self.threadreturn = {}
+                df_args = (
+                    redo,
+                    self.mtf_level,
+                    self.fieldstack[0],
+                    initphase,
+                    redo,
+                    self.threadreturn,
                 )
 
-                self.audio_offset = f.audio_next_offset
+                self.decodethread = threading.Thread(
+                    target=self.decodefield, args=df_args
+                )
+                # .run() does not actually run this in the background
+                self.decodethread.run()
+                f, offset = self.threadreturn["field"], self.threadreturn["offset"]
+                self.decodethread = None
+
+                # Only allow one redo, no matter what
+                done = True
+                redo = None
+            elif self.decodethread and self.decodethread.ident:
+                self.decodethread.join()
+                self.decodethread = None
+
+                f, offset = self.threadreturn["field"], self.threadreturn["offset"]
+            else:  # assume first run
+                f = None
+                offset = 0
+
+            if True:
+                # Start new thread
+                self.threadreturn = {}
+                if f and f.valid:
+                    prevfield = f
+                    toffset = self.fdoffset + offset
+                else:
+                    prevfield = None
+                    toffset = self.fdoffset
+
+                    if offset:
+                        toffset += offset
+
+                df_args = (
+                    toffset,
+                    self.mtf_level,
+                    prevfield,
+                    initphase,
+                    False,
+                    self.threadreturn,
+                )
+
+                self.decodethread = threading.Thread(
+                    target=self.decodefield, args=df_args
+                )
+                self.decodethread.start()
+                # Enabling .join() here to disable threading makes it slower,
+                # but makes the output more deterministic
+                self.decodethread.join()
+
+            # process previous run
+            if f:
+                self.fdoffset += offset
+            elif offset is None:
+                # Probable end, so push an empty field
+                self.fieldstack.insert(0, None)
+
+            if f and f.valid:
+                picture, audio, efm = f.downscale(
+                    linesout=self.output_lines,
+                    final=True,
+                    audio=self.analog_audio,
+                    lastfieldwritten=self.lastFieldWritten,
+                )
 
                 _ = self.computeMetrics(f, None, verbose=True)
-                # if "blackToWhiteRFRatio" in metrics and adjusted == False:
-                #     keep = 900 if self.isCLV else 30
-                #     self.bw_ratios.append(metrics["blackToWhiteRFRatio"])
-                #     self.bw_ratios = self.bw_ratios[-keep:]
+                # if "blackToWhiteRFRatio" in metrics and adjusted is False:
+                #    keep = 900 if self.isCLV else 30
+                #    self.bw_ratios.append(metrics["blackToWhiteRFRatio"])
+                #    self.bw_ratios = self.bw_ratios[-keep:]
 
-                # redo = not self.checkMTF(f, self.prevfield)
-                redo = False
+                redo = f.needrerun
+                if redo:
+                    redo = self.fdoffset - offset
 
                 # Perform AGC changes on first fields only to prevent luma mismatch intra-field
                 if self.useAGC and f.isFirstField and f.sync_confidence > 80:
-                    sync_hz, ire0_hz = self.detectLevels(f)
-                    vsync_ire = self.rf.SysParams["vsync_ire"]
+                    # TODO: actuall test this after changes
+                    sync_hz, ire0_hz, ire100_hz = self.detectLevels(f)
 
-                    sync_ire_diff = np.abs(self.rf.hztoire(sync_hz) - vsync_ire)
-                    ire0_diff = np.abs(self.rf.hztoire(ire0_hz))
+                    actualwhiteIRE = f.rf.hztoire(ire100_hz)
+
+                    sync_ire_diff = nb_abs(
+                        self.rf.hztoire(sync_hz) - self.rf.DecoderParams["vsync_ire"]
+                    )
+                    whitediff = nb_abs(self.rf.hztoire(ire100_hz) - actualwhiteIRE)
+                    ire0_diff = nb_abs(self.rf.hztoire(ire0_hz))
 
                     acceptable_diff = 2 if self.fields_written else 0.5
 
-                    if max(sync_ire_diff, ire0_diff) > acceptable_diff:
-                        redo = True
-                        self.rf.AGClevels[0].push(ire0_hz)
-                        # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
-                        self.rf.AGClevels[1].push((sync_hz - ire0_hz) / vsync_ire)
+                    if max((whitediff, ire0_diff, sync_ire_diff)) > acceptable_diff:
+                        hz_ire = (ire100_hz - ire0_hz) / 100
+                        vsync_ire = (sync_hz - ire0_hz) / hz_ire
 
-                        self.rf.SysParams["ire0"] = self.rf.AGClevels[0].pull()
-                        self.rf.SysParams["hz_ire"] = self.rf.AGClevels[1].pull()
+                        if vsync_ire > -20:
+                            logger.warning(
+                                "At field #{0}, Auto-level detection malfunction (vsync IRE computed at {1}, nominal ~= -40), possible disk skipping".format(
+                                    len(self.fieldinfo), np.round(vsync_ire, 2)
+                                )
+                            )
+                        else:
+                            redo = self.fdoffset - offset
 
-                if adjusted is False and redo is True:
+                            self.rf.DecoderParams["ire0"] = ire0_hz
+                            # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
+                            self.rf.DecoderParams["hz_ire"] = hz_ire
+                            self.rf.DecoderParams["vsync_ire"] = vsync_ire
+
+                if adjusted is False and redo:
                     self.demodcache.flush_demod()
                     adjusted = True
-                    self.fdoffset -= offset
+                    self.fdoffset = redo
                 else:
                     done = True
-            else:
-                # Probably jumping ahead - delete the previous field so
-                # TBC computations aren't thrown off
-                if self.curfield is not None and self.badfields is None:
-                    self.badfields = (self.curfield, f)
-                self.curfield = None
+                    self.fieldstack.insert(0, f)
+
+            if f is None and offset is None:
+                # EOF, probably
+                return None
+
+            if self.decodethread and not self.decodethread.ident and not redo:
+                self.decodethread.start()
 
         if f is None or f.valid is False:
             return None
-
-        self.curfield = f
 
         if f is not None and self.fname_out is not None:
             # Only write a FirstField first
@@ -298,6 +404,7 @@ class VHSDecode(ldd.LDdecode):
                 # If this is the first field to be written, don't write anything
                 return f
 
+            self.lastFieldWritten = (self.fields_written, f.readloc)
             self.writeout(self.lastvalidfield[f.isFirstField])
 
         return f
@@ -313,7 +420,6 @@ class VHSRFDecode(ldd.RFDecode):
         extra_options={},
         debug_plot=None,
     ):
-
         # First init the rf decoder normally.
         super(VHSRFDecode, self).__init__(
             inputfreq,
@@ -349,7 +455,9 @@ class VHSRFDecode(ldd.RFDecode):
         self.debug = extra_options.get("debug", False)
         # Enable cafc for betamax until proper track detection for it is implemented.
         self._do_cafc = (
-            True if tape_format == "BETAMAX" else rf_options.get("cafc", False)
+            True
+            if (tape_format == "BETAMAX" and system != "NTSC")
+            else rf_options.get("cafc", False)
         )
         # cafc requires --recheck_phase
         self._recheck_phase = True if self._do_cafc else self._recheck_phase
@@ -365,6 +473,7 @@ class VHSRFDecode(ldd.RFDecode):
             self.track_phase = track_phase
         else:
             raise Exception("Track phase can only be 0, 1 or None")
+
         self.hsync_tolerance = 0.8
 
         self.field_number = 0
@@ -374,11 +483,26 @@ class VHSRFDecode(ldd.RFDecode):
             system, tape_format, ldd.logger
         )
 
+        params_file = extra_options.get("params_file", None)
+        if params_file:
+            override_params(self.SysParams, self.DecoderParams, params_file, ldd.logger)
+
         # Make (intentionally) mutable copies of HZ<->IRE levels
         # (NOTE: used by upstream functions, we use a namedtuple to keep const values already)
         self.DecoderParams["ire0"] = self.SysParams["ire0"]
         self.DecoderParams["hz_ire"] = self.SysParams["hz_ire"]
         self.DecoderParams["vsync_ire"] = self.SysParams["vsync_ire"]
+        self.DecoderParams["track_ire0_offset"] = self.SysParams.get(
+            "track_ire0_offset", [0, 0]
+        )
+
+        export_raw_tbc = rf_options.get("export_raw_tbc", False)
+        is_color_under = vhs_formats.is_color_under(tape_format)
+        write_chroma = (
+            is_color_under
+            and not export_raw_tbc
+            and not rf_options.get("skip_chroma", False)
+        )
 
         # No idea if this is a common pythonic way to accomplish it but this gives us values that
         # can't be changed later.
@@ -390,26 +514,43 @@ class VHSRFDecode(ldd.RFDecode):
                 "tape_format",
                 "disable_comb",
                 "nldeemp",
+                "subdeemp",
                 "disable_right_hsync",
                 "sync_clip",
                 "disable_dc_offset",
                 "double_lpf",
                 "fallback_vsync",
                 "saved_levels",
-                "y_comb"
+                "y_comb",
+                "write_chroma",
+                "color_under",
+                "chroma_deemphasis_filter",
+                "skip_hsync_refine",
+                "export_raw_tbc",
             ],
         )(
             self.iretohz(100) * 2,
             tape_format,
-            rf_options.get("disable_comb", False),
+            rf_options.get("disable_comb", False) or is_secam(system),
             rf_options.get("nldeemp", False),
+            rf_options.get("subdeemp", False),
             rf_options.get("disable_right_hsync", False),
             rf_options.get("sync_clip", False),
             rf_options.get("disable_dc_offset", False),
-            tape_format == "VHS",
-            rf_options.get("fallback_vsync", False),
+            tape_format == "VHS" or tape_format == "VHSHQ",
+            # Always use this if we are decoding TYPEC since it doesn't have normal vsync.
+            # also enable by default with EIAJ since that was typically used with a primitive sync gen
+            # which output not quite standard vsync.
+            rf_options.get("fallback_vsync", False)
+            or tape_format == "TYPEC"
+            or tape_format == "EIAJ",
             rf_options.get("saved_levels", False),
             rf_options.get("y_comb", 0) * self.SysParams["hz_ire"],
+            write_chroma,
+            is_color_under,
+            tape_format == "VIDEO8" or tape_format == "HI8",
+            rf_options.get("skip_hsync_refine", False),
+            export_raw_tbc,
         )
 
         # As agc can alter these sysParams values, store a copy to then
@@ -422,6 +563,14 @@ class VHSRFDecode(ldd.RFDecode):
             self.SysParams["vsync_ire"],
             self.SysParams["ire0"],
             self.SysParams["vsyncPulseUS"],
+        )
+
+        #
+        self._sub_emphasis_params = create_sub_emphasis_params(
+            self.DecoderParams,
+            self.SysParams,
+            self._sysparams_const.hz_ire,
+            self._sysparams_const.vsync_ire,
         )
 
         self.debug_plot = debug_plot
@@ -455,7 +604,24 @@ class VHSRFDecode(ldd.RFDecode):
             do_cafc=self._do_cafc,
         )
 
-        self.Filters["FVideoBurst"] = self._chroma_afc.get_chroma_bandpass()
+        self.Filters["FVideoBurst"] = (
+            self._chroma_afc.get_chroma_bandpass()
+            if self._options.color_under
+            else self._chroma_afc.get_chroma_bandpass_final()
+        )
+
+        if self.options.chroma_deemphasis_filter:
+            from vhsdecode.addons.biquad import peaking
+
+            out_freq_half = self._chroma_afc.getOutFreqHalf()
+
+            (b, a) = peaking(
+                self.sys_params["fsc_mhz"] / out_freq_half,
+                3.4,
+                BW=0.5 / out_freq_half,
+                type="constantq",
+            )
+            self.Filters["chroma_deemphasis"] = (b, a)
 
         if self._notch is not None:
             if not self._do_cafc:
@@ -476,9 +642,10 @@ class VHSRFDecode(ldd.RFDecode):
         # The following filters are for post-TBC:
         # The output sample rate is 4fsc
         self.Filters["FChromaFinal"] = self._chroma_afc.get_chroma_bandpass_final()
-        self.Filters["FBurstNarrow"] = self._chroma_afc.get_burst_narrow()
-        self.chroma_heterodyne = self._chroma_afc.getChromaHet()
-        self.fsc_wave, self.fsc_cos_wave = self._chroma_afc.getFSCWaves()
+        if is_color_under:
+            self.Filters["FBurstNarrow"] = self._chroma_afc.get_burst_narrow()
+            self.chroma_heterodyne = self._chroma_afc.getChromaHet()
+            self.fsc_wave, self.fsc_cos_wave = self._chroma_afc.getFSCWaves()
 
         # Increase the cutoff at the end of blocks to avoid edge distortion from filters
         # making it through.
@@ -502,20 +669,32 @@ class VHSRFDecode(ldd.RFDecode):
             level_detect_divisor = int(inputfreq // 4)
 
         self.resync = Resync(
-            self.freq_hz, self.SysParams, divisor=level_detect_divisor, debug=self.debug
+            self.freq_hz,
+            self.SysParams,
+            self._sysparams_const,
+            divisor=level_detect_divisor,
+            debug=self.debug,
         )
 
         if self._chroma_trap:
-            self.chromaTrap = ChromaSepClass(self.freq_hz, self.SysParams["fsc_mhz"])
+            self.chromaTrap = ChromaSepClass(
+                self.freq_hz, self.SysParams["fsc_mhz"], ldd.logger
+            )
 
         if self.useAGC:
             self.AGClevels = StackableMA(
                 window_average=self.SysParams["FPS"] / 2
             ), StackableMA(window_average=self.SysParams["FPS"] / 2)
 
+        self._field_averages = FieldAverage()
+
     @property
     def sysparams_const(self):
         return self._sysparams_const
+
+    @property
+    def sys_params(self):
+        return self.SysParams
 
     @property
     def options(self):
@@ -544,6 +723,10 @@ class VHSRFDecode(ldd.RFDecode):
     @property
     def dod_options(self):
         return self._dod_options
+
+    @property
+    def field_averages(self):
+        return self._field_averages
 
     def computefilters(self):
         # Override the stuff used in lddecode to skip generating filters we don't use.
@@ -622,24 +805,11 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         # Video (luma) main de-emphasis
-        db, da = FMDeEmphasisB(self.freq_hz, DP["deemph_gain"], DP["deemph_mid"]).get()
-        # Sync de-emphasis
-        # db05, da05 = FMDeEmphasis(self.freq_hz, tau=DP["deemph_tau"]).get()
+        filter_deemp = gen_video_main_deemp_fft_params(DP, self.freq_hz, self.blocklen)
 
-        # db2, da2 = FMDeEmphasisB(
-        #     self.freq_hz, 1.5, 1e6, 3 / 4
-        # ).get()
-
-        # nlde_lower = (
-        #     lddu.filtfft((db2, da2), self.blocklen)
-        # )
-
-        video_lpf = sps.butter(
-            DP["video_lpf_order"], DP["video_lpf_freq"] / self.freq_hz_half, "low"
+        (video_lpf, filter_video_lpf) = gen_video_lpf_params(
+            DP, self.freq_hz_half, self.blocklen
         )
-        # SF["Fvideo_lpf"] = lddu.filtfft(video_lpf, self.blocklen)
-        filter_video_lpf = filtfft(video_lpf, self.blocklen, False)
-        SF["Fvideo_lpf"] = video_lpf
 
         # additional filters:  0.5mhz, used for sync detection.
         # Using an FIR filter here to get a known delay
@@ -654,7 +824,18 @@ class VHSRFDecode(ldd.RFDecode):
             1, [700000 / self.freq_hz_half], btype="lowpass", output="sos"
         )
 
-        filter_deemp = filtfft((db, da), self.blocklen, whole=False)
+        self.Filters["NLAmplitudeLPF"] = gen_nonlinear_amplitude_lpf(
+            DP.get("nonlinear_amp_lpf_freq", NONLINEAR_AMP_LPF_FREQ_DEFAULT),
+            self.freq_hz_half,
+        )
+
+        # self.Filters["chroma_notch"] = sps.iirnotch(
+        #            self.sys_params["fsc_mhz"] / self.freq_half, 1
+        # )
+        # chroma_notch_fft = filtfft(chroma_notch, self.blocklen, False)
+
+        self.Filters["FDeemp"] = filter_deemp
+
         self.Filters["FVideo"] = filter_deemp * filter_video_lpf
         if self.options.double_lpf:
             # Double up the lpf to possibly closer emulate
@@ -673,15 +854,24 @@ class VHSRFDecode(ldd.RFDecode):
         #     output="sos",
         # )
 
-        if self.options.nldeemp:
-            SF["NLHighPassF"] = filtfft(
-                sps.butter(
-                    1,
-                    [DP["nonlinear_highpass_freq"] / self.freq_hz_half],
-                    btype="highpass",
-                ),
+        if self.options.nldeemp or self.options.subdeemp:
+            SF["NLHighPassF"] = gen_nonlinear_bandpass_params(
+                DP, self.freq_hz_half, self.blocklen
+            )
+
+        if (
+            self.debug_plot
+            and self.debug_plot.is_plot_requested("nldeemp")
+            and self.options.subdeemp
+        ):
+            from vhsdecode.nonlinear_filter import test_filter
+
+            test_filter(
+                self.Filters,
+                self.freq_hz,
                 self.blocklen,
-                whole=False,
+                (self._sysparams_const.hz_ire * 143.0),
+                self._sub_emphasis_params,
             )
 
         if self.debug_plot and self.debug_plot.is_plot_requested("deemphasis"):
@@ -715,8 +905,13 @@ class VHSRFDecode(ldd.RFDecode):
         if data is None:
             data = npfft.ifft(indata_fft).real
 
+        if self.debug_plot and self.debug_plot.is_plot_requested("demodblock"):
+            # If we're doing a plot make a copy of the input to be able to plot it since we
+            # are modifying the data in place.
+            indata_fft_copy = indata_fft.copy()
+
         if self._notch is not None:
-            indata_fft = indata_fft * self.Filters["FVideoNotchF"]
+            indata_fft *= self.Filters["FVideoNotchF"]
 
         raw_filtered = npfft.ifft(
             indata_fft * self.Filters["RFVideoRaw"] * self.Filters["hilbert"]
@@ -734,33 +929,24 @@ class VHSRFDecode(ldd.RFDecode):
         env_mean = np.mean(env)
 
         # Applies RF filters
-        indata_fft_filt = indata_fft * self.Filters["RFVideo"]
+        indata_fft *= self.Filters["RFVideo"]
 
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
-            data_filtered = npfft.ifft(indata_fft_filt)
+            data_filtered = npfft.ifft(indata_fft)
             high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
                 (env_mean * 0.9) / env
             )
             del data_filtered
-            indata_fft_filt += npfft.fft(high_part * self._high_boost)
+            indata_fft += npfft.fft(high_part * self._high_boost)
         else:
             ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
-        hilbert = npfft.ifft(indata_fft_filt * self.Filters["hilbert"])
+        hilbert = npfft.ifft(indata_fft * self.Filters["hilbert"])
 
         # FM demodulator
         demod = unwrap_hilbert(hilbert, self.freq_hz).real
-
-        if self._chroma_trap:
-            # applies the Subcarrier trap
-            demod = self.chromaTrap.work(demod)
-
-        # Disabled if sharpness level is zero (default).
-        if self._video_eq:
-            # applies the video EQ
-            demod = self._video_eq.filter_video(demod)
 
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
         # replace the spikes with data from the diffed demod.
@@ -779,10 +965,25 @@ class VHSRFDecode(ldd.RFDecode):
                 # more
                 if False:
                     demod = smooth_spikes(demod, check_value * 2.2)
+
+        # Disabled if sharpness level is zero (default).
+        # TODO: This should be done after the deemphasis steps
+        if self._video_eq:
+            # applies the video EQ
+            demod = self._video_eq.filter_video(demod)
+
+        # TODO: This should be done after the deemphasis steps
+        if self._chroma_trap:
+            # applies the Subcarrier trap
+            demod = self.chromaTrap.work(demod)
+
         # applies main deemphasis filter
         demod_fft = npfft.rfft(demod)
         out_video_fft = demod_fft * self.Filters["FVideo"]
         out_video = npfft.irfft(out_video_fft).real
+
+        # out_video = sps.lfilter(self.Filters["chroma_notch"][0], self.Filters["chroma_notch"][1], out_video[::-1])[::-1]
+
         if self.options.double_lpf:
             # Compensate for phase shift of the extra lpf
             # TODO: What's this supposed to be?
@@ -801,7 +1002,18 @@ class VHSRFDecode(ldd.RFDecode):
 
             # And subtract it from the output signal.
             out_video -= hf_part
-            # out_video = hf_part + self.iretohz(50)
+
+        if self.options.subdeemp:
+            out_video = sub_deemphasis(
+                out_video,
+                out_video_fft,
+                self.Filters,
+                self._sub_emphasis_params.deviation,
+                self._sub_emphasis_params.exponential_scaling,
+                self._sub_emphasis_params.scaling_1,
+                self._sub_emphasis_params.scaling_2,
+                self._sub_emphasis_params.static_factor,
+            )
 
         del out_video_fft
 
@@ -809,9 +1021,10 @@ class VHSRFDecode(ldd.RFDecode):
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
 
         # Filter out the color-under signal from the raw data.
+        chroma_source = data if self.options.color_under else out_video
         out_chroma = (
             demod_chroma_filt(
-                data,
+                chroma_source,
                 self.Filters["FVideoBurst"],
                 self.blocklen,
                 self.Filters["FVideoNotch"],
@@ -831,13 +1044,16 @@ class VHSRFDecode(ldd.RFDecode):
                 raw_data=data,
                 env=env,
                 env_mean=env_mean,
-                raw_fft=indata_fft,
-                filtered_fft=indata_fft_filt,
+                raw_fft=indata_fft_copy,
+                filtered_fft=indata_fft,
                 demod_video=demod,
                 filtered_video=out_video,
                 chroma=out_chroma,
                 rfdecode=self,
             )
+
+        if self.options.export_raw_tbc:
+            out_video = demod
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
         video_out = np.rec.array(

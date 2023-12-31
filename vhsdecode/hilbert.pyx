@@ -14,8 +14,6 @@ def unwrap_hilbert(double complex[:] hilbert, cython.double freq_hz):
     cdef double[:] dangles = np.ediff1d(tangles, to_begin=0)
     del tangles
     cdef np.ndarray tdangles2
-    # cdef np.ndarray tdangles2
-
     # make sure unwapping goes the right way
     if dangles[0] < -pi:
         dangles[0] += tau

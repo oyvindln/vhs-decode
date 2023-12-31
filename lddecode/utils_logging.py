@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 
 
 def init_logging(outfile_name, columns=80):
@@ -34,7 +35,7 @@ def init_logging(outfile_name, columns=80):
         # Delete old logfile if it exists
         try:
             os.unlink(outfile_name)
-        except Exception:
+        except (OSError, FileNotFoundError):
             pass
 
         logger_file = logging.FileHandler(outfile_name)

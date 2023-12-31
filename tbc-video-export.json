@@ -1,0 +1,245 @@
+{
+    "ffmpeg_profiles": {
+        "ffv1": {
+            "v_codec": "ffv1",
+            "v_opts": [
+                "-coder",
+                "1",
+                "-level",
+                "3",
+                "-context",
+                "1",
+                "-slices",
+                "24",
+                "-slicecrc",
+                "1",
+                "-g",
+                "1"
+            ],
+            "v_format": "yuv422p10le",
+            "a_codec": "flac",
+            "a_opts": [
+                "-compression_level",
+                "12"
+            ],
+            "container": "mkv"
+        },
+        "ffv1_pcm": {
+            "v_codec": "ffv1",
+            "v_opts": [
+                "-coder",
+                "1",
+                "-level",
+                "3",
+                "-context",
+                "1",
+                "-slices",
+                "24",
+                "-slicecrc",
+                "1",
+                "-g",
+                "1"
+            ],
+            "v_format": "yuv422p10le",
+            "a_codec": "pcm_s24le",
+            "container": "mkv"
+        },
+        "ffv1_8bit": {
+            "v_codec": "ffv1",
+            "v_opts": [
+                "-coder",
+                "1",
+                "-level",
+                "3",
+                "-context",
+                "1",
+                "-slices",
+                "24",
+                "-slicecrc",
+                "1",
+                "-g",
+                "1"
+            ],
+            "v_format": "yuv422p",
+            "a_codec": "flac",
+            "a_opts": [
+                "-compression_level",
+                "12"
+            ],
+            "container": "mkv"
+        },
+        "ffv1_8bit_pcm": {
+            "v_codec": "ffv1",
+            "v_opts": [
+                "-coder",
+                "1",
+                "-level",
+                "3",
+                "-context",
+                "1",
+                "-slices",
+                "24",
+                "-slicecrc",
+                "1",
+                "-g",
+                "1"
+            ],
+            "v_format": "yuv422p",
+            "a_codec": "pcm_s24le",
+            "container": "mkv"
+        },
+        "ffv1_luma": {
+            "v_codec": "ffv1",
+            "v_opts": [
+                "-coder",
+                "1",
+                "-level",
+                "3",
+                "-context",
+                "1",
+                "-slices",
+                "24",
+                "-slicecrc",
+                "1",
+                "-g",
+                "1"
+            ],
+            "v_format": "y8",
+            "container": "mkv"
+        },
+        "prores_hq": {
+            "v_codec": "prores",
+            "v_opts": [
+                "-profile:v",
+                "3",
+                "-vendor",
+                "apl0",
+                "-bits_per_mb",
+                "8000",
+                "-quant_mat",
+                "hq",
+                "-mbs_per_slice",
+                "8"
+            ],
+            "v_format": "yuv422p10le",
+            "a_codec": "pcm_s24le",
+            "container": "mov"
+        },
+        "prores_4444xq": {
+            "v_codec": "prores",
+            "v_opts": [
+                "-profile:v",
+                "5",
+                "-vendor",
+                "apl0",
+                "-bits_per_mb",
+                "8000",
+                "-mbs_per_slice",
+                "8"
+            ],
+            "v_format": "yuv444p16",
+            "a_codec": "pcm_s24le",
+            "container": "mov"
+        },
+        "v210": {
+            "v_codec": "v210",
+            "v_format": "yuv422p10le",
+            "a_codec": "pcm_s24le",
+            "container": "mov"
+        },
+        "v410": {
+            "v_codec": "v410",
+            "v_format": "yuv422p10le",
+            "a_codec": "pcm_s24le",
+            "container": "mov"
+        },
+        "x264_web": {
+            "v_codec": "libx264",
+            "v_opts": [
+                "-crf",
+                "18",
+                "-preset",
+                "slow",
+                "-maxrate",
+                "8M",
+                "-bufsize",
+                "16M",
+                "-movflags",
+                "+faststart",
+                "-x264opts",
+                "interlaced=0"
+            ],
+            "v_format": "yuv420p",
+            "v_filter": "bwdif",
+            "v_double_rate": true,
+            "a_codec": "aac",
+            "a_opts": [
+                "-ar",
+                "48000",
+                "-b:a",
+                "320K"
+            ],
+            "container": "mov"
+        },
+        "x264_lossless": {
+            "v_codec": "libx264",
+            "v_opts": [
+                "-qp",
+                "0",
+                "-preset",
+                "veryslow"
+            ],
+            "v_format": "yuv422p10le",
+            "a_codec": "flac",
+            "a_opts": [
+                "-compression_level",
+                "12"
+            ],
+            "container": "mkv"
+        },
+        "x264_lossless_8bit": {
+            "v_codec": "libx264",
+            "v_opts": [
+                "-qp",
+                "0",
+                "-preset",
+                "veryslow"
+            ],
+            "v_format": "yuv422p",
+            "a_codec": "flac",
+            "a_opts": [
+                "-compression_level",
+                "12"
+            ],
+            "container": "mkv"
+        },
+        "x265_web": {
+            "v_codec": "libx265",
+            "v_opts": [
+                "-crf",
+                "18",
+                "-preset",
+                "slow",
+                "-maxrate",
+                "8M",
+                "-bufsize",
+                "16M",
+                "-movflags",
+                "+faststart",
+                "-x264opts",
+                "interlaced=0"
+            ],
+            "v_format": "yuv420p",
+            "v_filter": "bwdif",
+            "v_double_rate": true,
+            "a_codec": "aac",
+            "a_opts": [
+                "-ar",
+                "48000",
+                "-b:a",
+                "320K"
+            ],
+            "container": "mov"
+        }
+    }
+}

@@ -5,6 +5,7 @@ add_executable(ld-process-vbi
     main.cpp
     fmcode.cpp
     vbilinedecoder.cpp
+    videoid.cpp
     vitccode.cpp
     whiteflag.cpp
 )

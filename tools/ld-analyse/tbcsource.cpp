@@ -444,6 +444,24 @@ bool TbcSource::getIsFrameVbiValid()
     return true;
 }
 
+// Method to return the decoded VIDEO ID data for the frame
+VideoIdDecoder::VideoId TbcSource::getFrameVideoId()
+{
+    if (loadedFrameNumber == -1) return VideoIdDecoder::VideoId();
+
+    return videoIdDecoder.decodeFrame(firstField.ntsc.videoIdData, secondField.ntsc.videoIdData);
+}
+
+// Method returns true if the VIDEO ID is present for the frame
+bool TbcSource::getIsFrameVideoIdValid()
+{
+    if (loadedFrameNumber == -1) return false;
+
+    if (!firstField.ntsc.isVideoIdDataValid || !secondField.ntsc.isVideoIdDataValid) return false;
+
+    return true;
+}
+
 // Method to return the decoded VITC data for the frame
 VitcDecoder::Vitc TbcSource::getFrameVitc()
 {

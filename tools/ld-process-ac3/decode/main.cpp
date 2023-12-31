@@ -28,6 +28,11 @@
 #include <cassert>
 #include <cstring>
 
+#ifdef _WIN32
+    #include <io.h>
+    #include <fcntl.h>
+#endif
+
 #include "../logger.hpp"
 #include "AC3Framer.hpp"
 #include "ac3_parsing.hpp" // mostly for debug & stats
@@ -49,6 +54,10 @@ void doHelp(const std::string &app) {
 }
 
 int main(int argc, char *argv[]) {
+    #ifdef _WIN32
+    _setmode(_fileno(stdout), O_BINARY);
+    _setmode(_fileno(stdin), O_BINARY);	
+    #endif	
     while (true) {
         switch (getopt(argc, argv, "v:h?")) {
             // could have stdin/stdout as defaults, with switches to change them

@@ -76,14 +76,14 @@ def main(args=None):
         "--MTF",
         metavar="mtf",
         type=float,
-        default=None,
+        default=1.0,
         help="mtf compensation multiplier",
     )
     parser.add_argument(
         "--MTF_offset",
         metavar="mtf_offset",
         type=float,
-        default=None,
+        default=0,
         help="mtf compensation offset",
     )
     parser.add_argument(
@@ -181,26 +181,25 @@ def main(args=None):
     )
 
     parser.add_argument(
-        "-d",
-        "--deemp_adjust",
-        metavar="deemp_adjust",
-        type=float,
-        default=1.0,
-        help="Deemphasis level multiplier",
-    )
-    parser.add_argument(
         "--deemp_low",
         metavar="deemp_low",
         type=float,
         default=0,
-        help="Deemphasis low coefficient",
+        help="Deemphasis low frequency in nsecs (defaults:  NTSC 3.125mhz, PAL 2.5mhz)",
     )
     parser.add_argument(
         "--deemp_high",
         metavar="deemp_high",
         type=float,
         default=0,
-        help="Deemphasis high coefficient",
+        help="Deemphasis high frequency in mhz (defaults:  NTSC 8.33mhz, PAL 10mhz)",
+    )
+    parser.add_argument(
+        "--deemp_strength",
+        metavar="deemp_str",
+        type=float,
+        default=1,
+        help="Strength of deemphasis (default 1.0)",
     )
 
     parser.add_argument(
@@ -208,7 +207,7 @@ def main(args=None):
         "--threads",
         metavar="threads",
         type=int,
-        default=5,
+        default=4,
         help="number of CPU threads to use",
     )
 
@@ -273,7 +272,7 @@ def main(args=None):
 
     if args.pal and (args.ntsc or args.ntscj):
         print("ERROR: Can only be PAL or NTSC")
-        exit(1)
+        sys.exit(1)
 
     audio_pipe = None
 
@@ -282,8 +281,10 @@ def main(args=None):
         "write_RF_TBC": args.RF_TBC,
         "pipe_RF_TBC": audio_pipe,
         "write_pre_efm": args.prefm,
-        "deemp_mult": (args.deemp_adjust, args.deemp_adjust),
         "deemp_coeff": (args.deemp_low, args.deemp_high),
+        "deemp_str": args.deemp_strength,
+        "MTF_level": args.MTF,
+        "MTF_offset": args.MTF_offset,
         "audio_filterwidth": args.audio_filterwidth,
         "AC3": args.AC3,
     }
@@ -299,7 +300,7 @@ def main(args=None):
 
     if vid_standard == "PAL" and args.AC3:
         print("ERROR: AC3 audio decoding is only supported for NTSC")
-        exit(1)
+        sys.exit(1)
 
     if args.lowband:
         extra_options["lowband"] = True
@@ -308,7 +309,7 @@ def main(args=None):
         loader = make_loader(filename, args.inputfreq)
     except ValueError as e:
         print(e)
-        exit(1)
+        sys.exit(1)
 
     # Wrap the LDdecode creation so that the signal handler is not taken by sub-threads,
     # allowing SIGINT/control-C's to be handled cleanly
@@ -348,13 +349,7 @@ def main(args=None):
     if args.seek != -1:
         if ldd.seek(args.seek if firstframe == 0 else firstframe, args.seek) is None:
             print("ERROR: Seeking failed", file=sys.stderr)
-            exit(1)
-
-    if args.MTF is not None:
-        ldd.rf.mtf_mult = args.MTF
-
-    if args.MTF_offset is not None:
-        ldd.rf.mtf_offset = args.MTF_offset
+            sys.exit(1)
 
     DecoderParamsOverride = {}
     if args.vbpf_high is not None:
@@ -377,20 +372,25 @@ def main(args=None):
     jsondumper = jsondump_thread(ldd, outname)
 
     def cleanup():
-        jsondumper.put(ldd.build_json(ldd.curfield))
+        jsondumper.put(ldd.build_json())
         # logger.flush()
         ldd.close()
         jsondumper.put(None)
         if audio_pipe is not None:
             audio_pipe.close()
 
+    # seconddecode is taken so that setup time is not included in FPS calculation
+    firstdecode = time.time()
+    seconddecode = None
     while not done and ldd.fields_written < (req_frames * 2):
         try:
             f = ldd.readfield()
+            if not seconddecode:
+                seconddecode = time.time()
         except KeyboardInterrupt as kbd:
             print("\nTerminated, saving JSON and exiting", file=sys.stderr)
             cleanup()
-            exit(1)
+            sys.exit(1)
         except Exception as err:
             print(
                 "\nERROR - please paste the following into a bug report:",
@@ -401,13 +401,24 @@ def main(args=None):
             print("Exception:", err, " Traceback:", file=sys.stderr)
             traceback.print_tb(err.__traceback__)
             cleanup()
-            exit(1)
+            sys.exit(1)
 
         if f is None or (args.ignoreleadout == False and ldd.leadOut == True):
             done = True
 
         if ldd.fields_written < 100 or ((ldd.fields_written % 500) == 0):
-            jsondumper.put(ldd.build_json(ldd.curfield))
+            jsondumper.put(ldd.build_json())
 
-    print("\nCompleted: saving JSON and exiting", file=sys.stderr)
+    if ldd.fields_written:
+        timeused = time.time() - firstdecode
+        timeused2 = time.time() - seconddecode
+        frames = ldd.fields_written // 2
+        fps = frames / timeused2
+ 
+        print(f"\nCompleted: saving JSON and exiting.  Took {timeused:.2f} seconds to decode {frames} frames ({fps:.2f} FPS post-setup)", file=sys.stderr)
+    else:
+        print(f"\nCompleted without handling any frames.", file=sys.stderr)
+
     cleanup()
+
+#    print(time.time()-firstdecode)

@@ -4,6 +4,7 @@
 
     ld-process-efm - EFM data decoder
     Copyright (C) 2019-2022 Simon Inns
+    Copyright (C) 2023 Adam Sampson
 
     This file is part of ld-decode-tools.
 
@@ -80,7 +81,29 @@ bool Section::setData(const uchar *dataIn)
     // so we decode that here
 
     // Firstly we CRC the Q channel to ensure it contains valid data
-    if (verifyQ()) {
+    bool qVerified = verifyQ();
+    if (!qVerified) {
+        // Q channel CRC failed to match.
+        // The most likely type of error is a single bit being flipped.
+        // So try flipping each bit in turn, including those in the CRC
+        // itself, to see whether that makes the CRC correct.
+        for (qint32 bitNumber = 0; bitNumber < 96; bitNumber++) {
+            uchar &qSubcodeByte = qSubcode[bitNumber / 8];
+            const uchar origByte = qSubcodeByte;
+            qSubcodeByte ^= 1 << (bitNumber % 8);
+
+            qVerified = verifyQ();
+            if (qVerified) {
+                // Success!
+                qDebug() << "Section::setData(): Q Subcode CRC failed - corrected by flipping bit" << bitNumber;
+                break;
+            }
+
+            qSubcodeByte = origByte;
+        }
+    }
+
+    if (qVerified) {
         // Decode the Q channel mode
         qMode = decodeQAddress();
 
@@ -106,6 +129,7 @@ bool Section::setData(const uchar *dataIn)
         if (qMode < 0 || qMode > 4) qDebug() << "Section::setData(): Unsupported Q Mode" << qMode;
     } else {
         // Q channel mode is invalid
+        qDebug() << "SubcodeBlock::verifyQ(): Q Subcode CRC failed - Q subcode payload is invalid";
         qMode = -1;
         return false;
     }
@@ -136,7 +160,6 @@ bool Section::verifyQ()
 
     // Is the Q subcode valid?
     if (crcChecksum != calcChecksum) {
-        //qDebug() << "SubcodeBlock::verifyQ(): Q Subcode CRC failed - Q subcode payload is invalid";
         return false;
     }
 

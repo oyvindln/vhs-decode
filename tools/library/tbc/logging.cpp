@@ -122,6 +122,14 @@ void setQuiet(bool state)
     quietDebug = state;
 }
 
+void setBinaryMode(void)
+{
+    #ifdef _WIN32
+   _setmode(_fileno(stdout), O_BINARY);
+   _setmode(_fileno(stdin), O_BINARY);	
+    #endif
+}
+
 // Method to add the standard debug options to the command line parser
 void addStandardDebugOptions(QCommandLineParser &parser)
 {

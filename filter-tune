@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+from filter_tune.filter_tune import main
+
+
+if __name__ == "__main__":
+    main()

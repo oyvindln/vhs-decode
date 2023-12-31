@@ -8,10 +8,14 @@ chroma_phase=0
 output_format="yuv422p10le"
 monochrome=0
 chroma_decoder=""
+aspect_ratio=""
 video_codec="ffv1"
 video_container="mkv"
+video_gop="1"
+thread_queue_size="1024"
 
 #output_format is set here as that could be changed to yuv444p10le if desired
+
 FILTER_COMPLEX="[1:v]format=$output_format[chroma];[0:v][chroma]mergeplanes=0x001112:$output_format[output]"
 FILTER_COMPLEX_MONO="[0:v]format=$output_format[output]"
 
@@ -35,7 +39,8 @@ usage() {
 	echo "                                            RGB48, YUV444P16, GRAY16 pixel formats are supported"
 	echo "--video-codec                               Specify the output video codec to use (ex. v210); default is FFV1"
 	echo "--video-container                           Specify the output video container to use (ex. mov); default is mkv."
-        echo "                                            Specify only the container type, do not include a period."
+    echo "                                            Specify only the container type, do not include a period."
+	echo "--video-gop                                 Specify the output video GOP to use; default is 25"
 	echo "-b, --blackandwhite                         Output in black and white"
 	echo "--pad, --output-padding <number>            Pad the output frame to a multiple of this many pixels on"
 	echo "-d, --decoder <decoder>                     Decoder to use (pal2d, transform2d, transform3d, ntsc1d,"
@@ -139,6 +144,10 @@ while [ "$1" != "" ]; do
 		shift
 		video_container="$1"
 		;;
+	--video-gop)
+		shift
+		video_gop="$1"
+		;;
 	-b | --blackandwhite)
 		shift
 		monochrome=1
@@ -235,11 +244,24 @@ if [ "$videosystem" = "" ]; then
 	# Very dumb way of checking if the source is PAL
 	# There is probably a better way of doing this...
 	pal_found="$(head "$input_tbc_json" | grep -c -e \\\"PAL\\\" -e \\\"PAL-M\\\" -e \\\"isSourcePal\\\":true)"
+
 	if [ "$pal_found" = 1 ]; then
 		videosystem="pal"
 	else
 		videosystem="ntsc"
 	fi
+fi
+
+if [ "$aspect_ratio" = "" ]; then
+	# Very dumb way of checking if the source has WSS 16:9 Anamorphic Widescreen flagging
+	# There is probably a better way of doing this...
+	wss_found="$(head "$input_tbc_json" | grep -c -e \\\"isWidescreen\\\":true)"
+fi
+
+if [ "$wss_found" = 1 ]; then
+		aspect_ratio="-aspect 16:9"
+	else
+		aspect_ratio="-aspect 4:3"
 fi
 
 if [ "$videosystem" = "pal" ]; then
@@ -252,7 +274,7 @@ if [ "$videosystem" = "pal" ]; then
 	fi
 	color_space="bt470bg"
 	color_primaries="bt470bg"
-	color_trc="gamma28"
+	color_trc="bt709"
 fi
 
 if [ "$videosystem" = "ntsc" ]; then
@@ -265,7 +287,7 @@ if [ "$videosystem" = "ntsc" ]; then
 	fi
 	color_space="smpte170m"
 	color_primaries="smpte170m"
-	color_trc="smpte170m"
+	color_trc="bt709"
 	decoder_opts+=( --ntsc-phase-comp )
 fi
 
@@ -285,30 +307,30 @@ fi
 
 # There might be a better way of supporting monochrome output
 if [ "$monochrome" = "1" ]; then
-	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
-	-i <(
+	ffmpeg -hide_banner -thread_queue_size "$thread_queue_size" -color_range tv \
+	-thread_queue_size "$thread_queue_size" -i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
 			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX_MONO" \
-	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g "$video_gop" -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
 	-shortest -y "$input_stripped"."$video_container"
 else
-	ffmpeg -hide_banner -thread_queue_size 4096 -color_range tv \
-	-i <(
+	ffmpeg -hide_banner -thread_queue_size "$thread_queue_size" -color_range tv \
+	-thread_queue_size "$thread_queue_size" -i <(
 		ld-dropout-correct -i "$input_tbc" --output-json /dev/null - |
 			ld-chroma-decoder --chroma-gain 0 -f mono -p y4m "${decoder_opts[@]}" --input-json "$input_tbc_json" - -
 	) \
-	-i <(
+	-thread_queue_size "$thread_queue_size" -i <(
 		ld-dropout-correct -i "$input_chroma_tbc" --input-json "$input_tbc_json" --output-json /dev/null - |
 			ld-chroma-decoder -f $chroma_decoder "${decoder_opts[@]}" --luma-nr 0 --chroma-gain $chroma_gain --chroma-phase "$chroma_phase" -p y4m --input-json "$input_tbc_json" - -
 	) \
 	"${audio_opts_1[@]}" \
 	-filter_complex "$FILTER_COMPLEX" \
-	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 \
+	-map "[output]":v -c:v "$video_codec" -coder 1 -context 1 -g "$video_gop" -level 3 -slices 16 -slicecrc 1 -top 1 \
 	-pixel_format "$output_format" -color_range tv -color_primaries "$color_primaries" -color_trc "$color_trc" \
 	-colorspace $color_space "${audio_opts_2[@]}" \
 	-shortest -y "${input_stripped}"."$video_container"
@@ -337,3 +359,22 @@ fi
 #ffmpeg -f rawvideo -r 25 -pix_fmt yuv444p16 -s 928x576 -i "$1_chroma.rgb" -r 25 -pix_fmt gray16 -s 928x576 -i "$1.rgb" -filter_complex "[0:v]format=yuv444p16le[chroma];[1:v]format=yuv444p16le[luma];[chroma][luma]mergeplanes=0x100102:yuv444p16le[output]" -map "[output]":v -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y -shortest "$1.mkv"
 #ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_luma.mkv"
 #ffmpeg -f rawvideo -r 25 -pix_fmt rgb48 -s 928x576 -i "$1_chroma.rgb" -c:v libx264 -qp 0 -pix_fmt yuv444p10le -top 1 -color_range tv -color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg -aspect 4:3 -y "$1_chroma.mkv"
+
+
+
+# HOW TO EDIT THIS SCRIPT!
+# The goto and repalce sorce localtion of script, these are the locations that the system is running it from.
+#./usr/local/bin/gen_chroma_vid.sh
+#./usr/local/lib/python3.10/dist-packages/ld_decode-7-py3.10-linux-x86_64.egg/EGG-INFO/scripts/gen_chroma_vid.sh
+
+# FFV1 Stock - "-coder 1 -context 1 -g 1 -level 3 -slices 16 -slicecrc 1 -top 1"
+
+# Thread queue size can be changed to lower or higher value helpful in some cases, 1024 / 2048 etc
+
+# FFV1 Encoding - "-c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1"
+
+# V210 Encoding - "-c:v v210 -top 1 -vf setfield=tff -flags +ilme+ildct"
+
+# ProRes HQ Encoding - "-c:v prores -profile:v 3 -vendor apl0 -bits_per_mb 8000 -quant_mat hq -mbs_per_slice 8 -top 1"
+
+# ProRes 4444XQ Encoding - "-c:v prores -profile:v 5 -vendor apl0 -bits_per_mb 8000 -mbs_per_slice 8 -top 1"

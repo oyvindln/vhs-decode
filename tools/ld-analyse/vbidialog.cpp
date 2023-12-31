@@ -203,3 +203,39 @@ void VbiDialog::updateVbi(VbiDecoder::Vbi vbi, bool isVbiValid)
     else ui->standardVideoLabelAm2->setText("No");
 
 }
+
+void VbiDialog::updateVideoId(VideoIdDecoder::VideoId videoid, bool isVideoIdValid)
+{
+    if (!isVideoIdValid) {
+        // VIDEO ID is missing or line 20 and line 283 are inconsistent
+        ui->videoIdDataLabel->setText("No metadata");
+        ui->aspectRatioLabel->setText("No metadata");
+        ui->cgmsLabel->setText("No metadata");
+        ui->apsLabel->setText("No metadata");
+        ui->analogPreRecordedLabel->setText("No metadata");
+
+        return;
+    }
+
+    ui->videoIdDataLabel->setText(QString("%1 %2 %3 (0x%4)").arg(videoid.videoIdData >> 12, 2, 2, QLatin1Char('0'))
+                                                            .arg(videoid.videoIdData >> 8 & 0xf, 4, 2, QLatin1Char('0'))
+                                                            .arg(videoid.videoIdData & 0xff, 8, 2, QLatin1Char('0'))
+                                                            .arg(videoid.videoIdData, 4, 16, QLatin1Char('0')));
+
+    if (videoid.vIdAspectRatio == VideoIdDecoder::VIdAspectRatio::fourByThree) ui->aspectRatioLabel->setText("4:3");
+    if (videoid.vIdAspectRatio == VideoIdDecoder::VIdAspectRatio::sixteenByNine) ui->aspectRatioLabel->setText("16:9");
+    if (videoid.vIdAspectRatio == VideoIdDecoder::VIdAspectRatio::letterBox) ui->aspectRatioLabel->setText("Letterbox");
+    if (videoid.vIdAspectRatio == VideoIdDecoder::VIdAspectRatio::undefined) ui->aspectRatioLabel->setText("Undefined");
+
+    if (videoid.vIdCgms == VideoIdDecoder::VIdCgms::copyFreely) ui->cgmsLabel->setText("Copy Freely");
+    if (videoid.vIdCgms == VideoIdDecoder::VIdCgms::notUsed) ui->cgmsLabel->setText("Undefined");
+    if (videoid.vIdCgms == VideoIdDecoder::VIdCgms::copyOnce) ui->cgmsLabel->setText("Copy Once");
+    if (videoid.vIdCgms == VideoIdDecoder::VIdCgms::copyNever) ui->cgmsLabel->setText("Copy Never");
+
+    if (videoid.vIdAps == VideoIdDecoder::VIdAps::pspOff) ui->apsLabel->setText("Off");
+    if (videoid.vIdAps == VideoIdDecoder::VIdAps::pspOn) ui->apsLabel->setText("On");
+    if (videoid.vIdAps == VideoIdDecoder::VIdAps::pspOn2Line) ui->apsLabel->setText("On, 2-Line");
+    if (videoid.vIdAps == VideoIdDecoder::VIdAps::pspOn4Line) ui->apsLabel->setText("On, 4-Line");
+
+    ui->analogPreRecordedLabel->setText(videoid.analoguePreRecorded ? "True" : "False");
+}

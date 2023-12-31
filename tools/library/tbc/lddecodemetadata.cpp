@@ -272,6 +272,8 @@ void LdDecodeMetaData::Ntsc::read(JsonReader &reader, ClosedCaption &closedCapti
         if (member == "isFmCodeDataValid") reader.read(isFmCodeDataValid);
         else if (member == "fmCodeData") reader.read(fmCodeData);
         else if (member == "fieldFlag") reader.read(fieldFlag);
+        else if (member == "isVideoIdDataValid") reader.read(isVideoIdDataValid);
+        else if (member == "videoIdData") reader.read(videoIdData);
         else if (member == "whiteFlag") reader.read(whiteFlag);
         else if (member == "ccData0") {
             // rev7 and earlier put ccData0/1 here rather than in cc
@@ -305,6 +307,10 @@ void LdDecodeMetaData::Ntsc::write(JsonWriter &writer) const
         writer.writeMember("fmCodeData", fmCodeData);
     }
     writer.writeMember("isFmCodeDataValid", isFmCodeDataValid);
+    if (isVideoIdDataValid) {
+        writer.writeMember("videoIdData", videoIdData);
+    }
+    writer.writeMember("isVideoIdDataValid", isVideoIdDataValid);
     if (whiteFlag) {
         writer.writeMember("whiteFlag", whiteFlag);
     }

@@ -7,6 +7,9 @@ from libc.math cimport isnan, NAN
 
 cdef Py_ssize_t NONE_INT = -1
 
+cdef round_to_int(double a):
+    return int(round(a))
+
 cdef bint inrange(double a, double mi, double ma):
     return (a >= mi) & (a <= ma)
 
@@ -33,7 +36,9 @@ cdef c_median(np.ndarray data):
     # calling np.median via cython.
     return lddu.nb_median(data)
 
-cdef bint is_out_of_range(double[:] data, double min, double max):
+@cython.wraparound(False)
+@cython.boundscheck(False)
+cdef bint is_out_of_range(double[:] data, double min, double max) nogil:
     """Check if data stays between min and max, returns fals if not."""
     cdef Py_ssize_t i
     for i in range(0, len(data)):
@@ -65,6 +70,7 @@ cdef Py_ssize_t calczc_findfirst(double[:] data, double target, bint rising) nog
 cdef double calczc_do(double[:] data, Py_ssize_t _start_offset, double target, int edge=0, Py_ssize_t count=10) nogil:
     """Find the index where data first crosses target in the specified direction, and then try to estimate
     the exact crossing point between the samples.
+    Will fail if the start point is already past the threshold in the requested direction.
     ."""
     cdef Py_ssize_t start_offset = max(1, _start_offset)
     cdef Py_ssize_t icount = count + 1
@@ -74,6 +80,13 @@ cdef double calczc_do(double[:] data, Py_ssize_t _start_offset, double target, i
             edge = 1
         else:
             edge = -1
+
+    if edge == 1:
+        if data[_start_offset] > target:
+            return NAN
+    elif edge == -1:
+        if data[_start_offset] < target:
+            return NAN
 
     cdef Py_ssize_t loc = calczc_findfirst(
         data[start_offset : start_offset + icount], target, edge == 1
@@ -190,7 +203,7 @@ def valid_pulses_to_linelocs(
 
     return linelocs_dict, linelocs_dist
 
-def refine_linelocs_hsync(field, np.ndarray linebad):
+def refine_linelocs_hsync(field, np.ndarray linebad, double hsync_threshold):
     """Refine the line start locations using horizontal sync data."""
 
     # Original used a copy here which resulted in a list.
@@ -211,6 +224,7 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
     cdef double ire_110 = rf.iretohz(110)
 
     cdef bint right_cross_refined
+    cdef double refined_from_right_lineloc = -1
     cdef double zc_fr
     cdef double porch_level
     cdef double prev_porch_level = -1
@@ -218,6 +232,10 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
     cdef int ll1
     cdef int i
     cdef double[:] hsync_area
+
+    # Make sure we've done a copy
+    if type(field.linelocs1) == type(linelocs2):
+        assert(field.linelocs1.dtype != linelocs2.dtype, "BUG! input to refine_linelocs_hsync was not copied!")
 
     for i in range(len(field.linelocs1)):
         # skip VSYNC lines, since they handle the pulses differently
@@ -246,7 +264,8 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
                 ll1 + (normal_hsync_length) - one_usec,
                 zc_threshold,
                 reverse=False,
-                count=one_usec * 3,
+                count=round_to_int(one_usec * 3),
+                edge=1,
             )
         right_cross_refined = False
 
@@ -258,10 +277,10 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
             # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
             # TODO: Use correct values for NTSC/PAL here
             hsync_area = demod_05[
-                int(zc - (one_usec * 0.75)) : int(zc + (one_usec * 3.5))
+                round_to_int(zc - (one_usec * 0.75)) : round_to_int(zc + (one_usec * 3.5))
             ]
             back_porch = demod_05[
-                int(zc + one_usec * 3.5) : int(zc + (one_usec * 8))
+                round_to_int(zc + one_usec * 3.5) : round_to_int(zc + (one_usec * 8))
             ]
             if is_out_of_range(hsync_area, ire_n_55, ire_110): # or is_out_of_range(back_porch, ire_n_55, ire_110):
                 # don't use the computed value here if it's bad
@@ -271,17 +290,17 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
 
                 if np.amax(hsync_area) < ire_30:
                     porch_level = c_median(
-                        demod_05[int(zc + (one_usec * 8)) : int(zc + (one_usec * 9))]
+                        demod_05[round_to_int(zc + (one_usec * 8)) : round_to_int(zc + (one_usec * 9))]
                     )
                 else:
                     if prev_porch_level > 0:
                         porch_level = prev_porch_level
                     else:
                         porch_level = c_median(
-                            demod_05[int(zc - (one_usec * 1.0)) : int(zc - (one_usec * 0.5))]
+                            demod_05[round_to_int(zc - (one_usec * 1.0)) : round_to_int(zc - (one_usec * 0.5))]
                         )
                 sync_level = c_median(
-                    demod_05[int(zc + (one_usec * 1)) : int(zc + (one_usec * 2.5))]
+                    demod_05[round_to_int(zc + (one_usec * 1)) : round_to_int(zc + (one_usec * 2.5))]
                 )
 
                 # Re-calculate the crossing point using the mid point between the measured sync
@@ -330,16 +349,20 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
             zc_fr = right_cross - normal_hsync_length
 
             # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
+            # NOTE: This is more than hsync area, might wanna also check max levels of level in hsync
             hsync_area = demod_05[
-                int(zc_fr - (one_usec * 0.75)) : int(zc_fr + (one_usec * 8))
+                round_to_int(zc_fr - (one_usec * 0.75)) : round_to_int(zc_fr + (one_usec * 8))
             ]
+
             if not is_out_of_range(hsync_area, ire_n_55, ire_30):
+
                 porch_level = c_median(
-                    demod_05[int(zc_fr + (one_usec * 8)) : int(zc_fr + (one_usec * 9))]
+                    demod_05[round_to_int(zc_fr + normal_hsync_length + (one_usec * 1)) : round_to_int(zc_fr + normal_hsync_length + (one_usec * 2))]
                 )
+
                 sync_level = c_median(
                     demod_05[
-                        int(zc_fr + (one_usec * 1)) : int(zc_fr + (one_usec * 2.5))
+                        round_to_int(zc_fr + (one_usec * 1)) : round_to_int(zc_fr + (one_usec * 2.5))
                     ]
                 )
 
@@ -355,24 +378,26 @@ def refine_linelocs_hsync(field, np.ndarray linebad):
 
                 # any wild variation here indicates a failure
                 if zc2 is not None and abs(zc2 - right_cross) < (one_usec / 2):
-                    right_cross = zc2
-                    right_cross_refined = True
-                    prev_porch_level = porch_level
+                    # TODO: Magic value here, this seem to give be approximately correct results
+                    # but may not be ideal for all inputs.
+                    # Value based on default sample rate so scale if it's different.
+                    refined_from_right_lineloc = right_cross - normal_hsync_length + (2.25 * (sample_rate_mhz / 40.0))
+                    # Don't use if it deviates too much which could indicate a false positive or non-standard hsync length.
+                    if abs(refined_from_right_lineloc - linelocs2[i]) < (one_usec * 2):
+                        right_cross = zc2
+                        right_cross_refined = True
+                        prev_porch_level = porch_level
 
         if linebad[i]:
             linelocs2[i] = field.linelocs1[
                 i
             ]  # don't use the computed value here if it's bad
 
-        if right_cross is not None:
+        if right_cross is not None and right_cross_refined:
             # If we get a good result from calculating hsync start from the
             # right side of the hsync pulse, we use that as it's less likely
             # to be messed up by overshoot.
-            if right_cross_refined:
-                linebad[i] = False
-                # TODO: Magic value here, this seem to give be approximately correct results
-                # but may not be ideal for all inputs.
-                # Value based on default sample rate so scale if it's different.
-                linelocs2[i] = right_cross - normal_hsync_length + (2.25 * (sample_rate_mhz / 40.0))
+            linebad[i] = False
+            linelocs2[i] = refined_from_right_lineloc
 
     return linelocs2

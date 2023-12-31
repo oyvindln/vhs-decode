@@ -21,6 +21,9 @@ MAX_WOW = 1.06
 SysParams_NTSC["analog_audio"] = False
 SysParams_PAL["analog_audio"] = False
 
+def is_color_under(tape_format: str):
+    return tape_format not in ["TYPEC", "TYPEB"]
+
 
 def get_format_params(system: str, tape_format: str, logger):
     """Get format parameters based on video system and tape format.
@@ -38,6 +41,15 @@ def get_format_params(system: str, tape_format: str, logger):
             return get_sysparams_pal_umatic(SysParams_PAL), get_rfparams_pal_umatic(
                 RFParams_PAL
             )
+        if tape_format == "UMATIC_HI":
+            from vhsdecode.format_defs.umatic import (
+                get_rfparams_pal_umatic_hi,
+                get_sysparams_pal_umatic_hi,
+            )
+
+            return get_sysparams_pal_umatic_hi(
+                SysParams_PAL
+            ), get_rfparams_pal_umatic_hi(RFParams_PAL)
         elif tape_format == "BETAMAX":
             from vhsdecode.format_defs.betamax import (
                 get_rfparams_pal_betamax,
@@ -45,6 +57,15 @@ def get_format_params(system: str, tape_format: str, logger):
             )
 
             return get_sysparams_pal_betamax(SysParams_PAL), get_rfparams_pal_betamax(
+                RFParams_PAL
+            )
+        elif tape_format == "VHSHQ":
+            from vhsdecode.format_defs.vhs import (
+                get_rfparams_pal_vhs,
+                get_sysparams_pal_vhshq,
+            )
+
+            return get_sysparams_pal_vhshq(SysParams_PAL), get_rfparams_pal_vhs(
                 RFParams_PAL
             )
         elif tape_format == "SVHS":
@@ -74,7 +95,56 @@ def get_format_params(system: str, tape_format: str, logger):
             return get_sysparams_pal_hi8(SysParams_PAL), get_rfparams_pal_hi8(
                 RFParams_PAL
             )
+        elif tape_format == "EIAJ":
+            from vhsdecode.format_defs.eiaj import (
+                get_rfparams_pal_eiaj,
+                get_sysparams_pal_eiaj,
+            )
+
+            return get_sysparams_pal_eiaj(SysParams_PAL), get_rfparams_pal_eiaj(
+                RFParams_PAL
+            )
+        elif tape_format == "TYPEB":
+            from vhsdecode.format_defs.typec import (
+                get_rfparams_pal_typeb,
+                get_sysparams_pal_typeb,
+            )
+
+            return get_sysparams_pal_typeb(SysParams_PAL), get_rfparams_pal_typeb(
+                RFParams_PAL
+            )
+        elif tape_format == "TYPEC":
+            from vhsdecode.format_defs.typec import (
+                get_rfparams_pal_typec,
+                get_sysparams_pal_typec,
+            )
+
+            return get_sysparams_pal_typec(SysParams_PAL), get_rfparams_pal_typec(
+                RFParams_PAL
+            )
+        elif tape_format == "VCR":
+            from vhsdecode.format_defs.vcr import (
+                get_rfparams_pal_vcr,
+                get_sysparams_pal_vcr,
+            )
+
+            return get_sysparams_pal_vcr(SysParams_PAL), get_rfparams_pal_vcr(
+                RFParams_PAL
+            )
+        elif tape_format == "VCR_LP":
+            from vhsdecode.format_defs.vcr import (
+                get_rfparams_pal_vcr_lp,
+                get_sysparams_pal_vcr_lp,
+            )
+
+            return get_sysparams_pal_vcr_lp(SysParams_PAL), get_rfparams_pal_vcr_lp(
+                RFParams_PAL
+            )
         else:
+            if tape_format != "VHS":
+                logger.warning(
+                    'Tape format "%s" not supported for PAL yet', tape_format
+                )
             from vhsdecode.format_defs.vhs import (
                 get_rfparams_pal_vhs,
                 get_sysparams_pal_vhs,
@@ -93,7 +163,15 @@ def get_format_params(system: str, tape_format: str, logger):
             return get_sysparams_ntsc_umatic(SysParams_NTSC), get_rfparams_ntsc_umatic(
                 RFParams_NTSC
             )
+        elif tape_format == "VHSHQ":
+            from vhsdecode.format_defs.vhs import (
+                get_rfparams_ntsc_vhs,
+                get_sysparams_ntsc_vhshq,
+            )
 
+            return get_sysparams_ntsc_vhshq(SysParams_NTSC), get_rfparams_ntsc_vhs(
+                RFParams_NTSC
+            )
         elif tape_format == "SVHS":
             from vhsdecode.format_defs.vhs import (
                 get_rfparams_ntsc_svhs,
@@ -112,6 +190,15 @@ def get_format_params(system: str, tape_format: str, logger):
             return get_sysparams_ntsc_betamax(
                 SysParams_NTSC
             ), get_rfparams_ntsc_betamax(RFParams_NTSC)
+        elif tape_format == "BETAMAX_HIFI":
+            from vhsdecode.format_defs.betamax import (
+                get_rfparams_ntsc_betamax_hifi,
+                get_sysparams_ntsc_betamax_hifi,
+            )
+
+            return get_sysparams_ntsc_betamax_hifi(
+                SysParams_NTSC
+            ), get_rfparams_ntsc_betamax_hifi(RFParams_NTSC)
         elif tape_format == "VIDEO8":
             from vhsdecode.format_defs.video8 import (
                 get_rfparams_ntsc_video8,
@@ -130,7 +217,29 @@ def get_format_params(system: str, tape_format: str, logger):
             return get_sysparams_ntsc_hi8(SysParams_NTSC), get_rfparams_ntsc_hi8(
                 RFParams_NTSC
             )
+        elif tape_format == "TYPEB":
+            from vhsdecode.format_defs.typec import (
+                get_rfparams_ntsc_typeb,
+                get_sysparams_ntsc_typeb,
+            )
+
+            return get_sysparams_ntsc_typeb(SysParams_NTSC), get_rfparams_ntsc_typeb(
+                RFParams_NTSC
+            )
+        elif tape_format == "TYPEC":
+            from vhsdecode.format_defs.typec import (
+                get_rfparams_ntsc_typec,
+                get_sysparams_ntsc_typec,
+            )
+
+            return get_sysparams_ntsc_typec(SysParams_NTSC), get_rfparams_ntsc_typec(
+                RFParams_NTSC
+            )
         else:
+            if tape_format != "VHS":
+                logger.warning(
+                    'Tape format "%s" not supported for NTSC yet', tape_format
+                )
             from vhsdecode.format_defs.vhs import (
                 get_rfparams_ntsc_vhs,
                 get_sysparams_ntsc_vhs,

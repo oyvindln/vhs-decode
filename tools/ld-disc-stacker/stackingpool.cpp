@@ -111,7 +111,7 @@ bool StackingPool::process()
                lastFrameNumber / totalSecs << "FPS )";
 
     qInfo() << "Creating JSON metadata file for stacked TBC...";
-    ldDecodeMetaData[0]->write(outputJsonFilename);
+    correctMetaData().write(outputJsonFilename);
 
     // Close the target video
     targetVideo.close();
@@ -446,4 +446,89 @@ QVector<qint32> StackingPool::getAvailableSourcesForFrame(qint32 vbiFrameNumber)
 bool StackingPool::writeOutputField(const SourceVideo::Data &fieldData)
 {
     return targetVideo.write(reinterpret_cast<const char *>(fieldData.data()), 2 * fieldData.size());
+}
+
+void StackingPool::correctPhaseIDs()
+{
+    constexpr qint32 PHASE_COUNT = 4;
+
+    const qint32 fieldCount = ldDecodeMetaData[0]->getNumberOfFields();
+
+    // Find the first non-padded field
+    qint32 pivotField = 1;
+    while (pivotField <= fieldCount && ldDecodeMetaData[0]->getField(pivotField).pad) {
+        ++pivotField;
+    }
+    if (pivotField >= fieldCount)
+    {
+        return;
+    }
+
+    // Get the starting phase ID - 1
+    qint32 currentPhaseID = ldDecodeMetaData[0]->getField(pivotField).fieldPhaseID - 1;
+    currentPhaseID -= (pivotField - 1) % PHASE_COUNT;
+    currentPhaseID += PHASE_COUNT;
+    currentPhaseID %= PHASE_COUNT;
+
+    // Overwrite phase IDs
+    for (qint32 fieldNumber = 1; fieldNumber <= fieldCount; ++fieldNumber)
+    {
+        LdDecodeMetaData::Field field = ldDecodeMetaData[0]->getField(fieldNumber);
+        field.fieldPhaseID = currentPhaseID + 1;
+        ldDecodeMetaData[0]->updateField(field, fieldNumber);
+        ++currentPhaseID;
+        currentPhaseID %= PHASE_COUNT;
+    }
+}
+
+template<int field>
+void StackingPool::replaceFieldMetaData(qint32 frameNumber)
+{
+    const qint32 currentVbiFrame = convertSequentialFrameNumberToVbi(frameNumber, 0);
+
+    qint32 fieldNumber = 0;
+    if constexpr (field == 1) {
+        fieldNumber = ldDecodeMetaData[0]->getFirstFieldNumber(frameNumber);
+    } else {
+        fieldNumber = ldDecodeMetaData[0]->getSecondFieldNumber(frameNumber);
+    }
+
+    const LdDecodeMetaData::Field &currentField = ldDecodeMetaData[0]->getField(fieldNumber);
+    if (currentField.pad) {
+        for (int sourceNo = 1; sourceNo < ldDecodeMetaData.size(); ++sourceNo) {
+            if (currentVbiFrame < sourceMinimumVbiFrame[sourceNo] || currentVbiFrame > sourceMaximumVbiFrame[sourceNo]) {
+                continue;
+            }
+            const qint32 currentSourceFrameNumber = convertVbiFrameNumberToSequential(currentVbiFrame, sourceNo);
+            if (ldDecodeMetaData[sourceNo]->getNumberOfFrames() < currentSourceFrameNumber) {
+                continue;
+            }
+            qint32 otherFieldNumber = 0;
+            if constexpr (field == 1) {
+                otherFieldNumber = ldDecodeMetaData[sourceNo]->getFirstFieldNumber(frameNumber);
+            } else {
+                otherFieldNumber = ldDecodeMetaData[sourceNo]->getSecondFieldNumber(frameNumber);
+            }
+            if (ldDecodeMetaData[sourceNo]->getField(otherFieldNumber).pad) {
+                continue;
+            }
+            LdDecodeMetaData::Field potentialField = ldDecodeMetaData[sourceNo]->getField(otherFieldNumber);
+            potentialField.seqNo = currentField.seqNo;
+            potentialField.fieldPhaseID = currentField.fieldPhaseID;
+            potentialField.dropOuts = currentField.dropOuts;
+            ldDecodeMetaData[0]->updateField(potentialField, fieldNumber);
+            break;
+        }
+    }
+}
+
+LdDecodeMetaData &StackingPool::correctMetaData()
+{
+    correctPhaseIDs();
+    const qint32 frameCount = ldDecodeMetaData[0]->getNumberOfFrames();
+    for (qint32 frameNumber = 1; frameNumber <= frameCount; ++frameNumber) {
+        replaceFieldMetaData<1>(frameNumber);
+        replaceFieldMetaData<2>(frameNumber);
+    }
+    return *ldDecodeMetaData[0];
 }

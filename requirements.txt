@@ -1,6 +1,9 @@
-numpy
-jupyter
-numba
-pandas
-scipy
+Cython
 matplotlib
+numba>=0.55.1
+numpy
+pyhht
+pyzmq
+samplerate
+scipy
+soundfile

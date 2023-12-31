@@ -49,11 +49,25 @@ def main(args=None):
     system = select_system(args)
     sample_freq = select_sample_freq(args)
 
+    if not args.overwrite:
+        conflicts_ext = [".tbc", ".log", ".tbc.json"]
+        conflicts = []
+
+        for ext in conflicts_ext:
+            if os.path.isfile(outname + ext):
+                conflicts.append(outname + ext)
+
+        if conflicts:
+            print("Existing decode files found, remove them or run command with --overwrite")
+            for conflict in conflicts:
+                print("\t", conflict)
+            sys.exit(1)
+
     try:
         loader = lddu.make_loader(filename, sample_freq)
     except ValueError as e:
         print(e)
-        exit(1)
+        sys.exit(1)
 
     rf_options = get_rf_options(args)
     rf_options["auto_sync"] = args.auto_sync
@@ -98,7 +112,7 @@ def main(args=None):
     if args.seek != -1:
         if vhsd.seek(args.seek if firstframe == 0 else firstframe, args.seek) is None:
             print("ERROR: Seeking failed", file=sys.stderr)
-            exit(1)
+            sys.exit(1)
 
     # if args.MTF is not None:
     #    ldd.rf.mtf_mult = args.MTF
@@ -107,7 +121,7 @@ def main(args=None):
     #    ldd.rf.mtf_offset = args.MTF_offset
 
     def write_json(vhsd, outname):
-        jsondict = vhsd.build_json(vhsd.curfield)
+        jsondict = vhsd.build_json()
 
         fp = open(outname + ".tbc.json.tmp", "w")
         json.dump(jsondict, fp, indent=4)
@@ -121,7 +135,7 @@ def main(args=None):
     jsondumper = lddu.jsondump_thread(vhsd, outname)
 
     def cleanup(outname):
-        jsondumper.put(vhsd.build_json(vhsd.curfield))
+        jsondumper.put(vhsd.build_json())
         vhsd.close()
         jsondumper.put(None)
 
@@ -131,7 +145,7 @@ def main(args=None):
         except KeyboardInterrupt:
             print("Terminated, saving JSON and exiting")
             cleanup(outname)
-            exit(1)
+            sys.exit(1)
         except Exception as err:
             print(
                 "\nERROR - please paste the following into a bug report:",
@@ -142,15 +156,17 @@ def main(args=None):
             print("Exception:", err, " Traceback:", file=sys.stderr)
             traceback.print_tb(err.__traceback__)
             cleanup(outname)
-            exit(1)
+            sys.exit(1)
 
         if f is None:
             # or (args.ignoreleadout == False and vhsd.leadOut == True):
             done = True
+        else:
+            f.prevfield = None
 
         if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
-            jsondumper.put(vhsd.build_json(vhsd.curfield))
+            jsondumper.put(vhsd.build_json())
 
     print("saving JSON and exiting")
     cleanup(outname)
-    exit(0)
+    sys.exit(0)
