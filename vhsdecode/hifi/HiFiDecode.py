@@ -331,7 +331,8 @@ class NoiseReduction:
             rsC[id] = rsrC[id]
 
         # computes a sidechain signal to apply noise reduction
-        gate = np.clip(rsC * self.NR_envelope_gain, a_min=0.0, a_max=1.0)
+        nr_sidechain = np.array([LogCompander.expand(x) * self.NR_envelope_gain for x in rsC])
+        gate = np.clip(nr_sidechain, a_min=0.0, a_max=1.0)
         rev_gate = 1.0 - gate
 
         # applies noise reduction (notch at hfreq)
@@ -359,7 +360,7 @@ class NoiseReduction:
 
     def lopassCompand(self, audio, channel=0):
         audioX = self.finalLoL.work(audio) if channel == 0 else self.finalLoR.work(audio)
-        return [LogCompander.expand(x) for x in audioX]
+        return audioX
 
 
 class HiFiDecode:
@@ -429,13 +430,13 @@ class HiFiDecode:
 
     def getResamplingRatios(self):
         samplerate2ifrate = self.if_rate / self.sample_rate
-        self.ifresample_numerator = Fraction(samplerate2ifrate).limit_denominator(1000).numerator
-        self.ifresample_denominator = Fraction(samplerate2ifrate).limit_denominator(1000).denominator
+        self.ifresample_numerator = Fraction(samplerate2ifrate).numerator
+        self.ifresample_denominator = Fraction(samplerate2ifrate).denominator
         assert self.ifresample_numerator > 0, f'IF resampling numerator got 0; sample_rate {self.sample_rate}'
         assert self.ifresample_denominator > 0, f'IF resampling denominator got 0; sample_rate {self.sample_rate}'
         audiorate2ifrate = self.audio_rate / self.if_rate
-        self.audioRes_numerator = Fraction(audiorate2ifrate).limit_denominator(1000).numerator
-        self.audioRes_denominator = Fraction(audiorate2ifrate).limit_denominator(1000).denominator
+        self.audioRes_numerator = Fraction(audiorate2ifrate).numerator
+        self.audioRes_denominator = Fraction(audiorate2ifrate).denominator
         return self.ifresample_numerator, self.ifresample_denominator, self.audioRes_numerator, self.audioRes_denominator
 
     def updateDemod(self):

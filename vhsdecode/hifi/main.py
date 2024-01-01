@@ -4,6 +4,7 @@ from multiprocessing import cpu_count
 from datetime import datetime
 import os
 import sys
+import numpy as np
 import soundfile as sf
 
 from vhsdecode.cmdcommons import (
@@ -14,6 +15,7 @@ from vhsdecode.cmdcommons import (
 )
 from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
+import io
 
 
 parser, _ = common_parser_cli(
@@ -81,6 +83,111 @@ parser.add_argument(
 )
 
 
+class LDFReaderInputStream(io.RawIOBase):
+    def __init__(self, buffer):
+        self.buffer = buffer
+        self._pos: int = 0
+
+    def read(self, size=-1):
+        data = self.buffer.read(size * 2)
+        if not data:
+            return b''
+
+        self._pos += len(data)
+        return data
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def writable(self):
+        return False
+
+    def close(self):
+        self.buffer.close()
+
+    def fileno(self):
+        return self.buffer.fileno()
+
+    def isatty(self):
+        return self.buffer.isatty()
+
+    def tell(self):
+        # hack, there is no way to know the current position
+        return int(-1e6) if self._pos == 0 else self._pos
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        return self.tell()
+
+
+class UnseekableSoundFile(sf.SoundFile):
+    def __init__(self, file_path, mode, channels, samplerate, format, subtype, endian):
+        self.file_path = file_path
+        self._overlap = np.array([], dtype=np.int16)
+        super().__init__(
+            file_path,
+            mode,
+            channels=channels,
+            samplerate=samplerate,
+            format=format,
+            subtype=subtype,
+            endian=endian,
+        )
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        return self.file_path.seek(offset, whence)
+
+    def close(self):
+        pass
+
+    def read(self, samples, frames=-1, dtype='float64', always_2d=False,
+             fill_value=None, out=None):
+        data = self.file_path.read(samples)
+        if not data:
+            return b''
+        assert len(data) % 2 == 0, "data is misaligned"
+        out = np.asarray(np.frombuffer(data, dtype=np.int16), dtype=dtype)
+        return out
+
+    def _read_next_chunk(self, blocksize, overlap, dtype):
+        data = self.file_path.read(blocksize)
+        assert len(data) % 2 == 0, "data is misaligned"
+        out = np.asarray(np.frombuffer(data, dtype=np.int16), dtype=dtype)
+        self._overlap = np.copy(out[-overlap:])
+        return np.concatenate((self._overlap, out))
+
+    # yields infinite generator for _read_next_chunk
+    def blocks(self, blocksize=None, overlap=0, frames=-1, dtype='float64',
+               always_2d=False, fill_value=None, out=None):
+        while True:
+            yield self._read_next_chunk(blocksize, overlap, dtype)
+
+
+class UnSigned16BitFileReader(io.RawIOBase):
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.file = open(file_path, 'rb')
+
+    def read(self, size=-1):
+        data = self.file.read(size)
+        if not data:
+            return b''
+
+        # Convierte de unsigned 16-bit a signed 16-bit
+        samples = np.frombuffer(data, dtype=np.uint16)
+        signed_samples = samples.astype(np.int16) - 32768
+
+        return signed_samples.tobytes()
+
+    def readable(self):
+        return True
+
+    def close(self):
+        self.file.close()
+
+
 # This part is what opens the file
 # The samplerate here could be anything
 def as_soundfile(pathR, sample_rate=44100):
@@ -116,9 +223,27 @@ def as_soundfile(pathR, sample_rate=44100):
             endian="LITTLE",
         )
     elif ".u16" in path or ".r16" in path:
-        sys.exit("Unsigned 16 bit raw not supported yet")
+        return sf.SoundFile(
+            UnSigned16BitFileReader(pathR),
+            "r",
+            channels=1,
+            samplerate=int(sample_rate),
+            format="RAW",
+            subtype="PCM_16",
+            endian="LITTLE",
+        )
     elif ".ogx" in path:
-        sys.exit("OGX container not supported yet, try converting it to flac")
+        sys.exit("OGX container not supported yet, try using pipe input")
+    elif "-" == path:
+        return UnseekableSoundFile(
+            LDFReaderInputStream(sys.stdin.buffer),
+            "r",
+            channels=1,
+            samplerate=int(sample_rate),
+            format="RAW",
+            subtype="PCM_16",
+            endian="LITTLE",
+        )
     else:
         return sf.SoundFile(pathR, "r")
 
