@@ -1,6 +1,7 @@
 # This currently decodes raw vhs HiFi RF, but it could do beta, CED, LD and others stereo FM variants
 # Also, it implements an interpretation of the noise reduction like described on IEC60774-2/1999
 
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fractions import Fraction
@@ -16,6 +17,8 @@ from vhsdecode.addons.FMdeemph import FMDeEmphasisC
 from vhsdecode.addons.chromasep import samplerate_resample
 from vhsdecode.addons.gnuradioZMQ import ZMQSend
 from vhsdecode.utils import firdes_lowpass, firdes_highpass, FiltersClass, gen_wave_at_frequency, StackableMA
+
+DEFAULT_NR_GAIN_ = 66
 
 
 @dataclass
@@ -46,11 +49,15 @@ class AFEBandPass:
         self.filter_hi = FiltersClass(iir_hi[0], iir_hi[1], self.samp_rate)
 
     def work(self, data):
-        return self.filter_lo.filtfilt(self.filter_hi.filtfilt(data))
+        try:
+            return self.filter_lo.lfilt(self.filter_hi.filtfilt(data))
+        except ValueError as e:
+            print('ERROR: Cannot decode because a read size mismatch. Maybe EOF reached')
+            sys.exit(1)
 
 
 class LpFilter:
-    def __init__(self, sample_rate, cut=22e3, transition=10e3):
+    def __init__(self, sample_rate, cut=20e3, transition=10e3):
         self.samp_rate = sample_rate
         self.cut = cut
 
@@ -146,7 +153,7 @@ class AFEFilterable:
             )
             iir_notch_image = iirnotch(
                 self.filter_params.RCarrierRef - d,
-                QR,
+                QL,
                 fs=self.samp_rate
             )
 
@@ -238,8 +245,8 @@ def tau_as_freq(tau):
 
 class NoiseReduction:
 
-    def __init__(self, notch_freq, side_gain, discard_size=0):
-        self.audio_rate = 192000
+    def __init__(self, notch_freq, side_gain, discard_size=0, audio_rate=192000):
+        self.audio_rate = audio_rate
         self.discard_size = discard_size
         self.hfreq = notch_freq
 
@@ -247,8 +254,8 @@ class NoiseReduction:
         self.NR_envelope_gain = side_gain
 
         # values in seconds
-        NRenv_attack = 3e-3
-        NRenv_release = 70e-3
+        NRenv_attack = 4e-3
+        NRenv_release = 80e-3
 
         self.NR_weighting_attack_Lo_cut = tau_as_freq(NRenv_attack)
         self.NR_weighting_attack_Lo_transition = 1e3
@@ -266,7 +273,7 @@ class NoiseReduction:
         self.tau = 56e-6
 
         # final audio bandwidth limiter
-        self.finalLo_cut = 22e3
+        self.finalLo_cut = 20e3
         self.finalLo_transition = 10e3
 
         env_hi_trans = tau_as_freq(self.NR_weighting_T2) - tau_as_freq(self.NR_weighting_T1)
@@ -312,7 +319,8 @@ class NoiseReduction:
     def audio_notch_stereo(samp_rate: int, freq: float, audioL, audioR):
         return NoiseReduction.audio_notch(samp_rate, freq, audioL), NoiseReduction.audio_notch(samp_rate, freq, audioR)
 
-    def rs_envelope(self, data, channel=0):
+    def rs_envelope(self, raw_data, channel=0):
+        data = np.array([LogCompander.expand(x) for x in raw_data], dtype='float64')
         hi_part = self.envelopeHighpassL.lfilt(data) if channel == 0 else self.envelopeHighpassR.lfilt(data)
         lo_part = data - hi_part
         env_part = self.envelopeVoicepassL.lfilt(hi_part + lo_part / 2) if channel == 0 else self.envelopeVoicepassR.lfilt(hi_part + lo_part / 2)
@@ -320,7 +328,7 @@ class NoiseReduction:
 
     def noise_reduction(self, audio, comb, channel=0):
         # takes the RMS envelope of each audio channel
-        audio_env = self.rs_envelope(audio, channel)
+        audio_env = self.rs_envelope(comb, channel)
 
         rsaC = self.envelope_attack_LowpassL.lfilt(audio_env) if channel == 0 else self.envelope_attack_LowpassR.lfilt(audio_env)
         rsrC = self.envelope_release_LowpassL.lfilt(audio_env) if channel == 0 else self.envelope_release_LowpassR.lfilt(audio_env)
@@ -331,8 +339,7 @@ class NoiseReduction:
             rsC[id] = rsrC[id]
 
         # computes a sidechain signal to apply noise reduction
-        nr_sidechain = np.array([LogCompander.expand(x) * self.NR_envelope_gain for x in rsC])
-        gate = np.clip(nr_sidechain, a_min=0.0, a_max=1.0)
+        gate = np.clip(rsC * self.NR_envelope_gain, a_min=0.0, a_max=1.0)
         rev_gate = 1.0 - gate
 
         # applies noise reduction (notch at hfreq)
@@ -371,7 +378,7 @@ class HiFiDecode:
         self.sample_rate = options['input_rate']
         self.options = options
         self.if_rate = 8388608
-        self.audio_rate = 192000
+        self.audio_rate = self.options['audio_rate']
 
         # main deemphasis time constant
         self.tau = 56e-6

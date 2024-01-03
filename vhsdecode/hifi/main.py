@@ -13,7 +13,7 @@ from vhsdecode.cmdcommons import (
     select_system,
     get_basics,
 )
-from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction
+from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction, DEFAULT_NR_GAIN_
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
 import io
 
@@ -21,6 +21,14 @@ import io
 parser, _ = common_parser_cli(
     "Extracts audio from raw VHS HiFi FM capture",
     default_threads=round(cpu_count() / 2) + 1,
+)
+
+parser.add_argument(
+    "--audio_rate",
+    dest="rate",
+    type=int,
+    default=192000,
+    help="Output sample rate in Hz (default 192000)",
 )
 
 parser.add_argument(
@@ -59,15 +67,13 @@ parser.add_argument(
     help="Set auto tuning of the analog front end on/off",
 )
 
-DEFAULT_NR_GAIN_ = 33
-
 parser.add_argument(
     "--NR_sidechain_gain",
     dest="NR_side_gain",
     type=float,
     default=DEFAULT_NR_GAIN_,
     help=f"Sets the noise reduction envelope tracking sidechain gain (default is {DEFAULT_NR_GAIN_}). "
-    f"Range (20~100): 100 being a hard gate effect, operating range should be 40 and below",
+    f"Range (20~100): 100 being a hard gate effect",
 )
 
 parser.add_argument(
@@ -279,8 +285,10 @@ def log_decode_speed(start_time, frames):
 def decode(decoder, input_file, decode_options, output_file):
     start_time = datetime.now()
     noise_reduction = NoiseReduction(
-        decoder.notchFreq, decode_options["nr_side_gain"], decoder.audioDiscard
+        decoder.notchFreq, decode_options["nr_side_gain"], decoder.audioDiscard,
+        audio_rate=decoder.audioRate
     )
+
     with as_outputfile(output_file, decoder.audioRate) as w:
         with as_soundfile(input_file) as f:
             progressB = TimeProgressBar(f.frames, f.frames)
@@ -315,7 +323,8 @@ def decode_parallel(decoders, input_file, output_file, decode_options, threads=8
     block_size = decoders[0].blockSize
     read_overlap = decoders[0].readOverlap
     noise_reduction = NoiseReduction(
-        decoders[0].notchFreq, decode_options["nr_side_gain"], decoders[0].audioDiscard
+        decoders[0].notchFreq, decode_options["nr_side_gain"], decoders[0].audioDiscard,
+        audio_rate=audio_rate
     )
     futures_queue = list()
     executor = ThreadPoolExecutor(threads)
@@ -410,6 +419,7 @@ def main():
         "auto_fine_tune": args.auto_fine_tune == "on" if not args.preview else False,
         "nr_side_gain": args.NR_side_gain,
         "grc": args.GRC,
+        "audio_rate": args.rate,
     }
 
     filename, outname, _, _ = get_basics(args)
