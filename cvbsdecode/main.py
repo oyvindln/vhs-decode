@@ -37,6 +37,35 @@ def main(args=None):
         help="Enable auto sync level detection.",
     )
     parser.add_argument(
+        "-C",
+        "--clamp_agc",
+        dest="clamp_agc",
+        action="store_true",
+        default=False,
+        help="Clamp signal (black level) and enable automatic gain control.",
+    )
+    parser.add_argument(
+        "--agc_speed",
+        metavar="speed",
+        type=float,
+        default=0.1,
+        help="sets how fast the AGC should react (0 = never, 1 = immediate).",
+    )
+    parser.add_argument(
+        "--agc_gain_factor",
+        metavar="factor",
+        type=float,
+        default=1.0,
+        help="adjusts the AGC white level by given factor.",
+    )
+    parser.add_argument(
+        "--agc_set_gain",
+        metavar="gain",
+        type=float,
+        default=0.0,
+        help="override gain of AGC.",
+    )
+    parser.add_argument(
         "--right_hand_hsync",
         dest="rhs_hsync",
         action="store_true",
@@ -71,6 +100,10 @@ def main(args=None):
 
     rf_options = get_rf_options(args)
     rf_options["auto_sync"] = args.auto_sync
+    rf_options["clamp_agc"] = args.clamp_agc
+    rf_options["agc_speed"] = args.agc_speed
+    rf_options["agc_gain_factor"] = args.agc_gain_factor
+    rf_options["agc_set_gain"] = args.agc_set_gain
     rf_options["rhs_hsync"] = args.rhs_hsync
 
     extra_options = get_extra_options(args)

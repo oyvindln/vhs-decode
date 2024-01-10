@@ -227,6 +227,44 @@ def getpulses_override(field):
 
     return lddu.findpulses(field.data["video"]["demod_05"], pulse_hz_min, pulse_hz_max)
 
+def hz_to_output_override(field,input):
+    blank_levels = np.empty(field.outlinecount)
+    sync_levels = np.empty(field.outlinecount)
+    for i in range(0, field.outlinecount):
+        blank_levels[i] = np.median(input[i*field.outlinelen+96:i*field.outlinelen+164])
+        sync_levels[i] = np.median(input[i*field.outlinelen+12:i*field.outlinelen+72])
+
+    reduced = input
+
+    reduced[0:6*field.outlinelen] = input[0:6*field.outlinelen] - blank_levels[7]
+
+    for i in range(7, field.outlinecount-5):
+        reduced[i*field.outlinelen+130:(i+1)*field.outlinelen+130] -= np.linspace(blank_levels[i],blank_levels[i+1],num=field.outlinelen)
+
+    reduced[(field.outlinecount-5)*field.outlinelen+130:] = input[(field.outlinecount-5)*field.outlinelen+130:] - blank_levels[field.outlinecount-5]
+
+    if field.rf.DecoderParams["agc_set_gain"] == 0.0:
+        vsyncs = blank_levels - sync_levels
+        vsyncs = vsyncs[7:field.outlinecount-5]
+        vsyncs.sort()
+        new_gain = np.mean(vsyncs[(vsyncs.size//4):((vsyncs.size*3)//4)]) / (-field.rf.SysParams["vsync_ire"])
+        print(new_gain)
+        if field.rf.DecoderParams["agc_gain"] is None:
+            field.rf.DecoderParams["agc_gain"] = new_gain
+        else:
+            field.rf.DecoderParams["agc_gain"] = new_gain*field.rf.DecoderParams["agc_speed"] + field.rf.DecoderParams["agc_gain"]*(1.0-field.rf.DecoderParams["agc_speed"])
+    else:
+        field.rf.DecoderParams["agc_gain"] = field.rf.DecoderParams["agc_set_gain"]
+
+    reduced /= (field.rf.DecoderParams["agc_gain"]*field.rf.DecoderParams["agc_gain_factor"])
+    reduced -= field.rf.SysParams["vsync_ire"]
+
+    return np.uint16(
+        np.clip(
+            (reduced * field.out_scale) + field.rf.SysParams["outputZero"], 0, 65535
+        )
+        + 0.5
+    )
 
 class FieldPALCVBS(ldd.FieldPAL):
     def __init__(self, *args, **kwargs):
@@ -259,6 +297,12 @@ class FieldPALCVBS(ldd.FieldPAL):
         NOTE: TEMPORARY override until an override for the value itself is added upstream.
         """
         return getpulses_override(self)
+
+    def hz_to_output(self, input):
+        if self.rf.DecoderParams["clamp_agc"] is True and self.outlinecount*self.outlinelen == input.size:
+            return hz_to_output_override(self,input)
+        else:
+            return super(FieldPALCVBS, self).hz_to_output(input)
 
     def compute_deriv_error(self, linelocs, baserr):
         """Disabled this for now as tapes have large variations in line pos
@@ -503,6 +547,13 @@ class CVBSDecodeInner(ldd.RFDecode):
         # TEMP just set this high so it doesn't mess with anything.
         self.DecoderParams["video_lpf_freq"] = 6400000
         self.DecoderParams["video_deemp_strength"] = 1
+
+        # Fill DecodarParams with additional options 
+        self.DecoderParams["clamp_agc"] = rf_options.get("clamp_agc", False)
+        self.DecoderParams["agc_speed"] = rf_options.get("agc_speed", 0.1)
+        self.DecoderParams["agc_gain_factor"] = rf_options.get("agc_gain_factor", 1.0)
+        self.DecoderParams["agc_set_gain"] = rf_options.get("agc_set_gain", 0.0)
+        self.DecoderParams["agc_gain"] = None
 
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
