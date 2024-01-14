@@ -20,7 +20,7 @@ class DemodCacheTape(DemodCache):
                 return
 
             if item[0] == "DEMOD":
-                blocknum, block, target_MTF, request = item[1:]
+                blocknum, block, _, request = item[1:]
 
                 output = {}
 
@@ -33,7 +33,7 @@ class DemodCacheTape(DemodCache):
                 output["demod"] = rf.demodblock(
                     data=block["rawinput"],
                     fftdata=fftdata,
-                    mtf_level=target_MTF,
+                    mtf_level=0,
                     cut=True,
                 )
                 blockstime += time.time() - st

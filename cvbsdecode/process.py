@@ -70,7 +70,7 @@ def find_sync_levels(field):
         else:
             # We may be in vsync, try to skip ahead a bit
             # TODO: This may not work yet.
-            offset += field.usectoinpx(50)
+            offset += int(field.usectoinpx(50))
             if offset > len(data) - 10:
                 # Give up
                 return None, None

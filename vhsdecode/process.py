@@ -165,15 +165,83 @@ class VHSDecode(ldd.LDdecode):
             return 0
         return 20 * np.log10(signal / noise)
 
-    def buildmetadata(self, f):
-        if math.isnan(f.burstmedian):
-            f.burstmedian = 0.0
-        return super(VHSDecode, self).buildmetadata(f, False)
+    def buildmetadata(self, f, check_phase=False):
+        """returns field information JSON and whether or not a backfill field is needed"""
+        prevfi = self.fieldinfo[-1] if len(self.fieldinfo) else None
 
-    # For laserdisc this decodes frame numbers from VBI metadata, but there won't be such a thing on
-    # VHS, so just skip it.
-    def decodeFrameNumber(self, f1, f2):
-        return None
+        # Not calulated and used for tapes at the moment
+        # bust_median = lddu.roundfloat(np.nan_to_num(f.burstmedian)) #lddu.roundfloat(f.burstmedian if not math.isnan(f.burstmedian) else 0.0)
+        # "medianBurstIRE": bust_median,
+
+        fi = {
+            "isFirstField": True if f.isFirstField else False,
+            "syncConf": f.compute_syncconf(),
+            "seqNo": len(self.fieldinfo) + 1,
+            "diskLoc": np.round((f.readloc / self.bytes_per_field) * 10) / 10,
+            "fileLoc": int(np.floor(f.readloc)),
+            "fieldPhaseID": f.fieldPhaseID,
+        }
+
+        if self.doDOD:
+            dropout_lines, dropout_starts, dropout_ends = f.dropout_detect()
+            if len(dropout_lines):
+                fi["dropOuts"] = {
+                    "fieldLine": dropout_lines,
+                    "startx": dropout_starts,
+                    "endx": dropout_ends,
+                }
+
+        # This is a bitmap, not a counter
+        decodeFaults = 0
+
+        if prevfi is not None:
+            if prevfi["isFirstField"] == fi["isFirstField"]:
+                # logger.info('WARNING!  isFirstField stuck between fields')
+                if lddu.inrange(fi["diskLoc"] - prevfi["diskLoc"], 0.95, 1.05):
+                    decodeFaults |= 1
+                    fi["isFirstField"] = not prevfi["isFirstField"]
+                    fi["syncConf"] = 10
+                else:
+                    # TODO: Do we want to handle this differently?
+                    # Also check if this is done properly by calling function
+                    # Not sure if it is at the moment..
+                    ldd.logger.error(
+                        "Possibly skipped field (Two fields with same isFirstField in a row), writing out an copy of last field to compensate.."
+                    )
+                    decodeFaults |= 4
+                    fi["syncConf"] = 0
+                    return fi, True
+
+        fi["decodeFaults"] = decodeFaults
+        fi["vitsMetrics"] = self.computeMetrics(self.fieldstack[0], self.fieldstack[1])
+
+        self.frameNumber = None
+        if f.isFirstField:
+            self.firstfield = f
+        else:
+            # use a stored first field, in case we start with a second field
+            if self.firstfield is not None:
+                # process VBI frame info data
+                self.frameNumber = None
+
+                rawloc = np.floor((f.readloc / self.bytes_per_field) / 2)
+
+                tape_format = (
+                    self.rf.options.tape_format
+                )  # "CLV" if self.isCLV else "CAV"
+
+                try:
+                    if self.est_frames is not None:
+                        outstr = f"Frame {(self.fields_written//2)+1}/{int(self.est_frames)}: File Frame {int(rawloc)}: {tape_format} "
+                    else:
+                        outstr = f"File Frame {int(rawloc)}: {tape_format} "
+
+                    self.logger.status(outstr)
+                except Exception:
+                    logger.warning("file frame %d : VBI decoding error", rawloc)
+                    traceback.print_exc()
+
+        return fi, False
 
     # Again ignored for tapes
     def checkMTF(self, field, pfield=None):
@@ -187,12 +255,6 @@ class VHSDecode(ldd.LDdecode):
         # if they don't exist.
         if "audioSamples" in fi:
             del fi["audioSamples"]
-
-        if "vbi" in fi:
-            del fi["vbi"]
-
-        if "medianBurstIRE" in fi:
-            del fi["medianBurstIRE"]
 
         self.fieldinfo.append(fi)
 
@@ -984,10 +1046,10 @@ class VHSRFDecode(ldd.RFDecode):
 
         # out_video = sps.lfilter(self.Filters["chroma_notch"][0], self.Filters["chroma_notch"][1], out_video[::-1])[::-1]
 
-        if self.options.double_lpf:
-            # Compensate for phase shift of the extra lpf
-            # TODO: What's this supposed to be?
-            out_video = np.roll(out_video, 0)
+        # if self.options.double_lpf:
+        # Compensate for phase shift of the extra lpf
+        # TODO: What's this supposed to be?
+        # out_video = np.roll(out_video, 0)
 
         if self.options.nldeemp:
             # Extract the high frequency part of the signal
