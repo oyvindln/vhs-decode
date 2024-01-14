@@ -1,4 +1,5 @@
-# This currently decodes raw vhs HiFi RF, but it could do beta, CED, LD and others stereo FM variants
+# This currently decodes raw VHS and Video8 HiFi RF,
+# but it could do Beta HiFi, CED, LD and other stereo AFM variants
 # Also, it implements an interpretation of the noise reduction like described on IEC60774-2/1999
 
 import sys
@@ -6,8 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fractions import Fraction
 from math import log, pi
+from typing import Tuple
 
 import numpy as np
+from numba import njit
 from pyhht.utils import inst_freq
 from scipy.signal import iirpeak, iirnotch
 from scipy.signal.signaltools import hilbert
@@ -16,7 +19,7 @@ from lddecode.utils import unwrap_hilbert
 from vhsdecode.addons.FMdeemph import FMDeEmphasisC
 from vhsdecode.addons.chromasep import samplerate_resample
 from vhsdecode.addons.gnuradioZMQ import ZMQSend
-from vhsdecode.utils import firdes_lowpass, firdes_highpass, FiltersClass, gen_wave_at_frequency, StackableMA
+from vhsdecode.utils import firdes_lowpass, firdes_highpass, FiltersClass, StackableMA
 
 DEFAULT_NR_GAIN_ = 66
 
@@ -173,10 +176,8 @@ class FMdemod:
     def __init__(self, sample_rate, carrier_freerun, type=0):
         self.samp_rate = sample_rate
         self.type = type
-        self.wave = gen_wave_at_frequency(carrier_freerun, sample_rate, num_samples=sample_rate)
         self.carrier = carrier_freerun
         self.offset = 0
-        # self.offset = np.mean(self.work(self.wave))
 
     def hhtdeFM(self, data):
         instf, t = inst_freq(data)
@@ -187,12 +188,27 @@ class FMdemod:
         return unwrap_hilbert(hilbert(data), samp_rate)
 
     @staticmethod
-    def inst_freq(signal, sample_rate):
-        analytic_signal = hilbert(signal.real)
-        instantaneous_phase = np.unwrap(np.angle(analytic_signal))
+    @njit(cache=True, fastmath=True, nogil=True)
+    def unwrap(p: np.array, discont: float = pi):
+        dd = np.diff(p)
+        ddmod = np.mod(dd + pi, 2 * pi) - pi
+        to_pi_locations = np.where(np.logical_and(ddmod == -pi, dd > 0))
+        ddmod[to_pi_locations] = pi
+        ph_correct = ddmod - dd
+        to_zero_locations = np.where(np.abs(dd) < discont)
+        ph_correct[to_zero_locations] = 0
+        return p[1] + np.cumsum(ph_correct)
+
+    @staticmethod
+    def unwrap_hilbert(analytic_signal: np.array, sample_rate: int):
+        instantaneous_phase = FMdemod.unwrap(np.angle(analytic_signal))
         instantaneous_frequency = (np.diff(instantaneous_phase) /
-                                   (2.0 * np.pi) * sample_rate)
+                                   (2.0 * pi) * sample_rate)
         return instantaneous_frequency
+
+    @staticmethod
+    def inst_freq(signal: np.ndarray, sample_rate: int):
+        return FMdemod.unwrap_hilbert(hilbert(signal.real), sample_rate)
 
     def work(self, data):
 
@@ -245,7 +261,10 @@ def tau_as_freq(tau):
 
 class NoiseReduction:
 
-    def __init__(self, notch_freq, side_gain, discard_size=0, audio_rate=192000):
+    def __init__(self, notch_freq: float,
+                 side_gain: float,
+                 discard_size: int = 0,
+                 audio_rate: int = 192000):
         self.audio_rate = audio_rate
         self.discard_size = discard_size
         self.hfreq = notch_freq
@@ -378,7 +397,7 @@ class HiFiDecode:
         self.sample_rate = options['input_rate']
         self.options = options
         self.if_rate = 8388608
-        self.audio_rate = self.options['audio_rate']
+        self.audio_rate = 192000
 
         # main deemphasis time constant
         self.tau = 56e-6
@@ -560,7 +579,7 @@ class HiFiDecode:
     def carrierOffsets(self, standard, cL, cR):
         return standard.LCarrierRef - cL, standard.RCarrierRef - cR
 
-    def block_decode(self, raw_data, block_count=0):
+    def block_decode(self, raw_data: np.array, block_count: int = 0) -> Tuple[int, np.array, np.array]:
         lo_data = self.lopassRF.work(raw_data)
         data = samplerate_resample(lo_data, self.ifresample_numerator, self.ifresample_denominator)
         dcL, dcR, audioL, audioR, preL, preR = self.demodblock(data)

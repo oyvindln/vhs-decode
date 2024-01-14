@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import cpu_count
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import sys
+from typing import List
+
 import numpy as np
 import soundfile as sf
+from vhsdecode.addons.chromasep import samplerate_resample
 
 from vhsdecode.cmdcommons import (
     common_parser_cli,
@@ -20,7 +23,7 @@ import io
 
 parser, _ = common_parser_cli(
     "Extracts audio from raw VHS HiFi FM capture",
-    default_threads=round(cpu_count() / 2) + 1,
+    default_threads=round(cpu_count() / 2),
 )
 
 parser.add_argument(
@@ -77,7 +80,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--h8", dest="H8", action="store_true", default=False, help="8mm/Hi8 tape format"
+    "--h8", dest="H8", action="store_true", default=False, help="Video8/Hi8, 8mm tape format"
 )
 
 parser.add_argument(
@@ -275,21 +278,34 @@ def as_outputfile(path, sample_rate):
         )
 
 
-def log_decode_speed(start_time, frames):
-    elapsed_time = datetime.now() - start_time
+def seconds_to_str(seconds: float) -> str:
+    return str(timedelta(seconds=seconds))
+
+
+def log_decode(start_time: datetime, frames: int, decode_options: dict):
+    elapsed_time: timedelta = datetime.now() - start_time
+    audio_time: float = frames / decode_options["input_rate"]
+    relative_speed: float = audio_time / elapsed_time.total_seconds()
+    elapsed_time_format: str = seconds_to_str(elapsed_time.total_seconds())
+    audio_time_format: str = seconds_to_str(audio_time)
+
     print(
-        f"Decoding speed: {round(frames / (1e3 * elapsed_time.total_seconds()))} kFrames/s"
+        f"- Decoding speed: {round(frames / (1e3 * elapsed_time.total_seconds()))} kFrames/s ({relative_speed:.2f}x)\n" +
+        f"- Audio position: {str(audio_time_format)[:-3]}\n" +
+        f"- Wall time     : {str(elapsed_time_format)[:-3]}"
     )
 
 
 def decode(decoder, input_file, decode_options, output_file):
     start_time = datetime.now()
     noise_reduction = NoiseReduction(
-        decoder.notchFreq, decode_options["nr_side_gain"], decoder.audioDiscard,
-        audio_rate=decoder.audioRate
+        decoder.notchFreq,
+        decode_options["nr_side_gain"],
+        decoder.audioDiscard,
+        audio_rate=decode_options["audio_rate"]
     )
 
-    with as_outputfile(output_file, decoder.audioRate) as w:
+    with as_outputfile(output_file, decode_options["audio_rate"]) as w:
         with as_soundfile(input_file) as f:
             progressB = TimeProgressBar(f.frames, f.frames)
             current_block = 0
@@ -300,16 +316,26 @@ def decode(decoder, input_file, decode_options, output_file):
                 current_block, audioL, audioR = decoder.block_decode(
                     block, block_count=current_block
                 )
+                left_audio = samplerate_resample(audioL,
+                                                 decode_options["audio_rate"],
+                                                 decoder.audioRate,
+                                                 "sinc_fastest") \
+                    if decode_options["audio_rate"] != decoder.audioRate else audioL
+                right_audio = samplerate_resample(audioR,
+                                                  decode_options["audio_rate"],
+                                                  decoder.audioRate,
+                                                  "sinc_fastest") \
+                    if decode_options["audio_rate"] != decoder.audioRate else audioR
 
                 if decode_options["noise_reduction"]:
-                    stereo = noise_reduction.stereo(audioL, audioR)
+                    stereo = noise_reduction.stereo(left_audio, right_audio)
                 else:
-                    stereo = list(map(list, zip(audioL, audioR)))
+                    stereo = list(map(list, zip(left_audio, right_audio)))
 
                 if decode_options["auto_fine_tune"]:
                     log_bias(decoder)
 
-                log_decode_speed(start_time, f.tell())
+                log_decode(start_time, f.tell(), decode_options)
                 w.write(stereo)
 
         elapsed_time = datetime.now() - start_time
@@ -317,31 +343,36 @@ def decode(decoder, input_file, decode_options, output_file):
         print(f"\nDecode finished, seconds elapsed: {round(dt_string)}")
 
 
-def decode_parallel(decoders, input_file, output_file, decode_options, threads=8):
+def decode_parallel(decoders: List[HiFiDecode],
+                    input_file: str,
+                    output_file: str,
+                    decode_options: dict,
+                    threads: int = 8):
     start_time = datetime.now()
-    audio_rate = decoders[0].audioRate
     block_size = decoders[0].blockSize
     read_overlap = decoders[0].readOverlap
     noise_reduction = NoiseReduction(
-        decoders[0].notchFreq, decode_options["nr_side_gain"], decoders[0].audioDiscard,
-        audio_rate=audio_rate
+        decoders[0].notchFreq,
+        decode_options["nr_side_gain"],
+        decoders[0].audioDiscard,
+        audio_rate=decode_options["audio_rate"]
     )
     futures_queue = list()
     executor = ThreadPoolExecutor(threads)
     current_block = 0
-    with as_outputfile(output_file, audio_rate) as w:
+    with as_outputfile(output_file, decode_options["audio_rate"]) as w:
         with as_soundfile(input_file) as f:
             progressB = TimeProgressBar(f.frames, f.frames)
             for block in f.blocks(blocksize=block_size, overlap=read_overlap):
+                decoder = decoders[current_block % threads]
                 futures_queue.append(
                     executor.submit(
-                        decoders[current_block % threads].block_decode,
-                        block,
-                        current_block,
+                        decoder.block_decode,
+                        block, current_block
                     )
                 )
                 if decode_options["auto_fine_tune"]:
-                    log_bias(decoders[current_block % threads])
+                    log_bias(decoder)
 
                 current_block += 1
                 progressB.print(f.tell())
@@ -349,11 +380,21 @@ def decode_parallel(decoders, input_file, output_file, decode_options, threads=8
                 while len(futures_queue) > threads:
                     future = futures_queue.pop(0)
                     blocknum, audioL, audioR = future.result()
+                    left_audio = samplerate_resample(audioL,
+                                                     decode_options["audio_rate"],
+                                                     decoder.audioRate,
+                                                     "sinc_fastest") \
+                        if decode_options["audio_rate"] != decoder.audioRate else audioL
+                    right_audio = samplerate_resample(audioR,
+                                                      decode_options["audio_rate"],
+                                                      decoder.audioRate,
+                                                      "sinc_fastest") \
+                        if decode_options["audio_rate"] != decoder.audioRate else audioR
                     if decode_options["noise_reduction"]:
-                        stereo = noise_reduction.stereo(audioL, audioR)
+                        stereo = noise_reduction.stereo(left_audio, right_audio)
                     else:
-                        stereo = list(map(list, zip(audioL, audioR)))
-                    log_decode_speed(start_time, f.tell())
+                        stereo = list(map(list, zip(left_audio, right_audio)))
+                    log_decode(start_time, f.tell(), decode_options)
                     w.write(stereo)
 
             print("Emptying the decode queue ...")
@@ -364,7 +405,7 @@ def decode_parallel(decoders, input_file, output_file, decode_options, threads=8
                     stereo = noise_reduction.stereo(audioL, audioR)
                 else:
                     stereo = list(map(list, zip(audioL, audioR)))
-                log_decode_speed(start_time, f.tell())
+                log_decode(start_time, f.tell(), decode_options)
                 w.write(stereo)
 
         elapsed_time = datetime.now() - start_time
@@ -389,7 +430,7 @@ def guess_bias(decoder, input_file, block_size, blocks_limits=10):
     return LCRef, RCRef
 
 
-def log_bias(decoder):
+def log_bias(decoder: HiFiDecode):
     devL = (decoder.standard.LCarrierRef - decoder.afe_params.LCarrierRef) / 1e3
     devR = (decoder.standard.RCarrierRef - decoder.afe_params.RCarrierRef) / 1e3
     print("Bias L %.02f kHz, R %.02f kHz" % (devL, devR), end=" ")
