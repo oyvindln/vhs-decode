@@ -394,10 +394,10 @@ class HiFiDecode:
         if options is None:
             options = dict()
         self.options = options
-        self.sample_rate = options['input_rate']
+        self.sample_rate: int = options['input_rate']
         self.options = options
-        self.if_rate = 8388608
-        self.audio_rate = 192000
+        self.if_rate: int = 8388608
+        self.audio_rate: int = 192000
 
         # main deemphasis time constant
         self.tau = 56e-6
@@ -408,14 +408,15 @@ class HiFiDecode:
         self.audioRes_denominator = self.getResamplingRatios()
 
         # block overlap and edge discard
-        self.blocks_second = 8
-        self.block_size = int(self.sample_rate / self.blocks_second)
-        self.block_audio_size = int(self.audio_rate / self.blocks_second)
-        self.block_overlap_audio = 192 if not self.options['preview'] else 0
-        self.block_overlap = round(
-            self.block_overlap_audio *
-            self.audioRes_denominator * self.ifresample_denominator /
-            (self.audioRes_numerator * self.ifresample_numerator)
+        self.blocks_second: int = 40
+        self.block_size: int = int(self.sample_rate / self.blocks_second)
+        self.block_audio_size: int = int(self.audio_rate / self.blocks_second)
+        self.block_overlap_audio: int = int(self.audio_rate / 5e2) if not self.options['preview'] else 0
+        audio_final_rate = ((self.options['audio_rate'] / self.audio_rate) *
+                            (self.audioRes_numerator / self.audioRes_denominator))
+        self.block_overlap: int = round(
+            self.block_overlap_audio * self.ifresample_denominator /
+            (self.ifresample_numerator * audio_final_rate)
         )
 
         # start of filter design stuff
@@ -528,8 +529,8 @@ class HiFiDecode:
         preL = samplerate_resample(preAudioResampleL, self.audioRes_numerator, self.audioRes_denominator)
         preR = samplerate_resample(preAudioResampleR, self.audioRes_numerator, self.audioRes_denominator)
 
-        dcL = self.dcCancelL.work(np.mean(audioL))
-        dcR = self.dcCancelR.work(np.mean(audioR))
+        dcL = self.afe_params.LCarrierRef
+        dcR = self.afe_params.RCarrierRef
 
         return dcL, dcR, (audioL + preL) / 2, (audioR + preR) / 2, preL, preR
 
@@ -558,7 +559,8 @@ class HiFiDecode:
         return self.standard.Hfreq
 
     @staticmethod
-    def cancelDC(c, dc):
+    @njit(cache=True, fastmath=True, nogil=True)
+    def cancelDC(c: np.array, dc: np.array):
         return c - dc
 
     @staticmethod

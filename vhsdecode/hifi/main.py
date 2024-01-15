@@ -80,6 +80,14 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--gain",
+    dest="gain",
+    type=float,
+    default=1.0,
+    help="Sets the gain/volume of the output audio (default is 1.0)",
+)
+
+parser.add_argument(
     "--h8", dest="H8", action="store_true", default=False, help="Video8/Hi8, 8mm tape format"
 )
 
@@ -160,12 +168,14 @@ class UnseekableSoundFile(sf.SoundFile):
         out = np.asarray(np.frombuffer(data, dtype=np.int16), dtype=dtype)
         return out
 
-    def _read_next_chunk(self, blocksize, overlap, dtype):
-        data = self.file_path.read(blocksize)
+    def _read_next_chunk(self, blocksize, overlap, dtype) -> np.array:
+        data = self.file_path.read(blocksize - overlap)
         assert len(data) % 2 == 0, "data is misaligned"
         out = np.asarray(np.frombuffer(data, dtype=np.int16), dtype=dtype)
+        self._overlap = np.copy(out[-overlap:]) if np.size(self._overlap) == 0 else self._overlap
+        result = np.concatenate((self._overlap, out))
         self._overlap = np.copy(out[-overlap:])
-        return np.concatenate((self._overlap, out))
+        return result
 
     # yields infinite generator for _read_next_chunk
     def blocks(self, blocksize=None, overlap=0, frames=-1, dtype='float64',
@@ -296,6 +306,41 @@ def log_decode(start_time: datetime, frames: int, decode_options: dict):
     )
 
 
+@np.vectorize
+def gain_adjust(audio: np.array, gain: float) -> np.array:
+    return np.multiply(audio, gain)
+
+
+def prepare_stereo(l: np.array, r: np.array, noise_reduction: NoiseReduction, decode_options: dict):
+    if decode_options["noise_reduction"]:
+        stereo = noise_reduction.stereo(
+            gain_adjust(l, decode_options["gain"]),
+            gain_adjust(r, decode_options["gain"])
+        )
+    else:
+        stereo = list(map(
+            list,
+            zip(gain_adjust(l, decode_options["gain"]),
+                gain_adjust(r, decode_options["gain"]))
+        ))
+    return stereo
+
+
+def post_process(audioL: np.array, audioR: np.array, audio_rate: int, decode_options: dict):
+    left_audio = samplerate_resample(audioL,
+                                     decode_options["audio_rate"],
+                                     audio_rate,
+                                     "sinc_fastest") \
+        if decode_options["audio_rate"] != audio_rate else audioL
+    right_audio = samplerate_resample(audioR,
+                                      decode_options["audio_rate"],
+                                      audio_rate,
+                                      "sinc_fastest") \
+        if decode_options["audio_rate"] != audio_rate else audioR
+
+    return left_audio, right_audio
+
+
 def decode(decoder, input_file, decode_options, output_file):
     start_time = datetime.now()
     noise_reduction = NoiseReduction(
@@ -316,27 +361,18 @@ def decode(decoder, input_file, decode_options, output_file):
                 current_block, audioL, audioR = decoder.block_decode(
                     block, block_count=current_block
                 )
-                left_audio = samplerate_resample(audioL,
-                                                 decode_options["audio_rate"],
-                                                 decoder.audioRate,
-                                                 "sinc_fastest") \
-                    if decode_options["audio_rate"] != decoder.audioRate else audioL
-                right_audio = samplerate_resample(audioR,
-                                                  decode_options["audio_rate"],
-                                                  decoder.audioRate,
-                                                  "sinc_fastest") \
-                    if decode_options["audio_rate"] != decoder.audioRate else audioR
-
-                if decode_options["noise_reduction"]:
-                    stereo = noise_reduction.stereo(left_audio, right_audio)
-                else:
-                    stereo = list(map(list, zip(left_audio, right_audio)))
+                left_audio, right_audio = post_process(audioL, audioR, decoder.audioRate, decode_options)
+                stereo = prepare_stereo(left_audio, right_audio, noise_reduction, decode_options)
 
                 if decode_options["auto_fine_tune"]:
                     log_bias(decoder)
 
+                current_block += 1
                 log_decode(start_time, f.tell(), decode_options)
-                w.write(stereo)
+                try:
+                    w.write(stereo)
+                except ValueError:
+                    pass
 
         elapsed_time = datetime.now() - start_time
         dt_string = elapsed_time.total_seconds()
@@ -380,33 +416,24 @@ def decode_parallel(decoders: List[HiFiDecode],
                 while len(futures_queue) > threads:
                     future = futures_queue.pop(0)
                     blocknum, audioL, audioR = future.result()
-                    left_audio = samplerate_resample(audioL,
-                                                     decode_options["audio_rate"],
-                                                     decoder.audioRate,
-                                                     "sinc_fastest") \
-                        if decode_options["audio_rate"] != decoder.audioRate else audioL
-                    right_audio = samplerate_resample(audioR,
-                                                      decode_options["audio_rate"],
-                                                      decoder.audioRate,
-                                                      "sinc_fastest") \
-                        if decode_options["audio_rate"] != decoder.audioRate else audioR
-                    if decode_options["noise_reduction"]:
-                        stereo = noise_reduction.stereo(left_audio, right_audio)
-                    else:
-                        stereo = list(map(list, zip(left_audio, right_audio)))
+                    left_audio, right_audio = post_process(audioL, audioR, decoder.audioRate, decode_options)
+                    stereo = prepare_stereo(left_audio, right_audio, noise_reduction, decode_options)
                     log_decode(start_time, f.tell(), decode_options)
-                    w.write(stereo)
+                    try:
+                        w.write(stereo)
+                    except ValueError:
+                        pass
 
             print("Emptying the decode queue ...")
             while len(futures_queue) > 0:
                 future = futures_queue.pop(0)
                 blocknum, audioL, audioR = future.result()
-                if decode_options["noise_reduction"]:
-                    stereo = noise_reduction.stereo(audioL, audioR)
-                else:
-                    stereo = list(map(list, zip(audioL, audioR)))
-                log_decode(start_time, f.tell(), decode_options)
-                w.write(stereo)
+                left_audio, right_audio = post_process(audioL, audioR, decoder.audioRate, decode_options)
+                stereo = prepare_stereo(left_audio, right_audio, noise_reduction, decode_options)
+                try:
+                    w.write(stereo)
+                except ValueError:
+                    pass
 
         elapsed_time = datetime.now() - start_time
         dt_string = elapsed_time.total_seconds()
@@ -445,7 +472,7 @@ def log_bias(decoder: HiFiDecode):
         )
 
 
-def main():
+def main() -> int:
     args = parser.parse_args()
 
     system = select_system(args)
@@ -461,6 +488,7 @@ def main():
         "nr_side_gain": args.NR_side_gain,
         "grc": args.GRC,
         "audio_rate": args.rate,
+        "gain": args.gain,
     }
 
     filename, outname, _, _ = get_basics(args)
@@ -470,7 +498,7 @@ def main():
                 "Existing decode files found, remove them or run command with --overwrite"
             )
             print("\t", outname)
-            sys.exit(1)
+            return 1
 
     print("Initializing ...")
     if decode_options["format"] == "vhs":
@@ -484,7 +512,7 @@ def main():
         decoder = HiFiDecode(decode_options)
         LCRef, RCRef = decoder.standard.LCarrierRef, decoder.standard.RCarrierRef
         if args.BG:
-            LCRef, RCRef = guess_bias(decoder, filename, decoder.blockSize)
+            LCRef, RCRef = guess_bias(decoder, filename, int(decoder.sample_rate))
             decoder.updateAFE(LCRef, RCRef)
 
         if args.threads > 1 and not args.GRC:
@@ -497,10 +525,12 @@ def main():
             )
         else:
             decode(decoder, filename, decode_options, outname)
+        print('Decode finished successfully')
+        return 0
     else:
         print("No sample rate specified")
-        sys.exit(0)
+        return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
