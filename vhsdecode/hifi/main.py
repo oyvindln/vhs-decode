@@ -115,7 +115,7 @@ class LDFReaderInputStream(io.RawIOBase):
         return False
 
     def close(self):
-        self.buffer.close()
+        pass
 
     def fileno(self):
         return self.buffer.fileno()
