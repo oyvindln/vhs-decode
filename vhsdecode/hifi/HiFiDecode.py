@@ -1,6 +1,6 @@
-# This currently decodes raw VHS and Video8 HiFi RF,
-# but it could do Beta HiFi, CED, LD and other stereo AFM variants
-# Also, it implements an interpretation of the noise reduction like described on IEC60774-2/1999
+# This currently decodes raw VHS and Video8 HiFi RF.
+# It could also do Beta HiFi, CED, LD and other stereo AFM variants,
+# It has an interpretation of the noise reduction method described on IEC60774-2/1999
 
 import sys
 from concurrent.futures import ThreadPoolExecutor
