@@ -529,8 +529,8 @@ class HiFiDecode:
         preL = samplerate_resample(preAudioResampleL, self.audioRes_numerator, self.audioRes_denominator)
         preR = samplerate_resample(preAudioResampleR, self.audioRes_numerator, self.audioRes_denominator)
 
-        dcL = self.afe_params.LCarrierRef
-        dcR = self.afe_params.RCarrierRef
+        dcL = np.mean(audioL)
+        dcR = np.mean(audioR)
 
         return dcL, dcR, (audioL + preL) / 2, (audioR + preR) / 2, preL, preR
 
