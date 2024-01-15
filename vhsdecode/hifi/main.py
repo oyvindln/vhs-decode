@@ -294,7 +294,7 @@ def seconds_to_str(seconds: float) -> str:
 
 def log_decode(start_time: datetime, frames: int, decode_options: dict):
     elapsed_time: timedelta = datetime.now() - start_time
-    audio_time: float = frames / decode_options["input_rate"]
+    audio_time: float = frames / (2 * decode_options["input_rate"])
     relative_speed: float = audio_time / elapsed_time.total_seconds()
     elapsed_time_format: str = seconds_to_str(elapsed_time.total_seconds())
     audio_time_format: str = seconds_to_str(audio_time)
@@ -306,7 +306,6 @@ def log_decode(start_time: datetime, frames: int, decode_options: dict):
     )
 
 
-@np.vectorize
 def gain_adjust(audio: np.array, gain: float) -> np.array:
     return np.multiply(audio, gain)
 

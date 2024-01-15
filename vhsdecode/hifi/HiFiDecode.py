@@ -408,7 +408,7 @@ class HiFiDecode:
         self.audioRes_denominator = self.getResamplingRatios()
 
         # block overlap and edge discard
-        self.blocks_second: int = 40
+        self.blocks_second: int = 8
         self.block_size: int = int(self.sample_rate / self.blocks_second)
         self.block_audio_size: int = int(self.audio_rate / self.blocks_second)
         self.block_overlap_audio: int = int(self.audio_rate / 5e2) if not self.options['preview'] else 0
