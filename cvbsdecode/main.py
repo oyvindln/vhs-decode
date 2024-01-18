@@ -200,6 +200,11 @@ def main(args=None):
         if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
             jsondumper.put(vhsd.build_json())
 
+    if vhsd.rf.DecoderParams["lowest_agc_gain"] is not None:
+        print("Lowest detected gain:  ", vhsd.rf.DecoderParams["lowest_agc_gain"], file=sys.stderr)
+        print("Highest detected gain: ", vhsd.rf.DecoderParams["highest_agc_gain"], file=sys.stderr)
+        print("Lowest used gain:      ", vhsd.rf.DecoderParams["lowest_used_agc_gain"], file=sys.stderr)
+        print("Highest used gain:     ", vhsd.rf.DecoderParams["highest_used_agc_gain"], file=sys.stderr)
     print("saving JSON and exiting")
     cleanup(outname)
     sys.exit(0)

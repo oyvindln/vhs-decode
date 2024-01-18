@@ -236,23 +236,30 @@ def hz_to_output_override(field,input):
 
     reduced = input
 
-    reduced[0:6*field.outlinelen] = input[0:6*field.outlinelen] - blank_levels[7]
+    reduced[0:6*field.outlinelen+130] = input[0:6*field.outlinelen+130] - np.median(blank_levels[7:12])
 
     for i in range(7, field.outlinecount-5):
-        reduced[i*field.outlinelen+130:(i+1)*field.outlinelen+130] -= np.linspace(blank_levels[i],blank_levels[i+1],num=field.outlinelen)
+        reduced[i*field.outlinelen+130:(i+1)*field.outlinelen+130] -= np.linspace(np.median(blank_levels[i-2:i+3]),np.median(blank_levels[i-1:i+4]),num=field.outlinelen)
 
-    reduced[(field.outlinecount-5)*field.outlinelen+130:] = input[(field.outlinecount-5)*field.outlinelen+130:] - blank_levels[field.outlinecount-5]
+    reduced[(field.outlinecount-5)*field.outlinelen+130:] = input[(field.outlinecount-5)*field.outlinelen+130:] - np.median(blank_levels[field.outlinecount-9:field.outlinecount-5])
 
     if field.rf.DecoderParams["agc_set_gain"] == 0.0:
         vsyncs = blank_levels - sync_levels
         vsyncs = vsyncs[7:field.outlinecount-5]
         vsyncs.sort()
         new_gain = np.mean(vsyncs[(vsyncs.size//4):((vsyncs.size*3)//4)]) / (-field.rf.SysParams["vsync_ire"])
-        print(new_gain)
         if field.rf.DecoderParams["agc_gain"] is None:
             field.rf.DecoderParams["agc_gain"] = new_gain
+            field.rf.DecoderParams["lowest_agc_gain"] = new_gain
+            field.rf.DecoderParams["highest_agc_gain"] = new_gain
+            field.rf.DecoderParams["lowest_used_agc_gain"] = new_gain
+            field.rf.DecoderParams["highest_used_agc_gain"] = new_gain
         else:
             field.rf.DecoderParams["agc_gain"] = new_gain*field.rf.DecoderParams["agc_speed"] + field.rf.DecoderParams["agc_gain"]*(1.0-field.rf.DecoderParams["agc_speed"])
+            field.rf.DecoderParams["lowest_agc_gain"] = min(field.rf.DecoderParams["lowest_agc_gain"],new_gain)
+            field.rf.DecoderParams["highest_agc_gain"] = max(field.rf.DecoderParams["highest_agc_gain"],new_gain)
+            field.rf.DecoderParams["lowest_used_agc_gain"] = min(field.rf.DecoderParams["lowest_used_agc_gain"],field.rf.DecoderParams["agc_gain"])
+            field.rf.DecoderParams["highest_used_agc_gain"] = max(field.rf.DecoderParams["highest_used_agc_gain"],field.rf.DecoderParams["agc_gain"])
     else:
         field.rf.DecoderParams["agc_gain"] = field.rf.DecoderParams["agc_set_gain"]
 
