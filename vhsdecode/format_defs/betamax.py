@@ -68,6 +68,7 @@ def get_rfparams_pal_betamax(rfparams_pal):
     rfparams["nonlinear_scaling_1"] = 0.7
     rfparams["nonlinear_highpass_limit_h"] = 5000
     rfparams["nonlinear_highpass_limit_l"] = -20000
+    rfparams["use_sub_deemphasis"] = True
 
     # Phase rotation applied to chroma signal on each hsync for each track.
     # Not used on PAL Betamax
@@ -155,14 +156,26 @@ def _fill_rfparams_ntsc_betamax_common(rfparams):
     # Temporary video emphasis filter constants
     # Needs to be verified
     # NOT CORRECT!!
-    rfparams["deemph_mid"] = 250000
-    rfparams["deemph_gain"] = 12.5
+    # rfparams["deemph_mid"] = 250000
+    # rfparams["deemph_gain"] = 12.5
+    # Based on eyeball tweaking in filter tune, needs more work.
+    rfparams["deemph_mid"] = 100000
+    rfparams["deemph_gain"] = 8.0
 
-    # Parameters for high-pass filter used for non-linear deemphasis, these are
-    # probably not correct.
-    rfparams["nonlinear_highpass_freq"] = 600000
+    # Parameters for high-pass filter used for non-linear deemphasis,
+    # TODO: Needs tweaking
+    # rfparams["nonlinear_highpass_freq"] = 600000
+    # rfparams["nonlinear_highpass_limit_h"] = 5000
+    # rfparams["nonlinear_highpass_limit_l"] = -20000
+    rfparams["nonlinear_highpass_freq"] = 325000
+    rfparams["nonlinear_bandpass_upper"] = 4.5e6
+    rfparams["nonlinear_exp_scaling"] = 0.37
+    rfparams["nonlinear_static_factor"] = 0.16
+    rfparams["use_sub_deemphasis"] = True
+
     rfparams["nonlinear_highpass_limit_h"] = 5000
     rfparams["nonlinear_highpass_limit_l"] = -20000
+    # rfparams["use_sub_deemphasis"] = True
 
     # Phase rotation applied (in 90 degree / Pi/2 radian steps) to chroma signal on each hsync for each track.
     rfparams["chroma_rotation"] = [2, 0]

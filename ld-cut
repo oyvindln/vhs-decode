@@ -72,11 +72,23 @@ parser.add_argument(
     help="compression level for .ldf files",
 )
 
+parser.add_argument(
+    "-F",
+    "--fmpeg-options",
+    dest="ffmpeg_options",
+    type=str,
+    default=None,
+    help="custom ffmpeg format options"
+)
+
 args = parser.parse_args()
 
 # print(args)
 filename = args.infile
 outname = args.outfile
+
+if outname == '-':
+    outname = "/dev/stdout"
 
 vid_standard = "PAL" if args.pal else "NTSC"
 
@@ -131,7 +143,9 @@ startidx = int(ldd.fdoffset)
 ldd.roughseek(endloc)
 endidx = int(ldd.fdoffset)
 
-if makelds:
+if args.ffmpeg_options is not None:
+    process, fd = ffmpeg_pipe(outname, args.ffmpeg_options)
+elif makelds:
     process = subprocess.Popen(
         ["ld-lds-converter", "-o", outname, "-p"], stdin=subprocess.PIPE
     )
@@ -139,7 +153,7 @@ if makelds:
 elif makeldf:
     process, fd = ldf_pipe(outname, args.ldfcomp)
 else:
-    fd = open(args.outfile, "wb")
+    fd = open(outname, "wb")
 
 # print(startloc, endloc, startidx, endidx)
 

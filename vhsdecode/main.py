@@ -159,7 +159,7 @@ def main(args=None, use_gui=False):
         dest="cafc",
         action="store_true",
         default=False,
-        help="Enable downconverted chroma carrier AFC (Automatic freq. control), implies --recheck_phase",
+        help="Tries to detect the chroma carrier frequency on a field basis within some limit instead of using the default one for the format. Mainly useful for debug purposes and used on PAL betamax. implies --recheck_phase",
     )
     chroma_group.add_argument(
         "-T",
@@ -198,14 +198,6 @@ def main(args=None, use_gui=False):
         help="Do a plot for the requested data, separated by whitespace. Current options are: "
         + plot_options
         + ".",
-    )
-    debug_group.add_argument(
-        "--sclip",
-        "--sync_clip",
-        dest="sync_clip",
-        action="store_true",
-        default=False,
-        help="Enables sync clipping",
     )
     debug_group.add_argument(
         "--drh",
@@ -350,7 +342,6 @@ def main(args=None, use_gui=False):
     rf_options["subdeemp"] = args.subdeemp
     rf_options["y_comb"] = args.y_comb
     rf_options["cafc"] = args.cafc
-    rf_options["sync_clip"] = args.sync_clip
     rf_options["disable_right_hsync"] = args.disable_right_hsync
     rf_options["level_detect_divisor"] = args.level_detect_divisor
     rf_options["fallback_vsync"] = args.fallback_vsync

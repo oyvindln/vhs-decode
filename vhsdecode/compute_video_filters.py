@@ -17,7 +17,7 @@ def create_sub_emphasis_params(rf_params, sys_params, hz_ire, vsync_ire):
         rf_params.get("nonlinear_exp_scaling", 0.25),
         rf_params.get("nonlinear_scaling_1", None),
         rf_params.get("nonlinear_scaling_2", None),
-        rf_params.get("static_factor", NONLINEAR_STATIC_FACTOR_DEFAULT),
+        rf_params.get("nonlinear_static_factor", NONLINEAR_STATIC_FACTOR_DEFAULT),
         sys_params.get(
             "nonlinear_deviation",
             hz_ire * (100 + -vsync_ire),

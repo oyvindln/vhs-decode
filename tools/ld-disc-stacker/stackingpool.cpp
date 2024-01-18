@@ -23,6 +23,7 @@
 ************************************************************************/
 
 #include "stackingpool.h"
+#include "vbidecoder.h"
 
 StackingPool::StackingPool(QString _outputFilename, QString _outputJsonFilename,
                              qint32 _maxThreads, QVector<LdDecodeMetaData *> &_ldDecodeMetaData, QVector<SourceVideo *> &_sourceVideos,

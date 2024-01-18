@@ -380,7 +380,7 @@ class VHStune(QDialog):
                 "desc": "Video low pass filter corner freq ({:.0f} Hz):",
                 "onchange": [
                     self.update_deemphasis,
-                    self.applyDeemphFilter,
+                    self.apply_both_deemph_filters,
                     self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
@@ -393,7 +393,7 @@ class VHStune(QDialog):
                 "desc": "Video low pass filter order ({:.2f}):",
                 "onchange": [
                     self.update_deemphasis,
-                    self.applyDeemphFilter,
+                    self.apply_both_deemph_filters,
                     self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
@@ -406,7 +406,7 @@ class VHStune(QDialog):
                 "desc": "Deemphasis mid freq ({:.0f} Hz):",
                 "onchange": [
                     self.update_deemphasis,
-                    self.applyDeemphFilter,
+                    self.apply_both_deemph_filters,
                     self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
@@ -419,7 +419,7 @@ class VHStune(QDialog):
                 "desc": "Deemphasis gain ({:.1f} dB):",
                 "onchange": [
                     self.update_deemphasis,
-                    self.applyDeemphFilter,
+                    self.apply_both_deemph_filters,
                     self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
@@ -432,7 +432,7 @@ class VHStune(QDialog):
                 "desc": "Deemphasis Q ({:.2f}):",
                 "onchange": [
                     self.update_deemphasis,
-                    self.applyDeemphFilter,
+                    self.apply_both_deemph_filters,
                     self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
@@ -463,7 +463,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear high-pass freq ({} Hz):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -476,7 +476,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear bandpass upper freq ({} Hz):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -488,7 +488,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear linear scale ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -500,7 +500,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear linear scale B ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -512,7 +512,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear exponential scale ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -524,7 +524,7 @@ class VHStune(QDialog):
                 "desc": "Non-linear static factor ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -539,7 +539,7 @@ class VHStune(QDialog):
                 "desc": "NL deemp Amplitude detector low pass filter corner freq ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
-                    self.applyNLDeemphFilterA,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -664,8 +664,7 @@ class VHStune(QDialog):
                 p()
         else:
             self.loadImage()
-            self.applyDeemphFilter()
-            self.applyNLDeemphFilterA()
+            self.apply_both_deemph_filters()
             self.applyNLSVHSFilter()
             self.drawImage()
             self.update_filter_plot()
@@ -792,6 +791,10 @@ class VHStune(QDialog):
                 * lf_amp_scaled
                 * self.filter_params["svhs_lf_out_level"]["value"]
             )
+
+    def apply_both_deemph_filters(self):
+        self.applyDeemphFilter()
+        self.applyNLDeemphFilterA()
 
     def applyNLDeemphFilterA(self):
         self.NLDeemphAmplitude = []

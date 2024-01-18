@@ -130,7 +130,7 @@ Please read [VCR Reports](https://github.com/oyvindln/vhs-decode/wiki/VCR-report
 
 Information on various VCRs that have been documented alongside high resolution pictures of VCR's that have had RF taps installed, guidance on recommended cables/connectors & tools to use are also included.
 
-The setup process for RF capture involves running a short cable internally from points that provide the unprocessed video and or audio signal to a BNC jack at back of a metal/plastic VCR chassis or threaded out a vent, this allows direct access to the FM RF signals conveniently & reliably, we call this a Tap Point or RF Tap, for some decks and camcorders however Dupont conectors and ribbon jigs can be used.
+The setup process for RF capture involves running a short cable internally from points that provide the unprocessed video and or audio signal to a BNC jack at back of a metal/plastic VCR chassis or cable threaded out a vent, this allows direct access to the FM RF signals conveniently & reliably, we call this a Tap Point or RF Tap, for some decks and camcorders however DuPont conectors and ribbon jigs can be used but are less mechanically secure.
 
 VCR ==> Head Drum ==> Amplification & Tracking ==> FM RF Test/Signal Points ==> FM RF Capture ==> Software Decoding ==> Lossless TBC Files ==> Audio/Video File Creation.
 
@@ -169,7 +169,8 @@ On CX White Cards you use the S-Video Luma pin for the RF input, but a BNC can b
 
 ## Install A RF Tap
 
-[Hardware Installation Guide]() Goes over the install steps for VHS Decks to Sony 8mm camcorders.
+
+[Hardware Installation Guide](https://github.com/oyvindln/vhs-decode/wiki/Hardware-Installation-Guide) Goes over the install steps for VHS Decks to Sony 8mm camcorders.
 
 If you want to still use live playback or are using lower signal decks adding an 10uf (3.3uf to 100uf range) capacitor to the test point or amplifier can stop dropouts and improve signal level, avoiding dropouts.
 
@@ -413,7 +414,7 @@ These are stored in 16-bit `GREY16` headerless files separated into chroma/luma 
 
 The export scrips will by default render a lossless, interlaced top field first and high-bitrate (roughly 70-100 Mb/s) FFV1 codec video which, which although ideal for archival and further processing has only recently started to gain support in modern [NLEs](https://en.wikipedia.org/wiki/Non-linear_editing).
 
-To generate .mkv files viewable in most media players, simply use the `tbc-video-export.py` script below.
+To generate .mkv files viewable in most media players, simply use the `tbc-video-export` tool.
 
 Read the `README_gen_chroma_vid_scripts` readme for the legacy script options.
 
@@ -459,18 +460,22 @@ Define your profile with for example: `--ffmpeg-profile ffv1_8bit_pcm`
 
 ## Time Control & Audio Muxing
 
+- `-s` Skips number of frames `-s 25` for example skips 1 second of PAL video.
 
-Command Examples:
+- `-l` Defines length to export so `-l 1500` is 1 minute of PAL video at 25fps or `-l 1500` for NTSC at 29.97fps
 
-     python3 tbc-video-export.py -v -s <skip number of frames> -l <number of frames long> -i <.tbc filename without .tbc extension>
+- `--audio-track` Embed an audio file example: `--audio-track HiFi_24-bit_192khz.flac` & `--audio-track Linear_24-bit_48khz.flac` from [HiFi-Decode](https://github.com/oyvindln/vhs-decode/wiki/HiFi-Decode)
 
-The `-a` option can embed an audio file, such as audio decoded via [HiFi Decode](https://github.com/VideoMem/ld-decode/tree/hifi-decode)
+Full Example:
 
-     python3 tbc-video-export.py -v -s <skip n frames> -l <n frames long> -a <capture>.flac -i <.tbc filename without .tbc extension>
+Linux & MacOS:
 
-So for example open terminal in the directory of target TBC/Metadata files and run
+    python3 tbc-video-export.py -s 50 -l 1500 --audio-track HiFi_24-bit_48khz.flac --audio-track Linear_24-bit_48khz.flac Input.tbc
 
-     python3 tbc-video-export.py -v -s <skip n frames> -l <number of frames long> -a <capture>.flac -i <.tbc filename without .tbc extension>
+
+Windows:
+
+    tbc-video-export.exe -s 50 -l 1500 --audio-track HiFi_24-bit_48khz.flac --audio-track Linear_24-bit_48khz.flac Input.tbc
 
 
 ## VBI (Vertical Blanking Interval) Data Recovery
@@ -491,8 +496,14 @@ Software decoding provides the full signal frame, recovery software can be used 
 
 ### Generate an video output with the top VBI area:
 
+Linux & MacOS:
 
-    python3 tbc-video-export.py --vbi 
+    python3 tbc-video-export.py --vbi input.tbc
+
+
+Windows:
+
+    tbc-video-export.exe --vbi input.tbc
 
 <img src="https://github.com/oyvindln/vhs-decode/wiki/assets/images/Post-Processing/Jennings-With-VBI.png" width="600" height="">
 
@@ -508,9 +519,9 @@ The list below is a short list for common/daily usage but does not cover all the
 ## Sample Rate Comamnds
 
 
-By default, this is set to 40 MHz (the sample rate used internally and by the Domesday Duplicator) at 16 bits.
+By default, this is set to 40 Mhz (40msps) (the sample rate used internally and by the Domesday Duplicator) at 16 bits.
 
-The decoder is 8/16 bit agnostic so as long as sample rate is defined, it will decode it.
+The decoder is 8/16 bit agnostic so as long as sample rate is defined, it will decode it same for 10-bit packed captures and if its FLAC compressed.
 
 `-f`  Adjusts sampling frequency in integer units.
 
@@ -534,7 +545,7 @@ Example's `-f 280000hz` or `-f 28mhz` or `-f 8fsc`
 ## Colour System Commands
 
 
-Changes the colour or TV system to NTSC, PAL, PAL-M, NTSC-J, or [MESECAM](https://en.wikipedia.org/wiki/SECAM#MESECAM_(home_recording)) respectively.
+Changes the colour or TV system to NTSC, PAL, PAL-M, NTSC-J, or [MESECAM](https://github.com/oyvindln/vhs-decode/wiki/Decoding-SECAM-&-MESECAM) respectively.
 Please note that, as of this writing, support for PAL-M is **experimental**.
 
 `-n` = NTSC
@@ -545,7 +556,7 @@ Please note that, as of this writing, support for PAL-M is **experimental**.
 
 `--NTSCJ` = NTSC-J
 
-`--MESECAM` = MESECAM
+`--MESECAM` = MESECAM (requires extra GNUradio script for decoding colour currently)
 
 
 # [Time & Location Control](https://github.com/oyvindln/vhs-decode/wiki/Command-List#time--location-control)
@@ -594,13 +605,15 @@ Useful to recover decoding after a crash, or for limiting process time by produc
 
 .flac/.cvbs/.vhs/.svhs/.betacam/.betamax/.video8/.hi8 (FLAC-compressed captures, can be either 8-bit or 16-bit).
 
+If using custum extentions include, tv system, bit depth, and samplerate inside the file name so its clear for archival and presentation.
+
 
 ## Output file formats:
 
 
-Unlike CVBS-Decode & LD-Decode, VHS-Decode does not output its timebase-corrected frames as a single .tbc file for colour-under formats.
+Unlike CVBS-Decode & LD-Decode, VHS-Decode does not output its timebase-corrected frames as a single Composite `.tbc` file for colour-under formats, but does for composite modualted ones such as SMPTE-C.
 
-Both the luminance and chrominance channels are separate data files, essentially a digital "S-Video", additionally useful for troubleshooting. Descriptor/log files are generated so you end up with 4 files with the following naming:
+Both the luminance and chrominance channels are separate data files, essentially digital "S-Video", additionally useful for troubleshooting. Descriptor/log files are generated so you end up with 4 files with the following naming:
 
 `filename.tbc`        - Luminance (Y) Image Data (Combined Y/C for CVBS)
 
