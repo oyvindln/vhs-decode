@@ -218,7 +218,7 @@ def refine_linelocs_hsync(field, np.ndarray linebad, double hsync_threshold):
     cdef float sample_rate_mhz = rf.freq
     cdef bint is_pal = rf.system == "PAL"
     cdef bint disable_right_hsync = rf.options.disable_right_hsync
-    cdef double zc_threshold = rf.iretohz(rf.SysParams["vsync_ire"] / 2)
+    cdef double zc_threshold = hsync_threshold #rf.iretohz(rf.SysParams["vsync_ire"] / 2)
     cdef double ire_30 = rf.iretohz(30)
     cdef double ire_n_55 = rf.iretohz(-55)
     cdef double ire_110 = rf.iretohz(110)

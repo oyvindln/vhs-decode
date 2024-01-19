@@ -591,6 +591,7 @@ class VHSRFDecode(ldd.RFDecode):
                 "color_under",
                 "chroma_deemphasis_filter",
                 "skip_hsync_refine",
+                "hsync_refine_use_threshold",
                 "export_raw_tbc",
             ],
         )(
@@ -616,6 +617,9 @@ class VHSRFDecode(ldd.RFDecode):
             is_color_under,
             tape_format == "VIDEO8" or tape_format == "HI8",
             rf_options.get("skip_hsync_refine", False),
+            # hsync_refine_use_threshold - use detected level for hsync refine
+            # TODO: This should be used for everything eventually but needs proper testing
+            tape_format == "BETAMAX" or tape_format == "BETAMAX_HIFI",
             export_raw_tbc,
         )
 
@@ -896,7 +900,6 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         if self._use_fsc_notch_filter:
-            print("using notch!")
             self.Filters["fsc_notch"] = sps.iirnotch(
                 self.sys_params["fsc_mhz"] / self.freq_half, 2
             )

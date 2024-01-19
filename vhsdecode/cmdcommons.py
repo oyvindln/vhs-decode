@@ -163,7 +163,7 @@ def common_parser_inner(parser, use_gui=False, default_threads=4):
         dest="chroma_trap",
         action="store_true",
         default=False,
-        help="Enable filter to reduce chroma interference on luma.",
+        help="Enable filter that can help reduce some forms of chroma interference on luma. This will soften the image and have a noticeable impact on decoding speed.",
     )
     extra_filtering_group.add_argument(
         "--sl",
@@ -172,7 +172,7 @@ def common_parser_inner(parser, use_gui=False, default_threads=4):
         metavar="sharpness",
         type=int,
         default=0,
-        help="Sharpness level (0~100)",
+        help="Enable a crude sharpness filter - Sharpness level (0~100)",
     )
     extra_filtering_group.add_argument(
         "--notch",
