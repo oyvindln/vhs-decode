@@ -117,7 +117,11 @@ def getpulses_override(field):
     """
 
     if field.rf.auto_sync:
-        sync_level, blank_level = find_sync_levels(field)
+        if "agc_blank_level" in field.rf.DecoderParams:
+            sync_level = field.rf.DecoderParams["agc_sync_level"]
+            blank_level = field.rf.DecoderParams["agc_blank_level"]
+        else:
+            sync_level, blank_level = find_sync_levels(field)
 
         if sync_level is not None and blank_level is not None:
             field.rf.DecoderParams["ire0"] = blank_level
@@ -156,7 +160,7 @@ def getpulses_override(field):
     # pass one using standard levels
 
     # pulse_hz range:  vsync_ire - 10, maximum is the 50% crossing point to sync
-    pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 10)
+    pulse_hz_min = field.rf.iretohz(field.rf.SysParams["vsync_ire"] - 15)
     pulse_hz_max = field.rf.iretohz(field.rf.SysParams["vsync_ire"] / 2)
 
     pulses = lddu.findpulses(
@@ -233,6 +237,10 @@ def hz_to_output_override(field,input):
     for i in range(0, field.outlinecount):
         blank_levels[i] = np.median(input[i*field.outlinelen+96:i*field.outlinelen+164])
         sync_levels[i] = np.median(input[i*field.outlinelen+12:i*field.outlinelen+72])
+
+    field.rf.DecoderParams["agc_blank_level"] = np.median(blank_levels[(field.outlinecount//3)*2:])
+    field.rf.DecoderParams["agc_sync_level"] = np.median(sync_levels[(field.outlinecount//3)*2:])
+    
 
     reduced = input
 
