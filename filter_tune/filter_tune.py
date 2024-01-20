@@ -172,7 +172,7 @@ def _gen_sub_emphasis_params_from_sliders(format_params, filter_params):
 class FilterPlot:
     sub_emphasis_reference = {
         "SVHS": {
-            "levels": [0, -10, -20, 30],
+            "levels": [0, -10, -20, -30],
             "x": [200000, 500000, 1000000, 2000000, 3000000, 5000000],
             "y": [[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
                   [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
