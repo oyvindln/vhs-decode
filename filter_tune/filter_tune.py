@@ -30,10 +30,12 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QSplitter,
     QSizePolicy,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 from PyQt5.QtGui import (
     QBrush,
@@ -168,6 +170,17 @@ def _gen_sub_emphasis_params_from_sliders(format_params, filter_params):
 
 
 class FilterPlot:
+    sub_emphasis_reference = {
+        "SVHS": {
+            "levels": [0, -10, -20, 30],
+            "x": [200000, 500000, 1000000, 2000000, 3000000, 5000000],
+            "y": [[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
+                  [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
+                  [0.65, -1.09, -2.86, -4.16, -4.60, -4.43],
+                  [0.49, -2.35, -5.30, -7.14, -7.64, -7.34]]
+        }
+    }
+
     def __init__(self, filters, filter_params, format_params, layout, parent):
         self._canvas = None
         self._canvas = FigureCanvas(Figure(figsize=(5, 3)))
@@ -182,7 +195,7 @@ class FilterPlot:
 
         self.update(filters, filter_params, format_params)
 
-    def update(self, filters, filter_params, format_params):
+    def update(self, filters, filter_params, format_params, system = ""):
         # self._static_ax = self._canvas.figure.subplots()
         # t = np.linspace(0, 10, 501)
         # self._static_ax.plot(t, np.tan(t), ".")
@@ -190,14 +203,26 @@ class FilterPlot:
         sub_emphasis_params = _gen_sub_emphasis_params_from_sliders(
             format_params, filter_params
         )
-        plot_filters(
-            filters.filters,
-            filters.block_len,
-            format_params.fs,
-            self._canvas.figure,
-            self.sub_emph_plotter,
-            sub_emphasis_params,
-        )
+        if system in self.sub_emphasis_reference:
+            plot_filters(
+                filters.filters,
+                filters.block_len,
+                format_params.fs,
+                self._canvas.figure,
+                self.sub_emph_plotter,
+                sub_emphasis_params,
+                self.sub_emphasis_reference[system]["levels"],
+                self.sub_emphasis_reference[system]
+            )
+        else:
+            plot_filters(
+                filters.filters,
+                filters.block_len,
+                format_params.fs,
+                self._canvas.figure,
+                self.sub_emph_plotter,
+                sub_emphasis_params,
+            )
         self._canvas.draw()
 
 
@@ -328,9 +353,17 @@ class VHStune(QDialog):
         self.filters_area.setWidget(self.filterGroupBox)
         left_layout.addWidget(self.filters_area)
         main_layout.addLayout(left_layout, 0, 0)
-        main_layout.addLayout(self._right_layout, 0, 1)
+        img_plot_splitter = QSplitter(Qt.Horizontal)
+        img_widget = QWidget()
+        plot_widget = QWidget()
+        #main_layout.addLayout(self._right_layout, 0, 1)
+        img_widget.setLayout(self._right_layout)
         self.plot_layout = QGridLayout()
-        main_layout.addLayout(self.plot_layout, 0, 2)
+        #main_layout.addLayout(self.plot_layout, 0, 2)
+        plot_widget.setLayout(self.plot_layout)
+        img_plot_splitter.addWidget(img_widget)
+        img_plot_splitter.addWidget(plot_widget)
+        main_layout.addWidget(img_plot_splitter, 0, 1)
         main_layout.setRowStretch(0, 1)
         # main_layout.setRowStretch(1, 1)
         main_layout.setColumnStretch(1, 1)
@@ -735,7 +768,7 @@ class VHStune(QDialog):
 
     def update_filter_plot(self):
         self._filter_plot.update(
-            self._deemphasis, self.filter_params, self._format_params
+            self._deemphasis, self.filter_params, self._format_params, self.systemComboBox.currentText()
         )
 
     def calcNLSVHSFilter(self):
