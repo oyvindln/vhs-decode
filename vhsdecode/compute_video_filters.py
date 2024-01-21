@@ -1,9 +1,10 @@
+import math
 import scipy.signal as sps
 from collections import namedtuple
 
 
 from vhsdecode.utils import filtfft
-from vhsdecode.addons.FMdeemph import FMDeEmphasisB
+from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_low_shelf
 
 NONLINEAR_AMP_LPF_FREQ_DEFAULT = 700000
 NONLINEAR_STATIC_FACTOR_DEFAULT = None
@@ -47,6 +48,28 @@ def gen_video_main_deemp_fft(gain, mid, Q, freq_hz, block_len):
 
     filter_deemp = filtfft((db, da), block_len, whole=False)
     return filter_deemp
+
+
+def gen_video_linear_subdeemp_fft_params(rf_params, freq_hz, block_len):
+    """Generate real-value fft main video deemphasis filter from parameters"""
+    if rf_params.get("use_linear_sub_deemphasis", False) is True:
+        return gen_video_linear_subdeemp_fft(
+            rf_params["subdeemph_linear_gain_factor"],
+            rf_params["subdeemph_linear_mid"],
+            rf_params["subdeemph_linear_slope"],
+            freq_hz,
+            block_len,
+        )
+    else:
+        return None
+
+
+def gen_video_linear_subdeemp_fft(gain_factor, mid, slope, freq_hz, block_len):
+    """Generate real-value fft main video deemphasis filter from parameters"""
+    db, da = gen_low_shelf(mid, 20*math.log10(gain_factor), 1/math.sqrt((math.sqrt(gain_factor) + 1/math.sqrt(gain_factor))*(1/slope - 1) + 2), freq_hz)
+
+    filter_deemp = filtfft((db, da), block_len, whole=False)
+    return filter_deemp * (1/gain_factor)
 
 
 def gen_video_lpf(corner_freq, order, nyquist_hz, block_len):

@@ -32,6 +32,7 @@ from vhsdecode.load_params_json import override_params
 from vhsdecode.nonlinear_filter import sub_deemphasis
 from vhsdecode.compute_video_filters import (
     gen_video_main_deemp_fft_params,
+    gen_video_linear_subdeemp_fft_params,
     gen_video_lpf_params,
     gen_nonlinear_bandpass_params,
     gen_nonlinear_amplitude_lpf,
@@ -899,6 +900,8 @@ class VHSRFDecode(ldd.RFDecode):
             self.freq_hz_half,
         )
 
+        self.Filters["subdeemph_linear"] = gen_video_linear_subdeemp_fft_params(DP, self.freq_hz, self.blocklen)
+
         if self._use_fsc_notch_filter:
             self.Filters["fsc_notch"] = sps.iirnotch(
                 self.sys_params["fsc_mhz"] / self.freq_half, 2
@@ -907,6 +910,10 @@ class VHSRFDecode(ldd.RFDecode):
         self.Filters["FDeemp"] = filter_deemp
 
         self.Filters["FVideo"] = filter_deemp * filter_video_lpf
+        
+        if self.Filters["subdeemph_linear"] is not None:
+            self.Filters["FVideo"] *= self.Filters["subdeemph_linear"]
+        
         if self.options.double_lpf:
             # Double up the lpf to possibly closer emulate
             # lpf in vcr. May add to other formats too later or

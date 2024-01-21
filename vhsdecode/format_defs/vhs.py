@@ -58,8 +58,18 @@ def fill_rfparams_svhs_shared(rfparams):
     # adjusting the corner frequency here makes it look a bit closer
     # than just using the values for VHS, it needs to be properly
     # sorted though.
-    rfparams["deemph_mid"] = 350000
-    #rfparams["deemph_gain"] = 14
+    rfparams["deemph_mid"] = 440000
+    rfparams["deemph_q"] = 0.5
+
+    rfparams["nonlinear_highpass_freq"] = 320000
+    rfparams["nonlinear_exp_scaling"] = 0.26
+    rfparams["nonlinear_scaling_1"] = 1.2
+    rfparams["use_sub_deemphasis"] = True
+
+    rfparams["use_linear_sub_deemphasis"] = True
+    rfparams["subdeemph_linear_mid"] = 1000000
+    rfparams["subdeemph_linear_gain_factor"] = 1.25
+    rfparams["subdeemph_linear_slope"] = 0.5
 
 
 def get_rfparams_pal_vhs(rfparams_pal):
@@ -155,7 +165,7 @@ def get_rfparams_pal_svhs(sysparams_pal):
 
     fill_rfparams_svhs_shared(RFParams_PAL_SVHS)
 
-    RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
+    #RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -250000
 

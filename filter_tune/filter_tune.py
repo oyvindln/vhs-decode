@@ -2,6 +2,7 @@
 
 # released under GNU GPL v3 or later
 
+import copy
 import math
 import numpy as np
 import numpy.fft as npfft
@@ -173,11 +174,11 @@ class FilterPlot:
     sub_emphasis_reference = {
         "SVHS": {
             "levels": [0, -10, -20, -30],
-            "x": [200000, 500000, 1000000, 2000000, 3000000, 5000000],
-            "y": [[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
-                  [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
-                  [0.65, -1.09, -2.86, -4.16, -4.60, -4.43],
-                  [0.49, -2.35, -5.30, -7.14, -7.64, -7.34]]
+            "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
+            "y": np.array([[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
+                           [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
+                           [0.65, -1.09, -2.86, -4.16, -4.60, -4.43],
+                           [0.49, -2.35, -5.30, -7.14, -7.64, -7.34]])
         }
     }
 
@@ -195,7 +196,7 @@ class FilterPlot:
 
         self.update(filters, filter_params, format_params)
 
-    def update(self, filters, filter_params, format_params, system = ""):
+    def update(self, filters, filter_params, format_params, system = "", ref_adjust = 0.0):
         # self._static_ax = self._canvas.figure.subplots()
         # t = np.linspace(0, 10, 501)
         # self._static_ax.plot(t, np.tan(t), ".")
@@ -204,6 +205,8 @@ class FilterPlot:
             format_params, filter_params
         )
         if system in self.sub_emphasis_reference:
+            sub_ref = copy.deepcopy(self.sub_emphasis_reference[system])
+            sub_ref["y"] += ref_adjust
             plot_filters(
                 filters.filters,
                 filters.block_len,
@@ -211,8 +214,8 @@ class FilterPlot:
                 self._canvas.figure,
                 self.sub_emph_plotter,
                 sub_emphasis_params,
-                self.sub_emphasis_reference[system]["levels"],
-                self.sub_emphasis_reference[system]
+                sub_ref["levels"],
+                sub_ref
             )
         else:
             plot_filters(
@@ -300,6 +303,18 @@ class DeemphasisFilters:
             )
             * lpf
         )
+        if filter_params["subdeemph_linear_enable"]["value"] is True:
+            self._filters["subdeemph_linear"] = (
+                compute_video_filters.gen_video_linear_subdeemp_fft(
+                    filter_params["subdeemph_linear_gain_factor"]["value"],
+                    filter_params["subdeemph_linear_mid"]["value"],
+                    filter_params["subdeemph_linear_slope"]["value"],
+                    fs,
+                    block_len,
+                )
+            )
+        else:
+            self._filters["subdeemph_linear"] = None
 
     def update_nonlinear_deemphasis(self, filter_params, fs, block_len):
         self.filters["NLHighPassF"] = compute_video_filters.gen_nonlinear_bandpass(
@@ -414,7 +429,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -427,7 +441,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -440,7 +453,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -453,7 +465,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -466,7 +477,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -517,7 +527,7 @@ class VHStune(QDialog):
                 "value": rf_params.get("nonlinear_scaling_1", 1.0),
                 "step": 0.05,
                 "min": 0.05,
-                "max": 2.0,
+                "max": 5.0,
                 "desc": "Non-linear linear scale ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
@@ -529,7 +539,7 @@ class VHStune(QDialog):
                 "value": rf_params.get("nonlinear_scaling_2", 1.0),
                 "step": 0.01,
                 "min": 0.01,
-                "max": 2.0,
+                "max": 5.0,
                 "desc": "Non-linear linear scale B ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
@@ -576,67 +586,51 @@ class VHStune(QDialog):
                     self.drawImage,
                 ],
             },
-            "svhs_deemph_enable": {
-                "value": False,
+            "subdeemph_linear_enable": {
+                "value": rf_params.get("use_linear_sub_deemphasis", False),
                 "step": None,
-                "desc": "Enable S-VHS non-linear deemphasis",
-                "onchange": [self.drawImage],
+                "desc": "Enable linear sub-deemphasis",
+                "onchange": [
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage
+                ],
             },
-            "svhs_crossover_freq": {
-                "value": 400000,
+            "subdeemph_linear_mid": {
+                "value": rf_params.get("subdeemph_linear_mid", 400000),
                 "step": 5000,
                 "min": 10000,
-                "max": 4000000,
-                "desc": "Crossover freq ({} Hz):",
+                "max": 2000000,
+                "desc": "Lin. sub-deemphasis mid freq ({:.0f} Hz):",
                 "onchange": [
-                    self.calcNLSVHSFilter,
-                    self.applyNLSVHSFilter,
-                    self.drawImage,
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage
                 ],
             },
-            "svhs_lowpass_freq": {
-                "value": 7000000,
-                "step": 10000,
-                "min": 1000000,
-                "max": 8000000,
-                "desc": "Lowpass freq ({} Hz):",
+            "subdeemph_linear_gain_factor": {
+                "value": rf_params.get("subdeemph_linear_gain_factor", 1.25),
+                "step": 0.01,
+                "min": 1.0,
+                "max": 2.0,
+                "desc": "Lin. sub-deemphasis gain factor ({:.2f}):",
                 "onchange": [
-                    self.calcNLSVHSFilter,
-                    self.applyNLSVHSFilter,
-                    self.drawImage,
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage
                 ],
             },
-            "svhs_lf_in_level": {
-                "value": 1.0,
-                "step": 0.01,
-                "min": 0.5,
+            "subdeemph_linear_slope": {
+                "value": rf_params.get("subdeemph_linear_slope", 0.5),
+                "step": 0.05,
+                "min": 0.1,
                 "max": 2.0,
-                "desc": "LF input level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_hf_in_level": {
-                "value": 1.0,
-                "step": 0.01,
-                "min": 0.5,
-                "max": 2.0,
-                "desc": "HF input level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_lf_out_level": {
-                "value": 0.815,
-                "step": 0.001,
-                "min": 0.7,
-                "max": 1.0,
-                "desc": "LF output level ({:.3f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_hf_out_level": {
-                "value": 0.66,
-                "step": 0.01,
-                "min": 0.25,
-                "max": 2.0,
-                "desc": "HF output level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
+                "desc": "Lin. sub-deemphasis slope ({:.2f}):",
+                "onchange": [
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage
+                ],
             },
         }
 
@@ -644,7 +638,6 @@ class VHStune(QDialog):
         self._deemphasis.update_filters(
             self.filter_params, self._format_params.fs, BLOCK_LEN
         )
-        self.calcNLSVHSFilter()
 
     def updateFrameNr(self, s):
         if s == 1:
@@ -698,7 +691,6 @@ class VHStune(QDialog):
         else:
             self.loadImage()
             self.apply_both_deemph_filters()
-            self.applyNLSVHSFilter()
             self.drawImage()
             self.update_filter_plot()
 
@@ -767,63 +759,13 @@ class VHStune(QDialog):
         self.update_filter_plot()
 
     def update_filter_plot(self):
+        if self.filter_params["subdeemph_linear_enable"]["value"] is True:
+            ref_add = -20*math.log10(self.filter_params["subdeemph_linear_gain_factor"]["value"])
+        else:
+            ref_add = 0
         self._filter_plot.update(
-            self._deemphasis, self.filter_params, self._format_params, self.systemComboBox.currentText()
+            self._deemphasis, self.filter_params, self._format_params, self.systemComboBox.currentText(), ref_add
         )
-
-    def calcNLSVHSFilter(self):
-        self.NLSVHSLPFilter = genLowpass(
-            self.filter_params["svhs_crossover_freq"]["value"], self._format_params.fs
-        )
-        self.NLSVHSHPFilter = genHighpass(
-            self.filter_params["svhs_crossover_freq"]["value"], self._format_params.fs
-        )
-        self.NLSVHSLPBFilter = genLowpass(
-            self.filter_params["svhs_lowpass_freq"]["value"], self._format_params.fs
-        )
-        # self.NLSVHSACFilter = genHighpass(200000)
-
-    def applyNLSVHSFilter(self):
-        self.ProcessedSVHSFrame = []
-        deviation = self._format_params.sub_emphasis_params.deviation / 2.0
-
-        for b in self.fftData:
-            hf_part = npfft.irfft(
-                b
-                * self._deemphasis.filters["FVideo"]
-                * self.NLSVHSHPFilter
-                * self.NLSVHSLPBFilter
-            )
-            lf_part = npfft.irfft(
-                b * self._deemphasis.filters["FVideo"] * self.NLSVHSLPFilter
-            )
-            # dc_part = npfft.irfft(b * self._deemphasis.filters['FVideo'] * self.NLSVHSACFilter)
-            hf_amp = (
-                abs(signal.hilbert(hf_part))
-                / (deviation)
-                * self.filter_params["svhs_hf_in_level"]["value"]
-            )
-            lf_amp = (
-                abs(signal.hilbert(lf_part))
-                / (deviation)
-                * self.filter_params["svhs_lf_in_level"]["value"]
-            )
-            hf_amp_scaled = 1.0 / (
-                0.26007715 * np.exp(-0.4152129 * (np.log(hf_amp) - 1.27878766))
-                + 0.55291881
-            )
-            lf_amp_scaled = 1.0 / (
-                0.15124517 * np.exp(-3.41855724 * lf_amp) + 0.81349599
-            )
-            #  * lf_amp_scaled *
-            self.ProcessedSVHSFrame.append(
-                hf_part
-                * hf_amp_scaled
-                * self.filter_params["svhs_hf_out_level"]["value"]
-                + lf_part
-                * lf_amp_scaled
-                * self.filter_params["svhs_lf_out_level"]["value"]
-            )
 
     def apply_both_deemph_filters(self):
         self.applyDeemphFilter()
@@ -860,10 +802,7 @@ class VHStune(QDialog):
     def drawImage(self):
         outImage = None
         for i in range(len(self.ProcessedFrame)):
-            if self.filter_params["svhs_deemph_enable"]["value"] is True:
-                img = self.ProcessedSVHSFrame[i].copy()
-            else:
-                img = self.ProcessedFrame[i].copy()
+            img = self.ProcessedFrame[i].copy()
             if self.filter_params["nonlinear_deemph_enable"]["value"] is True:
                 if self.filter_params["nonlinear_amplitude_showonly"]["value"] is True:
                     img.fill(

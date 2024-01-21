@@ -57,6 +57,11 @@ def sub_deemphasis_inner(
     Returns:
         _type_: video signal with filtering applied
     """
+    # this filter is applied with all other linear filters. To make plot of filter-tune work it needs to be applied here
+    #if filters["subdeemph_linear"] is not None :
+    #    out_video_fft = out_video_fft * filters["subdeemph_linear"]
+    #    out_video = npfft.irfft(out_video_fft).real
+
     hf_part = npfft.irfft(out_video_fft * filters["NLHighPassF"])
     # hf_part = sps.filtfilt(filters["NLHighPassFB"][0], filters["NLHighPassFB"][1], out_video)
 
