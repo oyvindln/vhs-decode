@@ -259,6 +259,10 @@ def tau_as_freq(tau):
     return 1 / (2 * pi * tau)
 
 
+def discard_stereo(audioL, audioR, discard_size):
+    return audioL[discard_size:], audioR[discard_size:]
+
+
 class NoiseReduction:
 
     def __init__(self, notch_freq: float,
@@ -381,7 +385,7 @@ class NoiseReduction:
     def stereo(self, audioL, audioR):
         expandL, expandR = self.lopassCompand(audioL, channel=0), self.lopassCompand(audioR, channel=1)
         nrL, nrR = self.noise_reduction_stereo(expandL, expandR)
-        finalL, finalR = nrL[self.discard_size:], nrR[self.discard_size:]
+        finalL, finalR = discard_stereo(nrL, nrR, self.discard_size)
         return list(map(list, zip(finalL, finalR)))
 
     def lopassCompand(self, audio, channel=0):

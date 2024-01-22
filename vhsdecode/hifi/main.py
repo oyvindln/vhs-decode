@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import cpu_count
 from datetime import datetime, timedelta
 import os
 import sys
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import soundfile as sf
+from PyQt5.QtWidgets import QApplication
+import sounddevice as sd
 from vhsdecode.addons.chromasep import samplerate_resample
+from vhsdecode.hifi.HifiUi import ui_parameters_to_decode_options, decode_options_to_ui_parameters, \
+    FileIODialogUI, FileOutputDialogUI
 
 from vhsdecode.cmdcommons import (
     common_parser_cli,
@@ -16,7 +21,7 @@ from vhsdecode.cmdcommons import (
     select_system,
     get_basics,
 )
-from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction, DEFAULT_NR_GAIN_
+from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction, DEFAULT_NR_GAIN_, discard_stereo
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
 import io
 
@@ -99,6 +104,13 @@ parser.add_argument(
     help="Opens ZMQ REP pipe to gnuradio at port 5555",
 )
 
+parser.add_argument(
+    "--ui",
+    dest="UI",
+    action="store_true",
+    default=False,
+    help="Opens hifi-ui",
+)
 
 class LDFReaderInputStream(io.RawIOBase):
     def __init__(self, buffer):
@@ -317,6 +329,7 @@ def prepare_stereo(l: np.array, r: np.array, noise_reduction: NoiseReduction, de
             gain_adjust(r, decode_options["gain"])
         )
     else:
+        l, r = discard_stereo(l, r, noise_reduction.discard_size)
         stereo = list(map(
             list,
             zip(gain_adjust(l, decode_options["gain"]),
@@ -340,7 +353,39 @@ def post_process(audioL: np.array, audioR: np.array, audio_rate: int, decode_opt
     return left_audio, right_audio
 
 
-def decode(decoder, input_file, decode_options, output_file):
+class AppWindow:
+    def __init__(self, argv, decode_options):
+        self._app, self._window = self.open_ui(argv, decode_options)
+
+    def __del__(self):
+        self._window.close()
+        self._app.quit()
+
+    def open_ui(self, argv, decode_options):
+        app = QApplication(argv)
+        print("Opening hifi-ui...")
+        if decode_options["input_file"] == "-":
+            window = FileOutputDialogUI(decode_options_to_ui_parameters(decode_options))
+        else:
+            window = FileIODialogUI(decode_options_to_ui_parameters(decode_options))
+        window.show()
+        return app, window
+
+    def run(self):
+        self._app.exec_()
+
+    @property
+    def window(self):
+        return self._window
+
+    @property
+    def app(self):
+        return self._app
+
+
+def decode(decoder, decode_options, ui_t: Optional[AppWindow] = None):
+    input_file = decode_options["input_file"]
+    output_file = decode_options["output_file"]
     start_time = datetime.now()
     noise_reduction = NoiseReduction(
         decoder.notchFreq,
@@ -348,6 +393,7 @@ def decode(decoder, input_file, decode_options, output_file):
         decoder.audioDiscard,
         audio_rate=decode_options["audio_rate"]
     )
+    stereo_play_buffer = list()
 
     with as_outputfile(output_file, decode_options["audio_rate"]) as w:
         with as_soundfile(input_file) as f:
@@ -370,8 +416,22 @@ def decode(decoder, input_file, decode_options, output_file):
                 log_decode(start_time, f.tell(), decode_options)
                 try:
                     w.write(stereo)
+                    if decode_options["preview"]:
+                        if len(stereo_play_buffer) > decode_options["audio_rate"] * 5:
+                            sd.wait()
+                            sd.play(stereo_play_buffer, decode_options["audio_rate"], blocking=False)
+                            stereo_play_buffer = list()
+                        stereo_play_buffer += stereo
                 except ValueError:
                     pass
+                if ui_t is not None:
+                    ui_t.app.processEvents()
+                    if ui_t.window.transport_state == 0:
+                        break
+                    elif ui_t.window.transport_state == 2:
+                        while ui_t.window.transport_state == 2:
+                            ui_t.app.processEvents()
+                            time.sleep(0.01)
 
         elapsed_time = datetime.now() - start_time
         dt_string = elapsed_time.total_seconds()
@@ -379,10 +439,10 @@ def decode(decoder, input_file, decode_options, output_file):
 
 
 def decode_parallel(decoders: List[HiFiDecode],
-                    input_file: str,
-                    output_file: str,
                     decode_options: dict,
-                    threads: int = 8):
+                    threads: int = 8, ui_t: Optional[AppWindow] = None):
+    input_file = decode_options["input_file"]
+    output_file = decode_options["output_file"]
     start_time = datetime.now()
     block_size = decoders[0].blockSize
     read_overlap = decoders[0].readOverlap
@@ -395,6 +455,7 @@ def decode_parallel(decoders: List[HiFiDecode],
     futures_queue = list()
     executor = ThreadPoolExecutor(threads)
     current_block = 0
+    stereo_play_buffer = list()
     with as_outputfile(output_file, decode_options["audio_rate"]) as w:
         with as_soundfile(input_file) as f:
             progressB = TimeProgressBar(f.frames, f.frames)
@@ -420,8 +481,23 @@ def decode_parallel(decoders: List[HiFiDecode],
                     log_decode(start_time, f.tell(), decode_options)
                     try:
                         w.write(stereo)
+                        if decode_options["preview"]:
+                            if len(stereo_play_buffer) > decode_options["audio_rate"] * 5:
+                                sd.wait()
+                                sd.play(stereo_play_buffer, decode_options["audio_rate"], blocking=False)
+                                stereo_play_buffer = list()
+                            stereo_play_buffer += stereo
                     except ValueError:
                         pass
+
+                if ui_t is not None:
+                    ui_t.app.processEvents()
+                    if ui_t.window.transport_state == 0:
+                        break
+                    elif ui_t.window.transport_state == 2:
+                        while ui_t.window.transport_state == 2:
+                            ui_t.app.processEvents()
+                            time.sleep(0.01)
 
             print("Emptying the decode queue ...")
             while len(futures_queue) > 0:
@@ -471,41 +547,10 @@ def log_bias(decoder: HiFiDecode):
         )
 
 
-def main() -> int:
-    args = parser.parse_args()
-
-    system = select_system(args)
-    sample_freq = select_sample_freq(args)
-    decode_options = {
-        "input_rate": sample_freq * 1e6,
-        "standard": "p" if system == "PAL" else "n",
-        "format": "vhs" if not args.H8 else "h8",
-        "preview": args.preview,
-        "original": args.original,
-        "noise_reduction": args.noise_reduction == "on" if not args.preview else False,
-        "auto_fine_tune": args.auto_fine_tune == "on" if not args.preview else False,
-        "nr_side_gain": args.NR_side_gain,
-        "grc": args.GRC,
-        "audio_rate": args.rate,
-        "gain": args.gain,
-    }
-
-    filename, outname, _, _ = get_basics(args)
-    if not args.overwrite:
-        if os.path.isfile(outname):
-            print(
-                "Existing decode files found, remove them or run command with --overwrite"
-            )
-            print("\t", outname)
-            return 1
-
-    print("Initializing ...")
-    if decode_options["format"] == "vhs":
-        print("PAL VHS format selected") if system == "PAL" else print(
-            "NTSC VHS format selected"
-        )
-    else:
-        print("NTSC Hi8 format selected")
+def run_decoder(args, decode_options, ui_t: Optional[AppWindow] = None):
+    print("Starting decode...")
+    sample_freq = decode_options["input_rate"]
+    filename = decode_options["input_file"]
 
     if sample_freq is not None:
         decoder = HiFiDecode(decode_options)
@@ -520,15 +565,80 @@ def main() -> int:
                 decoders.append(HiFiDecode(decode_options))
                 decoders[i].updateAFE(LCRef, RCRef)
             decode_parallel(
-                decoders, filename, outname, decode_options, threads=args.threads
+                decoders, decode_options, threads=args.threads, ui_t=ui_t
             )
         else:
-            decode(decoder, filename, decode_options, outname)
+            decode(decoder, decode_options, ui_t=ui_t)
         print('Decode finished successfully')
         return 0
     else:
         print("No sample rate specified")
         return 0
+
+
+def main() -> int:
+    args = parser.parse_args()
+
+    system = select_system(args)
+    sample_freq = select_sample_freq(args)
+
+    filename, outname, _, _ = get_basics(args)
+    if not args.UI and not args.overwrite:
+        if os.path.isfile(outname):
+            print(
+                "Existing decode files found, remove them or run command with --overwrite"
+            )
+            print("\t", outname)
+            return 1
+
+    print("Initializing ...")
+
+    decode_options = {
+        "input_rate": sample_freq * 1e6,
+        "standard": "p" if system == "PAL" else "n",
+        "format": "vhs" if not args.H8 else "h8",
+        "preview": args.preview,
+        "original": args.original,
+        "noise_reduction": args.noise_reduction == "on" if not args.preview else False,
+        "auto_fine_tune": args.auto_fine_tune == "on" if not args.preview else False,
+        "nr_side_gain": args.NR_side_gain,
+        "grc": args.GRC,
+        "audio_rate": args.rate,
+        "gain": args.gain,
+        "input_file": filename,
+        "output_file": outname,
+    }
+
+    if decode_options["format"] == "vhs":
+        print("PAL VHS format selected") if system == "PAL" else print(
+            "NTSC VHS format selected"
+        )
+    else:
+        print("NTSC Hi8 format selected")
+
+    if args.UI:
+        ui_t = AppWindow(sys.argv, decode_options)
+        decoder_state = 0
+        try:
+            while ui_t.window.isVisible():
+                if ui_t.window.transport_state == 1:
+                    print("Starting decode...")
+                    options = ui_parameters_to_decode_options(ui_t.window.getValues())
+                    # change to output file directory
+                    if os.path.dirname(options["output_file"]) != '':
+                        os.chdir(os.path.dirname(options["output_file"]))
+                    decoder_state = run_decoder(args, options, ui_t=ui_t)
+                    ui_t.window.transport_state = 0
+                    ui_t.window.on_decode_finished()
+                ui_t.app.processEvents()
+                time.sleep(0.01)
+            ui_t.window.transport_state = 0
+        except (KeyboardInterrupt, RuntimeError):
+            pass
+
+        return decoder_state
+    else:
+        return run_decoder(args, decode_options)
 
 
 if __name__ == "__main__":
