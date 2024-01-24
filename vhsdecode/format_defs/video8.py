@@ -14,7 +14,7 @@ def fill_rfparams_video8_shared(rfparams):
     # Ideally we would calculate this based on tau and 'x' value
     # video8 uses same time constant as vhs, but lower 'x' value
     rfparams["deemph_mid"] = 273755.82
-    #rfparams["deemph_gain"] = 13.9794
+    # rfparams["deemph_gain"] = 13.9794
     rfparams["deemph_gain"] = 11.5794
     rfparams["deemph_q"] = 0.4613901
 
@@ -24,9 +24,10 @@ def fill_rfparams_video8_shared(rfparams):
     rfparams["nonlinear_highpass_freq"] = 198943.67
     rfparams["nonlinear_exp_scaling"] = 0.53
     rfparams["nonlinear_scaling_1"] = 0.73
-    #rfparams["nonlinear_scaling_2"] = 0.65
+    # rfparams["nonlinear_scaling_2"] = 0.65
     rfparams["nonlinear_highpass_limit_h"] = 5000
     rfparams["nonlinear_highpass_limit_l"] = -20000
+    rfparams["use_sub_deemphasis"] = True
 
     # Band-pass filter for Video rf.
     # TODO: Needs tweaking
@@ -76,7 +77,7 @@ def fill_rfparams_hi8_shared(rfparams):
     # Temporary video emphasis filter constants
     # Ideally we would calculate this based on tau and 'x' value, for now
     # it's eyeballed based on graph and output.
-    rfparams["deemph_mid"] = 550000 # TODO: Not correct, needs to be fixed properly
+    rfparams["deemph_mid"] = 550000  # TODO: Not correct, needs to be fixed properly
     rfparams["deemph_gain"] = 14
 
     # Parameters for high-pass filter used for non-linear deemphasis, these are
@@ -104,7 +105,7 @@ def fill_rfparams_hi8_shared(rfparams):
     rfparams["video_lpf_order"] = 1
 
     # Video Y FM de-emphasis
-    rfparams["deemph_tau"] = 0.47e-6 # From spec
+    rfparams["deemph_tau"] = 0.47e-6  # From spec
 
     # Filter to pull out high frequencies for high frequency boost
     # This should cover the area around reference white.
@@ -129,14 +130,14 @@ def fill_chroma_params_pal(rfparams):
     # PAL color under carrier is 46.875 fH
     rfparams["color_under_carrier"] = (625 * 25) * 46.875
     # Phase rotation applied (in 90 degree / Pi/2 radian steps) to chroma signal on each hsync for each track.
-    rfparams["chroma_rotation"] = [0,-1]
+    rfparams["chroma_rotation"] = [0, -1]
 
 
 def fill_chroma_params_ntsc(rfparams):
     # NTSC color under carrier is 47.25 fH
     rfparams["color_under_carrier"] = (525 * (30 / 1.001)) * 47.25
     # Phase rotation applied (in 90 degree / Pi/2 radian steps) to chroma signal on each hsync for each track.
-    rfparams["chroma_rotation"] = [0,2]
+    rfparams["chroma_rotation"] = [0, 2]
 
 
 def fill_sysparams_video8_shared(sysparams):

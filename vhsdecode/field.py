@@ -171,7 +171,9 @@ def _is_valid_seq(type_list, num_pulses):
     ]
 
 
-def get_line0_fallback(valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses):
+def get_line0_fallback(
+    valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses
+):
     """
     Try a more primitive way of locating line 0 if the normal approach fails.
     This doesn't actually fine line 0, rather it locates the approx position of the last vsync before vertical blanking
@@ -372,14 +374,16 @@ class FieldShared:
             if self.rf.options.export_raw_tbc:
                 return input.astype(np.single)
             else:
-                
                 return hz_to_output_array(
                     input,
-                    self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ (self.field_number % 2)],
+                    self.rf.DecoderParams["ire0"]
+                    + self.rf.DecoderParams["track_ire0_offset"][
+                        self.rf.track_phase ^ (self.field_number % 2)
+                    ],
                     self.rf.DecoderParams["hz_ire"],
                     self.rf.SysParams["outputZero"],
                     self.rf.DecoderParams["vsync_ire"],
-                    self.out_scale
+                    self.out_scale,
                 )
 
         # Not sure what situations will cause input to not be a ndarray.
@@ -388,7 +392,13 @@ class FieldShared:
             # Not sure if this will work.
             return np.single(input)
 
-        reduced = (input - self.rf.DecoderParams["ire0"] - self.rf.DecoderParams["track_ire0_offset"][self.rf.track_phase ^ (self.field_number % 2)]) / self.rf.DecoderParams["hz_ire"]
+        reduced = (
+            input
+            - self.rf.DecoderParams["ire0"]
+            - self.rf.DecoderParams["track_ire0_offset"][
+                self.rf.track_phase ^ (self.field_number % 2)
+            ]
+        ) / self.rf.DecoderParams["hz_ire"]
         reduced -= self.rf.DecoderParams["vsync_ire"]
 
         return np.uint16(
@@ -422,7 +432,7 @@ class FieldShared:
             self.data["video"]["demod_05"],
             self.lt_vsync,
             self.inlinelen,
-            self.rf.SysParams["numPulses"]
+            self.rf.SysParams["numPulses"],
         )
         # Not needed after this.
         del self.lt_vsync
@@ -731,9 +741,13 @@ class FieldShared:
 
     def refine_linelocs_hsync(self):
         if not self.rf.options.skip_hsync_refine:
-            return sync.refine_linelocs_hsync(
-                self, self.linebad, self.rf.resync.last_pulse_threshold
+            threshold = (
+                self.rf.resync.last_pulse_threshold
+                if self.rf.options.hsync_refine_use_threshold
+                else self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
             )
+
+            return sync.refine_linelocs_hsync(self, self.linebad, threshold)
         else:
             return self.linelocs1.copy()
 

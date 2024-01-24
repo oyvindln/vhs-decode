@@ -507,6 +507,10 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         self._chroma_trap = rf_options.get("chroma_trap", False)
+        # TODO: integrate this under chroma_trap later
+        self._use_fsc_notch_filter = (
+            tape_format == "BETAMAX" or tape_format == "BETAMAX_HIFI"
+        )
         track_phase = None if is_secam(system) else rf_options.get("track_phase", None)
         self._recheck_phase = rf_options.get("recheck_phase", False)
         high_boost = rf_options.get("high_boost", None)
@@ -578,7 +582,6 @@ class VHSRFDecode(ldd.RFDecode):
                 "nldeemp",
                 "subdeemp",
                 "disable_right_hsync",
-                "sync_clip",
                 "disable_dc_offset",
                 "double_lpf",
                 "fallback_vsync",
@@ -588,6 +591,7 @@ class VHSRFDecode(ldd.RFDecode):
                 "color_under",
                 "chroma_deemphasis_filter",
                 "skip_hsync_refine",
+                "hsync_refine_use_threshold",
                 "export_raw_tbc",
             ],
         )(
@@ -595,9 +599,10 @@ class VHSRFDecode(ldd.RFDecode):
             tape_format,
             rf_options.get("disable_comb", False) or is_secam(system),
             rf_options.get("nldeemp", False),
-            rf_options.get("subdeemp", False),
+            self.DecoderParams.get(
+                "use_sub_deemphasis", rf_options.get("subdeemp", False)
+            ),
             rf_options.get("disable_right_hsync", False),
-            rf_options.get("sync_clip", False),
             rf_options.get("disable_dc_offset", False),
             tape_format == "VHS" or tape_format == "VHSHQ",
             # Always use this if we are decoding TYPEC since it doesn't have normal vsync.
@@ -612,6 +617,9 @@ class VHSRFDecode(ldd.RFDecode):
             is_color_under,
             tape_format == "VIDEO8" or tape_format == "HI8",
             rf_options.get("skip_hsync_refine", False),
+            # hsync_refine_use_threshold - use detected level for hsync refine
+            # TODO: This should be used for everything eventually but needs proper testing
+            tape_format == "BETAMAX" or tape_format == "BETAMAX_HIFI",
             export_raw_tbc,
         )
 
@@ -891,10 +899,10 @@ class VHSRFDecode(ldd.RFDecode):
             self.freq_hz_half,
         )
 
-        # self.Filters["chroma_notch"] = sps.iirnotch(
-        #            self.sys_params["fsc_mhz"] / self.freq_half, 1
-        # )
-        # chroma_notch_fft = filtfft(chroma_notch, self.blocklen, False)
+        if self._use_fsc_notch_filter:
+            self.Filters["fsc_notch"] = sps.iirnotch(
+                self.sys_params["fsc_mhz"] / self.freq_half, 2
+            )
 
         self.Filters["FDeemp"] = filter_deemp
 
@@ -1044,8 +1052,6 @@ class VHSRFDecode(ldd.RFDecode):
         out_video_fft = demod_fft * self.Filters["FVideo"]
         out_video = npfft.irfft(out_video_fft).real
 
-        # out_video = sps.lfilter(self.Filters["chroma_notch"][0], self.Filters["chroma_notch"][1], out_video[::-1])[::-1]
-
         # if self.options.double_lpf:
         # Compensate for phase shift of the extra lpf
         # TODO: What's this supposed to be?
@@ -1078,6 +1084,11 @@ class VHSRFDecode(ldd.RFDecode):
             )
 
         del out_video_fft
+
+        if self._use_fsc_notch_filter:
+            out_video = sps.filtfilt(
+                self.Filters["fsc_notch"][0], self.Filters["fsc_notch"][1], out_video
+            )
 
         out_video05 = npfft.irfft(demod_fft * self.Filters["FVideo05"]).real
         out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])

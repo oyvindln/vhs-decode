@@ -24,6 +24,7 @@
 ************************************************************************/
 
 #include "correctorpool.h"
+#include "vbidecoder.h"
 
 CorrectorPool::CorrectorPool(QString _outputFilename, QString _outputJsonFilename,
                              qint32 _maxThreads, QVector<LdDecodeMetaData *> &_ldDecodeMetaData, QVector<SourceVideo *> &_sourceVideos,

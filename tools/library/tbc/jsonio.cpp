@@ -24,8 +24,12 @@
 
 #include "jsonio.h"
 
-#include <cmath>
 #include <limits>
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+#include <charconv>
+#else
+#include <sstream>
+#endif
 
 // Recognise JSON space characters
 static bool isAsciiSpace(char c)
@@ -46,10 +50,12 @@ JsonReader::JsonReader(std::istream &_input)
 
 void JsonReader::read(int &value)
 {
-    // Round to the nearest integer
-    double d;
-    readNumber(d);
-    value = static_cast<int>(std::lround(d));
+    readSignedInteger(value);
+}
+
+void JsonReader::read(qint64 &value)
+{
+    readSignedInteger(value);
 }
 
 void JsonReader::read(double &value)
@@ -331,8 +337,13 @@ void JsonReader::readNumber(double &value)
         }
     }
 
-    // XXX In C++17 we could use std::from_chars instead, which is slightly more efficient
-    value = std::stod(buf);
+#if ((defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || __cplusplus >= 201703L)
+    // Use the faster C++17 method if available.
+    std::from_chars(buf.data(), buf.data() + buf.size(), value);
+#else
+    std::istringstream(buf) >> value;
+#endif
+
 
     // We've read one character beyond the end of the number (there's no way to
     // tell where the end is otherwise), so we must unget the last char
@@ -347,6 +358,11 @@ JsonWriter::JsonWriter(std::ostream &_output)
 }
 
 void JsonWriter::write(int value)
+{
+    output << value;
+}
+
+void JsonWriter::write(qint64 value)
 {
     output << value;
 }

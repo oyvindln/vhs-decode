@@ -529,16 +529,24 @@ class LoadLDF:
         return self.read(infile, sample, readlen)
 
 
-def ldf_pipe(outname: str, compression_level: int = 6):
-    corecmd = "ffmpeg -y -hide_banner -loglevel error -f s16le -ar 40k -ac 1 -i - -acodec flac -f ogg".split(
-        " "
-    )
+def ffmpeg_pipe(outname: str, opts: str):
+    cmd = f"ffmpeg -y -hide_banner -loglevel error -f s16le -ar 40k -ac 1 -i -"
+    if opts and len(opts):
+        cmd += f" {opts}"
+
+    cmd = cmd.split(' ')
+
     process = subprocess.Popen(
-        [*corecmd, "-compression_level", str(compression_level), outname],
+        [*cmd, outname],
         stdin=subprocess.PIPE,
     )
 
     return process, process.stdin
+
+
+def ldf_pipe(outname: str, compression_level: int = 6):
+    return ffmpeg_pipe(outname, f"-acodec flac -f ogg -compression_level {compression_level}")
+
 
 def ac3_pipe(outname: str):
     processes = []

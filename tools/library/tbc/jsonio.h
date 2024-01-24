@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <stack>
+#include <cmath>
 
 class JsonReader
 {
@@ -51,6 +52,7 @@ public:
     }
 
     // Numbers
+    void read(qint64 &value);
     void read(int &value);
     void read(double &value);
 
@@ -81,6 +83,12 @@ private:
 
     void readString(std::string &value);
     void readNumber(double &value);
+    template <typename T> void readSignedInteger(T& value) {
+        // Round to the nearest integer
+        double d;
+        readNumber(d);
+        value = static_cast<T>(std::llround(d));
+    }
 
     // The input stream
     std::istream &input;
@@ -101,6 +109,7 @@ public:
 
     // Numbers
     void write(int value);
+    void write(qint64 value);
     void write(double value);
 
     // Booleans

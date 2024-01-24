@@ -657,10 +657,10 @@ class Resync:
         # cause weird artifacts on the output.
         demod_data = (
             field.data["video"]["demod"]
-            if not field.rf.options.sync_clip
-            else self._vsync_serration.safe_sync_clip(
-                sync_reference, field.data["video"]["demod"]
-            )
+            # if not field.rf.options.sync_clip
+            # else self._vsync_serration.safe_sync_clip(
+            #    sync_reference, field.data["video"]["demod"]
+            # )
         )
 
         # if self._temp_c == 1:

@@ -33,7 +33,6 @@
 #include <QDebug>
 #include <array>
 
-#include "vbidecoder.h"
 #include "dropouts.h"
 
 class JsonReader;
@@ -202,8 +201,8 @@ public:
         DropOuts dropOuts;
         bool pad = false;
 
-        qint32 diskLoc = -1;
-        qint32 fileLoc = -1;
+        double diskLoc = -1;
+        qint64 fileLoc = -1;
         qint32 decodeFaults = -1;
         qint32 efmTValues = -1;
 
