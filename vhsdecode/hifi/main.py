@@ -43,7 +43,7 @@ parser.add_argument(
     dest="rate",
     type=int,
     default=44100,
-    help="Output sample rate in Hz (default 192000)",
+    help="Output sample rate in Hz (default 44100)",
 )
 
 parser.add_argument(
