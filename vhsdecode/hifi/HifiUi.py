@@ -54,7 +54,12 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
         "audio_rate": values.audio_sample_rate,
         "gain": values.volume,
         "input_file": values.input_file,
-        "output_file": values.output_file
+        "output_file": values.output_file,
+        "mode": "s" if values.audio_mode == "Stereo"
+        else "l" if values.audio_mode == "L"
+        else "r" if values.audio_mode == "R"
+        else "mpx" if values.audio_mode == "Stereo MPX"
+        else "sum"
     }
     return decode_options
 
@@ -210,7 +215,7 @@ class HifiUi(QMainWindow):
         audio_mode_layout = QHBoxLayout()
         audio_mode_label = QLabel("Audio Mode:")
         self.audio_mode_combo = QComboBox(self)
-        self.audio_mode_combo.addItems(["Stereo", "L", "R", "Stereo MPX"])
+        self.audio_mode_combo.addItems(["Stereo", "L", "R", "Stereo MPX", "Sum"])
         audio_mode_layout.addWidget(audio_mode_label)
         audio_mode_layout.addWidget(self.audio_mode_combo)
 
@@ -614,7 +619,7 @@ class FileIODialogUI(HifiUi):
 
     def on_file_output_button_clicked(self):
         options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(self, "Open File", "", "All Files (*);;FLAC (*.flac)",
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save File", "", "All Files (*);;FLAC (*.flac);; WAV (*.wav)",
                                                    options=options)
 
         if os.path.isdir(os.path.dirname(file_name)):

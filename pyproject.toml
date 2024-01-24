@@ -8,7 +8,7 @@ name = "vhs_decode"
 description = "Software Decoder for raw rf captures of laserdisc, vhs and other analog video formats"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["laserdisc", "vhs", "video"]
+keywords = ["laserdisc", "vhs", "video", "tape", "decoder"]
 license = {file = "LICENSE"}
 classifiers = [
     "Topic :: Multimedia :: Video",

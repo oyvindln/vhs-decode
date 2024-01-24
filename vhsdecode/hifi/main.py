@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import cpu_count
@@ -9,11 +10,7 @@ from typing import List, Optional
 
 import numpy as np
 import soundfile as sf
-from PyQt5.QtWidgets import QApplication
-import sounddevice as sd
 from vhsdecode.addons.chromasep import samplerate_resample
-from vhsdecode.hifi.HifiUi import ui_parameters_to_decode_options, decode_options_to_ui_parameters, \
-    FileIODialogUI, FileOutputDialogUI
 
 from vhsdecode.cmdcommons import (
     common_parser_cli,
@@ -24,6 +21,16 @@ from vhsdecode.cmdcommons import (
 from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction, DEFAULT_NR_GAIN_, discard_stereo
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
 import io
+import sounddevice as sd
+
+try:
+    from PyQt5.QtWidgets import QApplication
+    from vhsdecode.hifi.HifiUi import ui_parameters_to_decode_options, decode_options_to_ui_parameters, \
+        FileIODialogUI, FileOutputDialogUI
+    HIFI_UI = True
+except ImportError:
+    print("PyQt5 not installed, please install it to use this feature")
+    HIFI_UI = False
 
 
 parser, _ = common_parser_cli(
@@ -35,7 +42,7 @@ parser.add_argument(
     "--audio_rate",
     dest="rate",
     type=int,
-    default=192000,
+    default=44100,
     help="Output sample rate in Hz (default 192000)",
 )
 
@@ -112,7 +119,26 @@ parser.add_argument(
     help="Opens hifi-ui",
 )
 
-class LDFReaderInputStream(io.RawIOBase):
+parser.add_argument(
+    "--audio_mode",
+    dest="mode",
+    type=str,
+    default='s',
+    help="Audio mode (s: stereo, mpx: stereo with mpx, l: left channel, r: right channel, sum: mono sum)"
+)
+
+
+def test_if_ldf_reader_is_installed():
+    shell_command = "ld-ldf-reader"
+    try:
+        os.system(shell_command)
+        return True
+    except FileNotFoundError:
+        print("ldf-reader not installed, please install it to use this feature")
+        return False
+
+
+class LDFReaderStdinStream(io.RawIOBase):
     def __init__(self, buffer):
         self.buffer = buffer
         self._pos: int = 0
@@ -149,6 +175,19 @@ class LDFReaderInputStream(io.RawIOBase):
 
     def seek(self, offset, whence=io.SEEK_SET):
         return self.tell()
+
+
+# executes ld-ldf-reader <file_path> and reads stdout as a file
+class LDFReaderFile(LDFReaderStdinStream):
+    def __init__(self, file_path):
+        shell_command = ["ld-ldf-reader", file_path]
+        p = subprocess.Popen(shell_command, shell=False,
+                             stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             universal_newlines=False)
+        self.buffer = p.stdout
+        self._pos: int = 0
 
 
 class UnseekableSoundFile(sf.SoundFile):
@@ -206,7 +245,7 @@ class UnSigned16BitFileReader(io.RawIOBase):
         if not data:
             return b''
 
-        # Convierte de unsigned 16-bit a signed 16-bit
+        # Converts unsigned 16-bit to signed 16-bit
         samples = np.frombuffer(data, dtype=np.uint16)
         signed_samples = samples.astype(np.int16) - 32768
 
@@ -263,11 +302,9 @@ def as_soundfile(pathR, sample_rate=44100):
             subtype="PCM_16",
             endian="LITTLE",
         )
-    elif ".ogx" in path:
-        sys.exit("OGX container not supported yet, try using pipe input")
     elif "-" == path:
         return UnseekableSoundFile(
-            LDFReaderInputStream(sys.stdin.buffer),
+            LDFReaderStdinStream(sys.stdin.buffer),
             "r",
             channels=1,
             samplerate=int(sample_rate),
@@ -276,6 +313,16 @@ def as_soundfile(pathR, sample_rate=44100):
             endian="LITTLE",
         )
     else:
+        if test_if_ldf_reader_is_installed():
+            return UnseekableSoundFile(
+                LDFReaderFile(pathR),
+                "r",
+                channels=1,
+                samplerate=int(sample_rate),
+                format="RAW",
+                subtype="PCM_16",
+                endian="LITTLE",
+            )
         return sf.SoundFile(pathR, "r")
 
 
@@ -322,7 +369,23 @@ def gain_adjust(audio: np.array, gain: float) -> np.array:
     return np.multiply(audio, gain)
 
 
-def prepare_stereo(l: np.array, r: np.array, noise_reduction: NoiseReduction, decode_options: dict):
+def prepare_stereo(l_raw: np.array, r_raw: np.array, noise_reduction: NoiseReduction, decode_options: dict):
+    if decode_options['mode'] == 'mpx':
+        l = np.multiply(np.add(l_raw, r_raw), 0.5)
+        r = np.multiply(np.subtract(l_raw, r_raw), 0.5)
+    elif decode_options['mode'] == 'l':
+        l = l_raw
+        r = l_raw
+    elif decode_options['mode'] == 'r':
+        l = r_raw
+        r = r_raw
+    elif decode_options['mode'] == 'sum':
+        l = np.multiply(np.add(l_raw, r_raw), 0.5)
+        r = np.multiply(np.add(l_raw, r_raw), 0.5)
+    else:
+        l = l_raw
+        r = r_raw
+
     if decode_options["noise_reduction"]:
         stereo = noise_reduction.stereo(
             gain_adjust(l, decode_options["gain"]),
@@ -461,12 +524,16 @@ def decode_parallel(decoders: List[HiFiDecode],
             progressB = TimeProgressBar(f.frames, f.frames)
             for block in f.blocks(blocksize=block_size, overlap=read_overlap):
                 decoder = decoders[current_block % threads]
-                futures_queue.append(
-                    executor.submit(
-                        decoder.block_decode,
-                        block, current_block
+                if len(block) > 0:
+                    futures_queue.append(
+                        executor.submit(
+                            decoder.block_decode,
+                            block, current_block
+                        )
                     )
-                )
+                else:
+                    break
+
                 if decode_options["auto_fine_tune"]:
                     log_bias(decoder)
 
@@ -593,6 +660,9 @@ def main() -> int:
 
     print("Initializing ...")
 
+    real_mode = 's' if not args.H8 else 'mpx'
+    real_mode = args.mode if args.mode in ['l', 'r', 'sum'] else real_mode
+
     decode_options = {
         "input_rate": sample_freq * 1e6,
         "standard": "p" if system == "PAL" else "n",
@@ -607,6 +677,7 @@ def main() -> int:
         "gain": args.gain,
         "input_file": filename,
         "output_file": outname,
+        "mode": real_mode
     }
 
     if decode_options["format"] == "vhs":

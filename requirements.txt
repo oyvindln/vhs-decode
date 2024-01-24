@@ -8,3 +8,4 @@ samplerate
 scipy
 soundfile
 PyQt5>=5.14.1
+sounddevice

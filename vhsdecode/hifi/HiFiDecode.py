@@ -52,11 +52,7 @@ class AFEBandPass:
         self.filter_hi = FiltersClass(iir_hi[0], iir_hi[1], self.samp_rate)
 
     def work(self, data):
-        try:
-            return self.filter_lo.lfilt(self.filter_hi.filtfilt(data))
-        except ValueError as e:
-            print('ERROR: Cannot decode because a read size mismatch. Maybe EOF reached')
-            sys.exit(1)
+        return self.filter_lo.lfilt(self.filter_hi.filtfilt(data))
 
 
 class LpFilter:
