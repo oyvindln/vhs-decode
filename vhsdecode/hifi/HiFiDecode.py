@@ -11,7 +11,6 @@ from typing import Tuple
 
 import numpy as np
 from numba import njit
-from pyhht.utils import inst_freq
 from scipy.signal import iirpeak, iirnotch
 from scipy.signal.signaltools import hilbert
 
@@ -176,8 +175,7 @@ class FMdemod:
         self.offset = 0
 
     def hhtdeFM(self, data):
-        instf, t = inst_freq(data)
-        return np.add(np.multiply(instf, -self.samp_rate), self.samp_rate / 2)
+        return FMdemod.inst_freq(data, self.samp_rate)
 
     @staticmethod
     def htdeFM(data, samp_rate):

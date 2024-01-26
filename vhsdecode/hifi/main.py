@@ -131,10 +131,14 @@ parser.add_argument(
 def test_if_ldf_reader_is_installed():
     shell_command = "ld-ldf-reader"
     try:
-        os.system(shell_command)
+        p = subprocess.Popen(shell_command, shell=False,
+                             stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE,
+                             universal_newlines=False)
         return True
-    except FileNotFoundError:
-        print("ldf-reader not installed, please install it to use this feature")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("WARN: ldf-reader not installed, please install it to speed up file reading")
         return False
 
 
