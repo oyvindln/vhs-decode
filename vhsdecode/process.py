@@ -35,6 +35,7 @@ from vhsdecode.compute_video_filters import (
     gen_video_lpf_params,
     gen_nonlinear_bandpass_params,
     gen_nonlinear_amplitude_lpf,
+    gen_custom_video_filters,
     create_sub_emphasis_params,
     NONLINEAR_AMP_LPF_FREQ_DEFAULT,
 )
@@ -879,6 +880,15 @@ class VHSRFDecode(ldd.RFDecode):
             DP, self.freq_hz_half, self.blocklen
         )
 
+        if DP.get("video_custom_luma_filters", None) is not None:
+            self.Filters["FCustomVideo"] = gen_custom_video_filters(
+                DP["video_custom_luma_filters"],
+                self.freq_hz,
+                self.blocklen,
+            )
+        else:
+            self.Filters["FCustomVideo"] = 1.0
+
         # additional filters:  0.5mhz, used for sync detection.
         # Using an FIR filter here to get a known delay
         F0_5 = sps.firwin(65, [0.5 / self.freq_half], pass_zero=True)
@@ -904,7 +914,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.Filters["FDeemp"] = filter_deemp
 
-        self.Filters["FVideo"] = filter_deemp * filter_video_lpf
+        self.Filters["FVideo"] = filter_deemp * filter_video_lpf * self.Filters["FCustomVideo"]
 
         SF["FVideo05"] = filter_video_lpf * filter_deemp * filter_05
 

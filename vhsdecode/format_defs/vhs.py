@@ -45,8 +45,14 @@ def fill_rfparams_svhs_shared(rfparams):
     rfparams["video_hpf_extra_order"] = 3
 
     # Low-pass filter on Y after demodulation
-    rfparams["video_lpf_freq"] = 6500000
+    rfparams["video_lpf_freq"] = 7500000
     rfparams["video_lpf_order"] = 6
+    rfparams["video_lpf_supergauss"] = True
+
+    rfparams["video_custom_luma_filters"] = [
+        {"type": "file", "filename": "svhs-sp-linear-subdeemphasis"},
+        {"type": "highshelf", "gain": 4.0, "midfreq": 2000000, "q": 0.4967045},
+    ]
 
     rfparams["boost_bpf_low"] = 7000000
     rfparams["boost_bpf_high"] = 8400000
@@ -58,9 +64,14 @@ def fill_rfparams_svhs_shared(rfparams):
     # adjusting the corner frequency here makes it look a bit closer
     # than just using the values for VHS, it needs to be properly
     # sorted though.
-    rfparams["deemph_mid"] = 350000
+    #rfparams["deemph_mid"] = 335000 # the optimal value of this parameter is currently dependant on the recording devices
     #rfparams["deemph_gain"] = 14
 
+    rfparams["nonlinear_highpass_freq"] = 370000
+    rfparams["nonlinear_amp_lpf_freq"] = 590000
+    rfparams["nonlinear_exp_scaling"] = 0.25
+    rfparams["nonlinear_scaling_2"] = 0.72
+    rfparams["use_sub_deemphasis"] = True
 
 def get_rfparams_pal_vhs(rfparams_pal):
     """Get RF params for PAL VHS"""
@@ -155,7 +166,7 @@ def get_rfparams_pal_svhs(sysparams_pal):
 
     fill_rfparams_svhs_shared(RFParams_PAL_SVHS)
 
-    RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
+    # RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -250000
 

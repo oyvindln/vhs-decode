@@ -174,6 +174,7 @@ class FilterPlot:
         "SVHS": {
             "levels": [0, -10, -20, -30],
             "apply_main_deemphasis": False,
+            "apply_custom_filters": True,
             "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
             "y": np.array([[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
                            [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
@@ -183,6 +184,7 @@ class FilterPlot:
         "SVHS_total": {
             "levels": [0, -10, -20, -30],
             "apply_main_deemphasis": True,
+            "apply_custom_filters": True,
             "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
             "y": np.array([[ -3.47426288,  -8.65657528, -11.62615626, -13.24248314, -13.74555096, -13.86360561],
                            [ -3.90426288,  -9.52657528, -13.35615626, -15.36248314, -15.91555096, -15.94360561],
@@ -219,6 +221,8 @@ class FilterPlot:
             signal_filters = 1
             if reference["apply_main_deemphasis"]:
                 signal_filters *= filters.filters["FDeemp"]
+            if reference["apply_custom_filters"]:
+                signal_filters *= filters.filters["FCustomVideo"]
             self.sub_emph_plotter.update_signal_filters(signal_filters)
         plot_filters(
             filters.filters,
@@ -275,12 +279,12 @@ class DeemphasisFilters:
     def block_len(self):
         return self._block_len
 
-    def update_filters(self, filter_params, fs, block_len):
+    def update_filters(self, filter_params, rf_params, fs, block_len):
         self._block_len = block_len
-        self.update_deemphasis(filter_params, fs, block_len)
+        self.update_deemphasis(filter_params, rf_params, fs, block_len)
         self.update_nonlinear_deemphasis(filter_params, fs, block_len)
 
-    def update_deemphasis(self, filter_params, fs, block_len):
+    def update_deemphasis(self, filter_params, rf_params, fs, block_len):
         if filter_params["video_lpf_supergauss"]["value"]:
             lpf = compute_video_filters.supergauss(np.linspace(0,fs/2,block_len//2+1), filter_params["video_lpf_freq"]["value"], filter_params["video_lpf_order"]["value"])
         else:
@@ -309,6 +313,19 @@ class DeemphasisFilters:
             )
             * lpf
         )
+
+        if filter_params["custom_video_filters"]["value"] and rf_params.get("video_custom_luma_filters", None) is not None:
+            self._filters["FCustomVideo"] = (
+                compute_video_filters.gen_custom_video_filters(
+                    rf_params["video_custom_luma_filters"],
+                    fs,
+                    block_len,
+                )
+            )
+            self._filters["FVideo"] *= self._filters["FCustomVideo"]
+        else:
+            self._filters["FCustomVideo"] = 1
+
 
     def update_nonlinear_deemphasis(self, filter_params, fs, block_len):
         bandpass = None
@@ -518,6 +535,16 @@ class VHStune(QDialog):
                     self.drawImage,
                 ],
             },
+            "custom_video_filters": {
+                "value": (rf_params.get("video_custom_luma_filters", None)!=None),
+                "step": None,
+                "desc": "Enable custom linear filters",
+                "onchange": [
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage,
+                ],
+            },
             "nonlinear_deemph_enable": {
                 "value": rf_params.get("use_sub_deemphasis", False),
                 "step": None,
@@ -643,7 +670,7 @@ class VHStune(QDialog):
 
     def initFilters(self):
         self._deemphasis.update_filters(
-            self.filter_params, self._format_params.fs, BLOCK_LEN
+            self.filter_params, self._format_params.rf_params, self._format_params.fs, BLOCK_LEN
         )
 
     def updateFrameNr(self, s):
@@ -796,7 +823,7 @@ class VHStune(QDialog):
 
     def update_deemphasis(self):
         self._deemphasis.update_deemphasis(
-            self.filter_params, self._format_params.fs, BLOCK_LEN
+            self.filter_params, self._format_params.rf_params, self._format_params.fs, BLOCK_LEN
         )
         self.update_filter_plot()
 

@@ -1,11 +1,13 @@
 import math
 import numpy as np
+import os.path as osp
 import scipy.signal as sps
+import sys
 from collections import namedtuple
 
 
 from vhsdecode.utils import filtfft
-from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_low_shelf
+from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_low_shelf, gen_high_shelf
 
 NONLINEAR_AMP_LPF_FREQ_DEFAULT = 700000
 NONLINEAR_STATIC_FACTOR_DEFAULT = None
@@ -49,6 +51,24 @@ def gen_video_main_deemp_fft(gain, mid, Q, freq_hz, block_len):
 
     filter_deemp = filtfft((db, da), block_len, whole=False)
     return filter_deemp
+
+
+def gen_custom_video_filters(filter_list, freq_hz, block_len):
+    ret = 1
+    for f in filter_list:
+        match f["type"]:
+            case "file":
+                try:
+                    ret *= np.loadtxt(osp.join(osp.dirname(__file__), "format_defs", f["filename"]+"-"+str(int(freq_hz))+".txt"), dtype=np.complex_)
+                except:
+                    print(f"Warning: Cannot load filter from file for samplerate of {freq_hz} Hz!", file=sys.stderr)
+            case "highshelf":
+                db, da = gen_high_shelf(f["midfreq"], f["gain"], f["q"], freq_hz / 2.0)
+                ret *= filtfft((db, da), block_len, whole=False)
+            case "lowshelf":
+                db, da = gen_low_shelf(f["midfreq"], f["gain"], f["q"], freq_hz / 2.0)
+                ret *= filtfft((db, da), block_len, whole=False)
+    return ret
 
 
 def gen_video_lpf(corner_freq, order, nyquist_hz, block_len):
