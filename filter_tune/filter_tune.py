@@ -11,7 +11,7 @@ import sys
 import logging
 import json
 
-from PyQt5.QtCore import Qt, QByteArray, QCryptographicHash, QMetaType, QSize
+from PyQt5.QtCore import Qt, QByteArray, QCryptographicHash, QMetaType, QObject, QSize, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
@@ -30,10 +30,12 @@ from PyQt5.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QSplitter,
     QSizePolicy,
     QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 from PyQt5.QtGui import (
     QBrush,
@@ -168,6 +170,27 @@ def _gen_sub_emphasis_params_from_sliders(format_params, filter_params):
 
 
 class FilterPlot:
+    emphasis_reference = {
+        "SVHS": {
+            "levels": [0, -10, -20, -30],
+            "apply_main_deemphasis": False,
+            "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
+            "y": np.array([[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
+                           [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
+                           [0.65, -1.09, -2.86, -4.16, -4.60, -4.43],
+                           [0.49, -2.35, -5.30, -7.14, -7.64, -7.34]])
+        },
+        "SVHS_total": {
+            "levels": [0, -10, -20, -30],
+            "apply_main_deemphasis": True,
+            "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
+            "y": np.array([[ -3.47426288,  -8.65657528, -11.62615626, -13.24248314, -13.74555096, -13.86360561],
+                           [ -3.90426288,  -9.52657528, -13.35615626, -15.36248314, -15.91555096, -15.94360561],
+                           [ -4.55426288, -11.34657528, -15.52615626, -17.77248314, -18.41555096, -18.35360561],
+                           [ -4.71426288, -12.60657528, -17.96615626, -20.75248314, -21.45555096, -21.26360561]])
+        },
+    }
+
     def __init__(self, filters, filter_params, format_params, layout, parent):
         self._canvas = None
         self._canvas = FigureCanvas(Figure(figsize=(5, 3)))
@@ -182,7 +205,7 @@ class FilterPlot:
 
         self.update(filters, filter_params, format_params)
 
-    def update(self, filters, filter_params, format_params):
+    def update(self, filters, filter_params, format_params, system = ""):
         # self._static_ax = self._canvas.figure.subplots()
         # t = np.linspace(0, 10, 501)
         # self._static_ax.plot(t, np.tan(t), ".")
@@ -190,6 +213,13 @@ class FilterPlot:
         sub_emphasis_params = _gen_sub_emphasis_params_from_sliders(
             format_params, filter_params
         )
+        reference = self.emphasis_reference.get(system, None)
+
+        if reference is not None:
+            signal_filters = 1
+            if reference["apply_main_deemphasis"]:
+                signal_filters *= filters.filters["FDeemp"]
+            self.sub_emph_plotter.update_signal_filters(signal_filters)
         plot_filters(
             filters.filters,
             filters.block_len,
@@ -197,6 +227,7 @@ class FilterPlot:
             self._canvas.figure,
             self.sub_emph_plotter,
             sub_emphasis_params,
+            reference,
         )
         self._canvas.draw()
 
@@ -250,12 +281,15 @@ class DeemphasisFilters:
         self.update_nonlinear_deemphasis(filter_params, fs, block_len)
 
     def update_deemphasis(self, filter_params, fs, block_len):
-        (_, lpf) = compute_video_filters.gen_video_lpf(
-            filter_params["video_lpf_freq"]["value"],
-            filter_params["video_lpf_order"]["value"],
-            fs / 2.0,
-            block_len,
-        )
+        if filter_params["video_lpf_supergauss"]["value"]:
+            lpf = compute_video_filters.supergauss(np.linspace(0,fs/2,block_len//2+1), filter_params["video_lpf_freq"]["value"], filter_params["video_lpf_order"]["value"])
+        else:
+            (_, lpf) = compute_video_filters.gen_video_lpf(
+                filter_params["video_lpf_freq"]["value"],
+                filter_params["video_lpf_order"]["value"],
+                fs / 2.0,
+                block_len,
+            )
 
         self._filters["FDeemp"] = compute_video_filters.gen_video_main_deemp_fft(
             filter_params["deemph_gain"]["value"],
@@ -277,9 +311,13 @@ class DeemphasisFilters:
         )
 
     def update_nonlinear_deemphasis(self, filter_params, fs, block_len):
+        bandpass = None
+        if filter_params["nonlinear_bandpass_upper"]["value"] != 0:
+            bandpass = filter_params["nonlinear_bandpass_upper"]["value"]
         self.filters["NLHighPassF"] = compute_video_filters.gen_nonlinear_bandpass(
-            None,
+            bandpass,
             filter_params["nonlinear_highpass_freq"]["value"],
+            filter_params["nonlinear_bandpass_order"]["value"],
             fs / 2.0,
             block_len,
         )
@@ -289,14 +327,44 @@ class DeemphasisFilters:
             filter_params["nonlinear_amplitude_lpf"]["value"], fs / 2.0
         )
 
+class WriteTBCWorker(QObject):
+    finished = pyqtSignal()
+    nextframe = pyqtSignal(int)
+    totalFrames = 0
+    abortExport = False
+    abortExportSig = pyqtSignal()
+
+    def __init__(self, totalFrames):
+        super(WriteTBCWorker, self).__init__()
+        self.totalFrames = totalFrames
+        self.abortExportSig.connect(self.abortExp)
+
+    def abortExp(self):
+        self.abortExport = True
+
+    def run(self):
+        self.nextframe.emit(1)
+        for i in range(1,self.totalFrames-1):
+            if self.abortExport is True:
+                self.finished.emit()
+                return
+            self.nextframe.emit(i)
+        self.nextframe.emit(self.totalFrames-2)
+        self.nextframe.emit(self.totalFrames-2)
+        self.finished.emit()
 
 class VHStune(QDialog):
     refTBCFilename = ""
     proTBCFilename = ""
+    saveTBCFilename = ""
     title = "VHStune"
 
     curFrameNr = 1
     totalFrames = 2
+
+    exportWorker = None
+    exportThread = None
+    outfile_video = None
 
     def __init__(self, tape_format, logger, parent=None):
         super(VHStune, self).__init__(
@@ -328,9 +396,17 @@ class VHStune(QDialog):
         self.filters_area.setWidget(self.filterGroupBox)
         left_layout.addWidget(self.filters_area)
         main_layout.addLayout(left_layout, 0, 0)
-        main_layout.addLayout(self._right_layout, 0, 1)
+        img_plot_splitter = QSplitter(Qt.Horizontal)
+        img_widget = QWidget()
+        plot_widget = QWidget()
+        #main_layout.addLayout(self._right_layout, 0, 1)
+        img_widget.setLayout(self._right_layout)
         self.plot_layout = QGridLayout()
-        main_layout.addLayout(self.plot_layout, 0, 2)
+        #main_layout.addLayout(self.plot_layout, 0, 2)
+        plot_widget.setLayout(self.plot_layout)
+        img_plot_splitter.addWidget(img_widget)
+        img_plot_splitter.addWidget(plot_widget)
+        main_layout.addWidget(img_plot_splitter, 0, 1)
         main_layout.setRowStretch(0, 1)
         # main_layout.setRowStretch(1, 1)
         main_layout.setColumnStretch(1, 1)
@@ -381,7 +457,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -389,12 +464,21 @@ class VHStune(QDialog):
                 "value": rf_params["video_lpf_order"],
                 "step": 1,
                 "min": 1,
-                "max": 4,
+                "max": 20,
                 "desc": "Video low pass filter order ({:.2f}):",
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
+                    self.drawImage,
+                ],
+            },
+            "video_lpf_supergauss": {
+                "value": rf_params.get("video_lpf_supergauss", False),
+                "step": None,
+                "desc": "Use supergauss lowpass filter",
+                "onchange": [
+                    self.update_deemphasis,
+                    self.apply_both_deemph_filters,
                     self.drawImage,
                 ],
             },
@@ -407,7 +491,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -420,7 +503,6 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
@@ -433,15 +515,18 @@ class VHStune(QDialog):
                 "onchange": [
                     self.update_deemphasis,
                     self.apply_both_deemph_filters,
-                    self.applyNLSVHSFilter,
                     self.drawImage,
                 ],
             },
             "nonlinear_deemph_enable": {
-                "value": False,
+                "value": rf_params.get("use_sub_deemphasis", False),
                 "step": None,
                 "desc": "Enable non-linear deemphasis",
-                "onchange": [self.drawImage],
+                "onchange": [
+                    self.update_nl_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage,
+                ],
             },
             "nonlinear_deemph_showonly": {
                 "value": False,
@@ -467,13 +552,24 @@ class VHStune(QDialog):
                     self.drawImage,
                 ],
             },
-            # TODO: Not applied!!
+            "nonlinear_bandpass_order": {
+                "value":  rf_params.get("nonlinear_bandpass_order", 1),
+                "step": 1,
+                "min": 1,
+                "max": 6,
+                "desc": "Non-linear high-pass order ({}):",
+                "onchange": [
+                    self.update_nl_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage,
+                ],
+            },
             "nonlinear_bandpass_upper": {
-                "value": rf_params.get("nonlinear_bandpass_upper", None),
+                "value": rf_params.get("nonlinear_bandpass_upper", 0),
                 "step": 5000,
-                "min": 300000,
-                "max": 6000000,
-                "desc": "Non-linear bandpass upper freq ({} Hz):",
+                "min": 0,
+                "max": 8000000,
+                "desc": "Non-linear bandpass upper freq (0=lowpass) ({} Hz):",
                 "onchange": [
                     self.update_nl_deemphasis,
                     self.apply_both_deemph_filters,
@@ -484,7 +580,7 @@ class VHStune(QDialog):
                 "value": rf_params.get("nonlinear_scaling_1", 1.0),
                 "step": 0.05,
                 "min": 0.05,
-                "max": 2.0,
+                "max": 10.0,
                 "desc": "Non-linear linear scale ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
@@ -496,7 +592,7 @@ class VHStune(QDialog):
                 "value": rf_params.get("nonlinear_scaling_2", 1.0),
                 "step": 0.01,
                 "min": 0.01,
-                "max": 2.0,
+                "max": 5.0,
                 "desc": "Non-linear linear scale B ({:.2f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
@@ -543,75 +639,12 @@ class VHStune(QDialog):
                     self.drawImage,
                 ],
             },
-            "svhs_deemph_enable": {
-                "value": False,
-                "step": None,
-                "desc": "Enable S-VHS non-linear deemphasis",
-                "onchange": [self.drawImage],
-            },
-            "svhs_crossover_freq": {
-                "value": 400000,
-                "step": 5000,
-                "min": 10000,
-                "max": 4000000,
-                "desc": "Crossover freq ({} Hz):",
-                "onchange": [
-                    self.calcNLSVHSFilter,
-                    self.applyNLSVHSFilter,
-                    self.drawImage,
-                ],
-            },
-            "svhs_lowpass_freq": {
-                "value": 7000000,
-                "step": 10000,
-                "min": 1000000,
-                "max": 8000000,
-                "desc": "Lowpass freq ({} Hz):",
-                "onchange": [
-                    self.calcNLSVHSFilter,
-                    self.applyNLSVHSFilter,
-                    self.drawImage,
-                ],
-            },
-            "svhs_lf_in_level": {
-                "value": 1.0,
-                "step": 0.01,
-                "min": 0.5,
-                "max": 2.0,
-                "desc": "LF input level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_hf_in_level": {
-                "value": 1.0,
-                "step": 0.01,
-                "min": 0.5,
-                "max": 2.0,
-                "desc": "HF input level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_lf_out_level": {
-                "value": 0.815,
-                "step": 0.001,
-                "min": 0.7,
-                "max": 1.0,
-                "desc": "LF output level ({:.3f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
-            "svhs_hf_out_level": {
-                "value": 0.66,
-                "step": 0.01,
-                "min": 0.25,
-                "max": 2.0,
-                "desc": "HF output level ({:.2f}):",
-                "onchange": [self.applyNLSVHSFilter, self.drawImage],
-            },
         }
 
     def initFilters(self):
         self._deemphasis.update_filters(
             self.filter_params, self._format_params.fs, BLOCK_LEN
         )
-        self.calcNLSVHSFilter()
 
     def updateFrameNr(self, s):
         if s == 1:
@@ -665,7 +698,6 @@ class VHStune(QDialog):
         else:
             self.loadImage()
             self.apply_both_deemph_filters()
-            self.applyNLSVHSFilter()
             self.drawImage()
             self.update_filter_plot()
 
@@ -701,6 +733,45 @@ class VHStune(QDialog):
             )
             self._update_format()
 
+    def saveProTBCFrame(self,frameNr):
+        self.curFrameNr = frameNr
+        self.frameSpin.setValue(self.curFrameNr)
+        self.frameSlider.setValue(self.curFrameNr)
+        self.loadImage()
+        self.apply_both_deemph_filters()
+        self.drawImage()
+
+    def saveProTBCFinished(self):
+        self.outfile_video.close()
+        self.outfile_video = None
+        self.frameSpin.blockSignals(False)
+        self.frameSlider.blockSignals(False)
+        self.saveProTBCFileButton.setText("Process and save TBC")
+
+    def saveProTBCFile(self):
+        if self.outfile_video is None:
+            fileName = QFileDialog.getSaveFileName(
+                self, "Save processed tbc file", self.saveTBCFilename, "tbc files (*.tbc)"
+            )
+            if fileName is not None and fileName[0] != "":
+                self.outfile_video = open(fileName[0], "wb")
+                self.frameSpin.blockSignals(True)
+                self.frameSlider.blockSignals(True)
+                self.exportThread = QThread()
+                self.exportWorker = WriteTBCWorker(self.totalFrames)
+                self.abortExport = pyqtSignal()
+                self.exportWorker.moveToThread(self.exportThread)
+                self.exportThread.started.connect(self.exportWorker.run)
+                self.exportWorker.finished.connect(self.exportThread.quit)
+                self.exportWorker.finished.connect(self.exportWorker.deleteLater)
+                self.exportThread.finished.connect(self.exportThread.deleteLater)
+                self.exportWorker.nextframe.connect(self.saveProTBCFrame,Qt.BlockingQueuedConnection)
+                self.exportWorker.finished.connect(self.saveProTBCFinished,Qt.BlockingQueuedConnection)
+                self.exportThread.start()
+                self.saveProTBCFileButton.setText("Cancel TBC export")
+        else:
+            self.exportWorker.abortExportSig.emit()
+
     def loadImage(self):
         self.refFieldA, self.refFieldB = readRefFrame(
             self.refTBCFilename,
@@ -717,6 +788,8 @@ class VHStune(QDialog):
         )
         pos = 0
         self.fftData = []
+        if self.vhsFrameData is None:
+            return
         while pos < (len(self.vhsFrameData) - BLOCK_LEN):
             self.fftData.append(npfft.rfft(self.vhsFrameData[pos : pos + BLOCK_LEN]))
             pos += BLOCK_LEN - 2048
@@ -735,62 +808,8 @@ class VHStune(QDialog):
 
     def update_filter_plot(self):
         self._filter_plot.update(
-            self._deemphasis, self.filter_params, self._format_params
+            self._deemphasis, self.filter_params, self._format_params, self.systemComboBox.currentText()
         )
-
-    def calcNLSVHSFilter(self):
-        self.NLSVHSLPFilter = genLowpass(
-            self.filter_params["svhs_crossover_freq"]["value"], self._format_params.fs
-        )
-        self.NLSVHSHPFilter = genHighpass(
-            self.filter_params["svhs_crossover_freq"]["value"], self._format_params.fs
-        )
-        self.NLSVHSLPBFilter = genLowpass(
-            self.filter_params["svhs_lowpass_freq"]["value"], self._format_params.fs
-        )
-        # self.NLSVHSACFilter = genHighpass(200000)
-
-    def applyNLSVHSFilter(self):
-        self.ProcessedSVHSFrame = []
-        deviation = self._format_params.sub_emphasis_params.deviation / 2.0
-
-        for b in self.fftData:
-            hf_part = npfft.irfft(
-                b
-                * self._deemphasis.filters["FVideo"]
-                * self.NLSVHSHPFilter
-                * self.NLSVHSLPBFilter
-            )
-            lf_part = npfft.irfft(
-                b * self._deemphasis.filters["FVideo"] * self.NLSVHSLPFilter
-            )
-            # dc_part = npfft.irfft(b * self._deemphasis.filters['FVideo'] * self.NLSVHSACFilter)
-            hf_amp = (
-                abs(signal.hilbert(hf_part))
-                / (deviation)
-                * self.filter_params["svhs_hf_in_level"]["value"]
-            )
-            lf_amp = (
-                abs(signal.hilbert(lf_part))
-                / (deviation)
-                * self.filter_params["svhs_lf_in_level"]["value"]
-            )
-            hf_amp_scaled = 1.0 / (
-                0.26007715 * np.exp(-0.4152129 * (np.log(hf_amp) - 1.27878766))
-                + 0.55291881
-            )
-            lf_amp_scaled = 1.0 / (
-                0.15124517 * np.exp(-3.41855724 * lf_amp) + 0.81349599
-            )
-            #  * lf_amp_scaled *
-            self.ProcessedSVHSFrame.append(
-                hf_part
-                * hf_amp_scaled
-                * self.filter_params["svhs_hf_out_level"]["value"]
-                + lf_part
-                * lf_amp_scaled
-                * self.filter_params["svhs_lf_out_level"]["value"]
-            )
 
     def apply_both_deemph_filters(self):
         self.applyDeemphFilter()
@@ -827,10 +846,7 @@ class VHStune(QDialog):
     def drawImage(self):
         outImage = None
         for i in range(len(self.ProcessedFrame)):
-            if self.filter_params["svhs_deemph_enable"]["value"] is True:
-                img = self.ProcessedSVHSFrame[i].copy()
-            else:
-                img = self.ProcessedFrame[i].copy()
+            img = self.ProcessedFrame[i].copy()
             if self.filter_params["nonlinear_deemph_enable"]["value"] is True:
                 if self.filter_params["nonlinear_amplitude_showonly"]["value"] is True:
                     img.fill(
@@ -850,6 +866,8 @@ class VHStune(QDialog):
                 outImage = img[1024:31744]
             else:
                 outImage = np.append(outImage, img[1024:31744])
+        if outImage is None:
+            return
         height = self._format_params.field_lines
         width = self._format_params.field_width
         field_samples = height * width
@@ -865,6 +883,9 @@ class VHStune(QDialog):
             self._format_params.sys_params,
             1 ^ int(self.swapTrackFieldChkBox.isChecked()),
         )
+        if self.outfile_video is not None:
+            self.outfile_video.write(vhsFieldA)
+            self.outfile_video.write(vhsFieldB)
         outFieldA = None
         outFieldB = None
         if self.refFieldA is not None and self.refFieldB is not None:
@@ -971,9 +992,12 @@ class VHStune(QDialog):
         openRefTBCFileButton.clicked.connect(self.openRefTBCFile)
         openProTBCFileButton = QPushButton("Open TBC to process")
         openProTBCFileButton.clicked.connect(self.openProTBCFile)
+        self.saveProTBCFileButton = QPushButton("Process and save TBC")
+        self.saveProTBCFileButton.clicked.connect(self.saveProTBCFile)
 
         layout.addWidget(openRefTBCFileButton)
         layout.addWidget(openProTBCFileButton)
+        layout.addWidget(self.saveProTBCFileButton)
 
         self.systemComboBox = QComboBox()
         supported_tape_formats_list = list(supported_tape_formats)
