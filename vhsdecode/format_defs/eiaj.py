@@ -10,7 +10,7 @@ def get_rfparams_pal_eiaj(RFParams_PAL):
     RFParams_PAL_EIAJ["video_hpf_extra"] = 1500000
     RFParams_PAL_EIAJ["video_hpf_extra_order"] = 1
     RFParams_PAL_EIAJ["video_lpf_freq"] = 3000000
-    RFParams_PAL_EIAJ["video_lpf_order"] = 1
+    RFParams_PAL_EIAJ["video_lpf_order"] = 6
     # 685546 ± 200
     RFParams_PAL_EIAJ["color_under_carrier"] = (625 * 25) * (351 / 8)
     RFParams_PAL_EIAJ["chroma_bpf_upper"] = 1300000

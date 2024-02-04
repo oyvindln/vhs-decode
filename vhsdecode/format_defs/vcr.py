@@ -10,7 +10,7 @@ def get_rfparams_pal_vcr(RFParams_PAL):
     RFParams_PAL_VCR["video_hpf_extra"] = 1200000
     RFParams_PAL_VCR["video_hpf_extra_order"] = 2
     RFParams_PAL_VCR["video_lpf_freq"] = 3000000
-    RFParams_PAL_VCR["video_lpf_order"] = 1
+    RFParams_PAL_VCR["video_lpf_order"] = 6
 
     RFParams_PAL_VCR["color_under_carrier"] = 562500
     RFParams_PAL_VCR["chroma_bpf_upper"] = 1200000
@@ -73,7 +73,7 @@ def get_rfparams_pal_vcr_lp(RFParams_PAL):
     RFParams_PAL_VCR["video_hpf_extra"] = 1200000
     RFParams_PAL_VCR["video_hpf_extra_order"] = 2
     RFParams_PAL_VCR["video_lpf_freq"] = 3000000
-    RFParams_PAL_VCR["video_lpf_order"] = 1
+    RFParams_PAL_VCR["video_lpf_order"] = 6
 
     RFParams_PAL_VCR["color_under_carrier"] = 562500
     RFParams_PAL_VCR["chroma_bpf_upper"] = 1200000

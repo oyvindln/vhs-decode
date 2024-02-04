@@ -2,7 +2,11 @@
     It provides a way to pipe a float32 stream to GNU Radio
     For measurements and addons
 """
-import zmq
+try:
+    import zmq
+    ZMQ_AVAILABLE = True
+except ImportError:
+    ZMQ_AVAILABLE = False
 import os
 import numpy as np
 

@@ -46,7 +46,7 @@ def fill_rfparams_svhs_shared(rfparams):
 
     # Low-pass filter on Y after demodulation
     rfparams["video_lpf_freq"] = 6500000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_order"] = 6
 
     rfparams["boost_bpf_low"] = 7000000
     rfparams["boost_bpf_high"] = 8400000
@@ -83,7 +83,7 @@ def get_rfparams_pal_vhs(rfparams_pal):
 
     # Low-pass filter on Y after demodulation
     RFParams_PAL_VHS["video_lpf_freq"] = 3500000
-    RFParams_PAL_VHS["video_lpf_order"] = 1
+    RFParams_PAL_VHS["video_lpf_order"] = 6
 
     # PAL color under carrier is 40H + 1953
     RFParams_PAL_VHS["color_under_carrier"] = ((625 * 25) * 40) + 1953
@@ -208,7 +208,7 @@ def get_rfparams_ntsc_vhs(rfparams_ntsc):
     RFParams_NTSC_VHS["video_lpf_freq"] = 3000000
 
     # Order may be fine as is.
-    RFParams_NTSC_VHS["video_lpf_order"] = 1
+    RFParams_NTSC_VHS["video_lpf_order"] = 6
 
     # NTSC color under carrier is 40H
     RFParams_NTSC_VHS["color_under_carrier"] = (525 * (30 / 1.001)) * 40

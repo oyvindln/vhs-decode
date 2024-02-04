@@ -51,10 +51,11 @@ def gen_video_main_deemp_fft(gain, mid, Q, freq_hz, block_len):
 
 def gen_video_lpf(corner_freq, order, nyquist_hz, block_len):
     """Generate real-value fir and fft post-demodulation low pass filters from parameters"""
-    video_lpf = sps.butter(order, corner_freq / nyquist_hz, "low")
+    video_lpf = sps.butter(order, corner_freq / nyquist_hz, "lowpass")
+    video_lpf_b = sps.butter(order, corner_freq / nyquist_hz, "lowpass", output="sos")
+    video_lpf_fft = abs(sps.sosfreqz(video_lpf_b, block_len)[1][: block_len // 2 + 1])
 
-    video_lpf_fft = filtfft(video_lpf, block_len, False)
-    return (video_lpf, video_lpf_fft)
+    return (video_lpf, abs(video_lpf_fft))
 
 
 def gen_video_lpf_params(rf_params, nyquist_hz, block_len):

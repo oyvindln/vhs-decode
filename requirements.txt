@@ -2,10 +2,7 @@ Cython
 matplotlib
 numba>=0.55.1
 numpy
-pyhht
-pyzmq
 samplerate
 scipy
 soundfile
-PyQt5>=5.14.1
 sounddevice

@@ -17,7 +17,7 @@ from scipy.signal.signaltools import hilbert
 from lddecode.utils import unwrap_hilbert
 from vhsdecode.addons.FMdeemph import FMDeEmphasisC
 from vhsdecode.addons.chromasep import samplerate_resample
-from vhsdecode.addons.gnuradioZMQ import ZMQSend
+from vhsdecode.addons.gnuradioZMQ import ZMQSend, ZMQ_AVAILABLE
 from vhsdecode.utils import firdes_lowpass, firdes_highpass, FiltersClass, StackableMA
 
 DEFAULT_NR_GAIN_ = 66
@@ -451,7 +451,10 @@ class HiFiDecode:
 
         if self.options['grc']:
             print(f'Set gnuradio sample rate at {self.if_rate} Hz, type float')
-            self.grc = ZMQSend()
+            if ZMQ_AVAILABLE:
+                self.grc = ZMQSend()
+            else:
+                print("ZMQ library is not available, please install the zmq python library to use this feature!")
 
     def getResamplingRatios(self):
         samplerate2ifrate = self.if_rate / self.sample_rate
@@ -504,7 +507,7 @@ class HiFiDecode:
         filterL = self.afeL.work(data)
         filterR = self.afeR.work(data)
 
-        if self.options['grc']:
+        if self.options['grc'] and ZMQ_AVAILABLE:
             self.grc.send(filterL + filterR)
 
         self.stereo_queue.append(

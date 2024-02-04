@@ -19,7 +19,7 @@ def get_rfparams_pal_betamax(rfparams_pal):
 
     # Low-pass filter on Y after demodulation
     rfparams["video_lpf_freq"] = 3500000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_order"] = 6
 
     # PAL color under carrier is ??
     # TODO: Need exact freq
@@ -122,7 +122,7 @@ def _fill_rfparams_ntsc_betamax_common(rfparams):
 
     # Low-pass filter on Y after demodulation
     rfparams["video_lpf_freq"] = 3000000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_order"] = 6
 
     # NTSC betamax uses phase inversion on every other field on one track rather than
     # different frequencies like on PAL
@@ -203,12 +203,12 @@ def get_rfparams_ntsc_betamax_hifi(rfparams_ntsc):
     rfparams["video_lpf_extra"] = 6010000
     rfparams["video_lpf_extra_order"] = 3
 
-    rfparams["video_hpf_extra"] = 1520000
-    rfparams["video_hpf_extra_order"] = 1
+    rfparams["video_hpf_extra"] = 2000000
+    rfparams["video_hpf_extra_order"] = 12
 
     # Low-pass filter on Y after demodulation
     rfparams["video_lpf_freq"] = 3000000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_order"] = 6
 
     return rfparams
 

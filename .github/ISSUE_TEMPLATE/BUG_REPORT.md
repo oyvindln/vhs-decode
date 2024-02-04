@@ -33,16 +33,16 @@ Outline the steps to reproduce the bug:
 2. ...
 3. ...
 
-### Expected Behavior
+### Expected Behaviour
 
 <!--
 Explain what you expected to happen when performing the steps above.
 -->
 
-### Actual Behavior
+### Actual Behaviour
 
 <!--
-Explain what actually happened when performing the steps above. Include any error messages or unexpected behavior.
+Explain what actually happened when performing the steps above. Include any error messages or unexpected behaviour.
 -->
 
 ### Environment
@@ -59,4 +59,9 @@ Include information on your environment.
 
 <!--
 Include any additional information that might be relevant to the bug report, such as screenshots or related issues/Pull-Requests.
+-->
+
+### Is it related to tbc-video-export?
+
+<!-- if so visit its repo here https://github.com/JuniorIsAJitterbug/tbc-video-export/issues."
 -->

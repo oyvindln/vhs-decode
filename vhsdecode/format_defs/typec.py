@@ -10,7 +10,7 @@ def get_rfparams_ntsc_typec(RFParams_NTSC):
     RFParams_NTSC_TYPEC["video_hpf_extra"] = 1500000
     RFParams_NTSC_TYPEC["video_hpf_extra_order"] = 1
     RFParams_NTSC_TYPEC["video_lpf_freq"] = 4200000
-    RFParams_NTSC_TYPEC["video_lpf_order"] = 1
+    RFParams_NTSC_TYPEC["video_lpf_order"] = 6
     # 923828 ± x00
     RFParams_NTSC_TYPEC["color_under_carrier"] = 3.58e6  # TODO set to fsc properly
     RFParams_NTSC_TYPEC["chroma_bpf_upper"] = 200000
@@ -71,7 +71,7 @@ def get_rfparams_pal_typec(RFParams_PAL):
     RFParams_PAL_TYPEC["video_hpf_extra"] = 500000
     RFParams_PAL_TYPEC["video_hpf_extra_order"] = 1
     RFParams_PAL_TYPEC["video_lpf_freq"] = 5200000
-    RFParams_PAL_TYPEC["video_lpf_order"] = 1
+    RFParams_PAL_TYPEC["video_lpf_order"] = 6
     # 923828 ± x00
     RFParams_PAL_TYPEC["color_under_carrier"] = 4.43e6  # TODO set to fsc properly
     RFParams_PAL_TYPEC["chroma_bpf_upper"] = 200000
@@ -141,7 +141,7 @@ def get_rfparams_pal_typeb(RFParams_PAL):
     RFParams_PAL_TYPEB["video_hpf_extra"] = 500000
     RFParams_PAL_TYPEB["video_hpf_extra_order"] = 1
     RFParams_PAL_TYPEB["video_lpf_freq"] = 5200000
-    RFParams_PAL_TYPEB["video_lpf_order"] = 1
+    RFParams_PAL_TYPEB["video_lpf_order"] = 6
     RFParams_PAL_TYPEB["color_under_carrier"] = 4.43e6  # TODO set to fsc properly
     RFParams_PAL_TYPEB["chroma_bpf_upper"] = 200000
 

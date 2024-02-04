@@ -2,15 +2,15 @@ def get_rfparams_pal_umatic(RFParams_PAL):
     RFParams_PAL_UMATIC = {**RFParams_PAL}
     # UMATIC section
     # These need tweaking.
-    RFParams_PAL_UMATIC["video_bpf_low"] = 2500000
-    RFParams_PAL_UMATIC["video_bpf_high"] = 6700000
+    RFParams_PAL_UMATIC["video_bpf_low"] = 1400000
+    RFParams_PAL_UMATIC["video_bpf_high"] = 7000000
     RFParams_PAL_UMATIC["video_bpf_order"] = 1
-    RFParams_PAL_UMATIC["video_lpf_extra"] = 6900000
-    RFParams_PAL_UMATIC["video_lpf_extra_order"] = 3
-    RFParams_PAL_UMATIC["video_hpf_extra"] = 1500000
-    RFParams_PAL_UMATIC["video_hpf_extra_order"] = 1
+    RFParams_PAL_UMATIC["video_lpf_extra"] = 7000000
+    RFParams_PAL_UMATIC["video_lpf_extra_order"] = 8
+    RFParams_PAL_UMATIC["video_hpf_extra"] = 1400000
+    RFParams_PAL_UMATIC["video_hpf_extra_order"] = 14
     RFParams_PAL_UMATIC["video_lpf_freq"] = 4200000
-    RFParams_PAL_UMATIC["video_lpf_order"] = 2
+    RFParams_PAL_UMATIC["video_lpf_order"] = 6
     # 685546 ± 200
     RFParams_PAL_UMATIC["color_under_carrier"] = (625 * 25) * (351 / 8)
     RFParams_PAL_UMATIC["chroma_bpf_upper"] = 1300000
@@ -65,9 +65,9 @@ def get_rfparams_pal_umatic_hi(RFParams_PAL):
     RFParams_PAL_UMATIC["video_lpf_extra"] = 7200000
     RFParams_PAL_UMATIC["video_lpf_extra_order"] = 3
     RFParams_PAL_UMATIC["video_hpf_extra"] = 1500000
-    RFParams_PAL_UMATIC["video_hpf_extra_order"] = 1
+    RFParams_PAL_UMATIC["video_hpf_extra_order"] = 8
     RFParams_PAL_UMATIC["video_lpf_freq"] = 4200000
-    RFParams_PAL_UMATIC["video_lpf_order"] = 2
+    RFParams_PAL_UMATIC["video_lpf_order"] = 6
     # 923828 ± x00
     RFParams_PAL_UMATIC["color_under_carrier"] = 923828  # (625 * 25) * (351 / 8)
     RFParams_PAL_UMATIC["chroma_bpf_upper"] = 1300000
@@ -129,15 +129,15 @@ def get_sysparams_pal_umatic_hi(sysparams_pal):
 def get_rfparams_ntsc_umatic(rfparams_ntsc):
     RFParams_NTSC_UMATIC = {**rfparams_ntsc}
 
-    RFParams_NTSC_UMATIC["video_bpf_low"] = 2500000
+    RFParams_NTSC_UMATIC["video_bpf_low"] = 1400000
     RFParams_NTSC_UMATIC["video_bpf_high"] = 6500000
     RFParams_NTSC_UMATIC["video_bpf_order"] = 1
-    RFParams_NTSC_UMATIC["video_lpf_extra"] = 6900000
-    RFParams_NTSC_UMATIC["video_lpf_extra_order"] = 3
-    RFParams_NTSC_UMATIC["video_hpf_extra"] = 1200000
-    RFParams_NTSC_UMATIC["video_hpf_extra_order"] = 1
+    RFParams_NTSC_UMATIC["video_lpf_extra"] = 6500000
+    RFParams_NTSC_UMATIC["video_lpf_extra_order"] = 8
+    RFParams_NTSC_UMATIC["video_hpf_extra"] = 1400000
+    RFParams_NTSC_UMATIC["video_hpf_extra_order"] = 14
     RFParams_NTSC_UMATIC["video_lpf_freq"] = 4000000
-    RFParams_NTSC_UMATIC["video_lpf_order"] = 1
+    RFParams_NTSC_UMATIC["video_lpf_order"] = 6
     #  688374 ± 200
     # (525 * (30 / 1.001)) * (175/4)
     RFParams_NTSC_UMATIC["color_under_carrier"] = (525 * (30 / 1.001)) * (175 / 4)

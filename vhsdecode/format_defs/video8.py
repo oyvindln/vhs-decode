@@ -21,9 +21,9 @@ def fill_rfparams_video8_shared(rfparams):
     # Parameters for high-pass filter used for non-linear deemphasis, these are
     # probably not correct.
     # 198943.67
-    rfparams["nonlinear_highpass_freq"] = 198943.67
+    rfparams["nonlinear_highpass_freq"] = 260000
     rfparams["nonlinear_exp_scaling"] = 0.53
-    rfparams["nonlinear_scaling_1"] = 0.73
+    rfparams["nonlinear_scaling_1"] = 0.45
     # rfparams["nonlinear_scaling_2"] = 0.65
     rfparams["nonlinear_highpass_limit_h"] = 5000
     rfparams["nonlinear_highpass_limit_l"] = -20000
@@ -31,22 +31,22 @@ def fill_rfparams_video8_shared(rfparams):
 
     # Band-pass filter for Video rf.
     # TODO: Needs tweaking
-    rfparams["video_bpf_low"] = 2100000
-    rfparams["video_bpf_high"] = 6900000
+    rfparams["video_bpf_low"] = 2000000
+    rfparams["video_bpf_high"] = 7900000
     # Band-pass filter order.
     # Order may be fine as is.
     rfparams["video_bpf_order"] = 1
     # Sharper upper cutoff to get rid of high-frequency junk.
-    rfparams["video_lpf_extra"] = 6810000
-    rfparams["video_lpf_extra_order"] = 2
+    rfparams["video_lpf_extra"] = 7200000
+    rfparams["video_lpf_extra_order"] = 20
 
     ## TODO: Maybe a Notch filter for audio freqs
-    rfparams["video_hpf_extra"] = 2520000
-    rfparams["video_hpf_extra_order"] = 2
+    rfparams["video_hpf_extra"] = 2000000
+    rfparams["video_hpf_extra_order"] = 14
 
     # Low-pass filter on Y after demodulation
     rfparams["video_lpf_freq"] = 3500000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_order"] = 6
 
     # Video Y FM de-emphasis (1.25~1.35µs)
     rfparams["deemph_tau"] = 1.30e-6
@@ -55,10 +55,10 @@ def fill_rfparams_video8_shared(rfparams):
     # This should cover the area around reference white.
     # Used to reduce streaks due to amplitude loss on phase change around
     # sharp transitions.
-    rfparams["boost_bpf_low"] = 5200000
-    rfparams["boost_bpf_high"] = 6200000
+    rfparams["boost_bpf_low"] = 4900000
+    rfparams["boost_bpf_high"] = 5800000
     # Multiplier for the boosted signal to add in.
-    rfparams["boost_bpf_mult"] = 0
+    rfparams["boost_bpf_mult"] = 0.5
 
     # Upper frequency of bandpass to filter out chroma from the rf signal.
     # For vhs decks it's typically a bit more than 2x cc
@@ -101,8 +101,8 @@ def fill_rfparams_hi8_shared(rfparams):
     rfparams["video_hpf_extra_order"] = 3
 
     # Low-pass filter on Y after demodulation
-    rfparams["video_lpf_freq"] = 5500000
-    rfparams["video_lpf_order"] = 1
+    rfparams["video_lpf_freq"] = 6500000
+    rfparams["video_lpf_order"] = 6
 
     # Video Y FM de-emphasis
     rfparams["deemph_tau"] = 0.47e-6  # From spec

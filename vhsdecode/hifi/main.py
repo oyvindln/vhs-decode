@@ -29,7 +29,6 @@ try:
         FileIODialogUI, FileOutputDialogUI
     HIFI_UI = True
 except ImportError:
-    print("PyQt5 not installed, please install it to use this feature")
     HIFI_UI = False
 
 
@@ -691,7 +690,10 @@ def main() -> int:
     else:
         print("NTSC Hi8 format selected")
 
-    if args.UI:
+    if args.UI and not HIFI_UI:
+        print("PyQt5 is not installed, can not use graphical UI, falling back to command line interface..")
+
+    if args.UI and HIFI_UI:
         ui_t = AppWindow(sys.argv, decode_options)
         decoder_state = 0
         try:

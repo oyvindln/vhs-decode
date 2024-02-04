@@ -1,6 +1,6 @@
 ---
 name: '🚀 Feature request'
-about: Suggest an idea for improving vhs-decode or hifi-decode
+about: Suggest an idea for improving vhs-decode, hifi-decode, cvbs-decode or tbc-video-export
 title: ''
 labels: 'enhancement'
 assignees: ''
@@ -11,6 +11,11 @@ assignees: ''
 <!--
   Provide a clear and concise description of what the problem is.
   For example, "I'm always frustrated when..."
+-->
+
+### Is your proposal related to tbc-video-export?
+
+<!-- if so visit its repo here https://github.com/JuniorIsAJitterbug/tbc-video-export/issues."
 -->
 
 ### Describe the solution you'd like

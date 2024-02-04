@@ -240,6 +240,12 @@ Set up pipx
 
 (Alternatively, a [python virtual environment](https://docs.python.org/3/library/venv.html) can be used instead of using pipx)
 
+Install TBC-Video-Export
+
+    pipx install tbc-video-export
+
+(There is also [self contained builds](https://github.com/JuniorIsAJitterbug/tbc-video-export/releases) if install issues arise)
+
 Optional dependencies for GPU (Nvidia Cards) FLAC compression support:
 
     sudo apt install make ocl-icd-opencl-dev mono-runtime
@@ -389,7 +395,7 @@ Decode your captured tape to `.tbc` by using:
 
 Basic Usage Example:
 
-    ./vhs-decode --debug --pal --threads 8 --tape_format VHS --cxadc CX-White-2022.10.25.u8 my-first-decode-2022.10.25
+    vhs-decode --debug --pal --threads 8 --tape_format VHS --cxadc CX-White-2022.10.25.u8 my-first-decode-2022.10.25
 
 After decoding process your tapes VBI data with:
 
@@ -423,7 +429,7 @@ Read the `README_gen_chroma_vid_scripts` readme for the legacy script options.
 
 Linux & MacOS
 
-    python3 tbc-video-export.py Input-Media.tbc
+    tbc-video-export Input-Media.tbc
 
 Windows
 
@@ -442,7 +448,7 @@ The stock profiles for web use the BDWIF deinterlacer, but QTGMC is always recom
 
 ProRes 4444XQ & FFV1 with PCM audio have been added for editing support.
 
-Define your profile with for example: `--ffmpeg-profile ffv1_8bit_pcm`
+Define your profile with for example: `--profile ffv1_8bit_pcm`
 
 | Profile Name  | Codec         | Compression Type     | Bit-Depth | Chroma Sub-Sampling | Audio Format | Container | File Extension | Bitrate    |
 |---------------|---------------|----------------------|-----------|---------------------|--------------|-----------|----------------|------------|
@@ -470,7 +476,7 @@ Full Example:
 
 Linux & MacOS:
 
-    python3 tbc-video-export.py -s 50 -l 1500 --audio-track HiFi_24-bit_48khz.flac --audio-track Linear_24-bit_48khz.flac Input.tbc
+    tbc-video-export -s 50 -l 1500 --audio-track HiFi_24-bit_48khz.flac --audio-track Linear_24-bit_48khz.flac Input.tbc
 
 
 Windows:
