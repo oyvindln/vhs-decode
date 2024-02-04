@@ -93,6 +93,7 @@ def plot_magnitude_density(
     from matplotlib import rc_context
     import numpy as np
     import scipy.signal as sps
+    from vhsdecode.hilbert import unwrap_hilbert
 
     raw_h = sps.hilbert(raw_data)
     fil_h = sps.hilbert(filtered_data)
@@ -100,20 +101,18 @@ def plot_magnitude_density(
     raw_m = np.abs(raw_h)
     fil_m = np.abs(fil_h)
 
-    raw_f = np.gradient(np.angle(raw_h))
-    fil_f = np.gradient(np.angle(fil_h))
+    raw_f = unwrap_hilbert(raw_h, rfdecode.freq_hz)
+    fil_f = unwrap_hilbert(fil_h, rfdecode.freq_hz)
 
     with rc_context(
         {"figure.figsize": (14, 10), "figure.constrained_layout.use": True}
     ):
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
-        ax1.hist2d(raw_f, raw_m, bins=(256, 256), cmap=plt.cm.jet)
+        ax1.hist2d(raw_f, raw_m, bins=(256, 256), range=[[0,rfdecode.freq_hz//2],[0,len(raw_m)//16]], cmap=plt.cm.jet)
         ax1.set_title("Raw data")
-        ax1.legend()
-        ax2.hist2d(fil_f, fil_m, bins=(256, 256), cmap=plt.cm.jet)
+        ax2.hist2d(fil_f, fil_m, bins=(256, 256), range=[[0,rfdecode.freq_hz//2],[0,len(fil_m)//16]], cmap=plt.cm.jet)
         ax2.set_title("Filtered data")
-        ax2.legend()
 
         plt.show()
 
