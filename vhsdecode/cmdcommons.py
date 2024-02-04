@@ -53,10 +53,13 @@ def test_output_file(output_file: Optional[str]) -> bool:
         return False
 
     # get the free space in the output file directory
-    statvfs = os.statvfs(output_file_dir)
-    free_space = statvfs.f_frsize * statvfs.f_bavail
-    if free_space < 1024 * 1024 * 1024:
-        print(f"WARN: output file directory {output_file_dir} has {sizeof_fmt(free_space)} free space")
+    try:
+        statvfs = os.statvfs(output_file_dir)
+        free_space = statvfs.f_frsize * statvfs.f_bavail
+        if free_space < 1024 * 1024 * 1024:
+            print(f"WARN: output file directory {output_file_dir} has {sizeof_fmt(free_space)} free space")
+    except AttributeError:
+        pass
 
     try:
         with open(output_file, "ab") as f:
