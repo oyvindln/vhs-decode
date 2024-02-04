@@ -734,7 +734,7 @@ def main() -> int:
             return run_decoder(args, decode_options)
         else:
             parser.print_help()
-            print("ERROR: input file not found" if not test_input_file(filename) else f"ERROR: output file '{outname}' cannot be ceated nor overwritten")
+            print("ERROR: input file not found" if not test_input_file(filename) else f"ERROR: output file '{outname}' cannot be created nor overwritten")
             return 1
 
 
