@@ -84,6 +84,40 @@ def plot_data_and_pulses(
         plt.show()
 
 
+def plot_magnitude_density(
+    raw_data,
+    filtered_data,
+    rfdecode,
+):
+    import matplotlib.pyplot as plt
+    from matplotlib import rc_context
+    import numpy as np
+    import scipy.signal as sps
+
+    raw_h = sps.hilbert(raw_data)
+    fil_h = sps.hilbert(filtered_data)
+
+    raw_m = np.abs(raw_h)
+    fil_m = np.abs(fil_h)
+
+    raw_f = np.gradient(np.angle(raw_h))
+    fil_f = np.gradient(np.angle(fil_h))
+
+    with rc_context(
+        {"figure.figsize": (14, 10), "figure.constrained_layout.use": True}
+    ):
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+        ax1.hist2d(raw_f, raw_m, bins=(256, 256), cmap=plt.cm.jet)
+        ax1.set_title("Raw data")
+        ax1.legend()
+        ax2.hist2d(fil_f, fil_m, bins=(256, 256), cmap=plt.cm.jet)
+        ax2.set_title("Filtered data")
+        ax2.legend()
+
+        plt.show()
+
+
 def plot_input_data(
     raw_data,
     raw_fft,
@@ -190,6 +224,35 @@ def plot_input_data(
         ax4.legend()
 
         plt.show()
+
+
+def plot_luma_rf(rf, rf_luma_filter):
+#    import math
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    x = np.linspace(0,40,rf_luma_filter.size)
+
+    mag = 20*np.log10(np.absolute(rf_luma_filter))
+    ph = np.angle(rf_luma_filter, deg=True)
+
+    fig, ax1 = plt.subplots()
+
+    col = 'tab:red'
+    ax1.set_xlabel('Frequenzy (MHz)')
+    ax1.set_ylabel('Magnetude (dB)', color=col)
+    ax1.plot(x, mag, color=col)
+    ax1.tick_params(axis='y', labelcolor=col)
+
+    ax2 = ax1.twinx()
+
+    col = 'tab:green'
+    ax2.set_ylabel('Phase (°)', color=col)
+    ax2.plot(x, ph, color=col)
+    ax2.tick_params(axis='y', labelcolor=col)
+
+    fig.tight_layout()
+    plt.show()
 
 
 def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):

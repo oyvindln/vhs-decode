@@ -37,6 +37,7 @@ from vhsdecode.compute_video_filters import (
     gen_nonlinear_amplitude_lpf,
     gen_custom_video_filters,
     create_sub_emphasis_params,
+    supergauss,
     NONLINEAR_AMP_LPF_FREQ_DEFAULT,
 )
 from vhsdecode.demodcache import DemodCacheTape
@@ -932,6 +933,11 @@ class VHSRFDecode(ldd.RFDecode):
                 DP, self.freq_hz_half, self.blocklen
             )
 
+        if self.debug_plot and self.debug_plot.is_plot_requested("rf_luma"):
+            from vhsdecode.debug_plot import plot_luma_rf
+
+            plot_luma_rf(self, self.Filters["RFVideo"])
+
         if (
             self.debug_plot
             and self.debug_plot.is_plot_requested("nldeemp")
@@ -1078,6 +1084,8 @@ class VHSRFDecode(ldd.RFDecode):
                 self._sub_emphasis_params.exponential_scaling,
                 self._sub_emphasis_params.scaling_1,
                 self._sub_emphasis_params.scaling_2,
+                self._sub_emphasis_params.logistic_mid,
+                self._sub_emphasis_params.logistic_rate,
                 self._sub_emphasis_params.static_factor,
             )
 
@@ -1107,6 +1115,14 @@ class VHSRFDecode(ldd.RFDecode):
             if not self._do_cafc
             else data[: self.blocklen]
         )
+
+        if self.debug_plot and self.debug_plot.is_plot_requested("magdens"):
+            from vhsdecode.debug_plot import plot_magnitude_density
+            plot_magnitude_density(
+                raw_data=data[: self.blocklen],
+                filtered_data=npfft.ifft(indata_fft).real,
+                rfdecode=self,
+            )
 
         if self.debug_plot and self.debug_plot.is_plot_requested("demodblock"):
             from vhsdecode.debug_plot import plot_input_data

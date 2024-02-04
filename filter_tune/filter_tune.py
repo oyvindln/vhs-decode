@@ -157,6 +157,8 @@ def _gen_sub_emphasis_params_from_sliders(format_params, filter_params):
         "nonlinear_exp_scaling": filter_params["nonlinear_exponential_scale"]["value"],
         "nonlinear_scaling_1": filter_params["nonlinear_linear_scale"]["value"],
         "nonlinear_scaling_2": filter_params["nonlinear_linear_scale_b"]["value"],
+        "nonlinear_logistic_mid": filter_params["nonlinear_logistic_mid"]["value"],
+        "nonlinear_logistic_rate": filter_params["nonlinear_logistic_rate"]["value"],
         "static_factor": filter_params["nonlinear_static_factor"]["value"],
         "nonlinear_deviation": 2,
     }
@@ -176,7 +178,7 @@ class FilterPlot:
             "apply_main_deemphasis": False,
             "apply_custom_filters": True,
             "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
-            "y": np.array([[1.73,  1.60,  1.04,  0.37,  0.07,  0.06],
+            "y": np.array([[1.73,  1.60,  1.04,  0.37,  0.07,  0.06], # Values directly from the spec
                            [1.30,  0.73, -0.69, -1.75, -2.10, -2.02],
                            [0.65, -1.09, -2.86, -4.16, -4.60, -4.43],
                            [0.49, -2.35, -5.30, -7.14, -7.64, -7.34]])
@@ -186,7 +188,7 @@ class FilterPlot:
             "apply_main_deemphasis": True,
             "apply_custom_filters": True,
             "x": np.array([200000, 500000, 1000000, 2000000, 3000000, 5000000]),
-            "y": np.array([[ -3.47426288,  -8.65657528, -11.62615626, -13.24248314, -13.74555096, -13.86360561],
+            "y": np.array([[ -3.47426288,  -8.65657528, -11.62615626, -13.24248314, -13.74555096, -13.86360561],  # Warning! These values could be wrong
                            [ -3.90426288,  -9.52657528, -13.35615626, -15.36248314, -15.91555096, -15.94360561],
                            [ -4.55426288, -11.34657528, -15.52615626, -17.77248314, -18.41555096, -18.35360561],
                            [ -4.71426288, -12.60657528, -17.96615626, -20.75248314, -21.45555096, -21.26360561]])
@@ -659,7 +661,31 @@ class VHStune(QDialog):
                 "step": 5000,
                 "min": 50000,
                 "max": 6000000,
-                "desc": "NL deemp Amplitude detector low pass filter corner freq ({:.2f}):",
+                "desc": "NL deemp Amplitude detector low pass filter corner freq ({:.1f}):",
+                "onchange": [
+                    self.update_nl_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage,
+                ],
+            },
+            "nonlinear_logistic_mid": {
+                "value": rf_params.get("nonlinear_logistic_mid", 0.1),
+                "step": 0.001,
+                "min": 0.0,
+                "max": 0.25,
+                "desc": "Non-linear logistic mid-point ({:.3f}):",
+                "onchange": [
+                    self.update_nl_deemphasis,
+                    self.apply_both_deemph_filters,
+                    self.drawImage,
+                ],
+            },
+            "nonlinear_logistic_rate": {
+                "value": rf_params.get("nonlinear_logistic_rate", 0.0),
+                "step": 0.1,
+                "min": 0,
+                "max": 100.0,
+                "desc": "Non-linear logistic rate (0=off) ({:.1f}):",
                 "onchange": [
                     self.update_nl_deemphasis,
                     self.apply_both_deemph_filters,

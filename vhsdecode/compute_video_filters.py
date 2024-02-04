@@ -16,11 +16,13 @@ NONLINEAR_STATIC_FACTOR_DEFAULT = None
 def create_sub_emphasis_params(rf_params, sys_params, hz_ire, vsync_ire):
     return namedtuple(
         "SubEmphasisParams",
-        "exponential_scaling scaling_1 scaling_2 static_factor deviation",
+        "exponential_scaling scaling_1 scaling_2 logistic_mid logistic_rate static_factor deviation",
     )(
         rf_params.get("nonlinear_exp_scaling", 0.25),
         rf_params.get("nonlinear_scaling_1", None),
         rf_params.get("nonlinear_scaling_2", None),
+        rf_params.get("nonlinear_logistic_mid", None),
+        rf_params.get("nonlinear_logistic_rate", None),
         rf_params.get("nonlinear_static_factor", NONLINEAR_STATIC_FACTOR_DEFAULT),
         sys_params.get(
             "nonlinear_deviation",
