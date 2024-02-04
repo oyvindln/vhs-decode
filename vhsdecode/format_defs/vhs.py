@@ -57,7 +57,11 @@ def fill_rfparams_svhs_shared(rfparams):
     rfparams["boost_bpf_low"] = 7000000
     rfparams["boost_bpf_high"] = 8400000
     # Multiplier for the boosted signal to add in.
-    rfparams["boost_bpf_mult"] = 1.1
+    rfparams["boost_bpf_mult"] = None
+
+    # Use linear ramp to boost RF
+    rfparams["boost_rf_linear_0"] = 0.5
+    rfparams["boost_rf_linear_20"] = 100
 
     # SVHS uses the emphasis curve from VHS + an additional sub-emphasis filter
     # The latter isn't properly implemented yet but

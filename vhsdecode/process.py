@@ -864,6 +864,10 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.Filters["RFVideo"] = abs(y_fm) * abs(y_fm_lowpass) * abs(y_fm_highpass)
 
+        if DP.get("boost_rf_linear_0", None) is not None:
+            ramp = np.linspace(DP["boost_rf_linear_0"], DP["boost_rf_linear_20"] * (self.freq_hz_half / 20e6), self.blocklen // 2)
+            self.Filters["RFVideo"] *= np.concatenate((ramp, np.flip(ramp)))
+
         self.Filters["RFTop"] = sps.butter(
             1,
             [
@@ -1013,12 +1017,14 @@ class VHSRFDecode(ldd.RFDecode):
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
-            data_filtered = npfft.ifft(indata_fft)
-            high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
-                (env_mean * 0.9) / env
-            )
-            del data_filtered
-            indata_fft += npfft.fft(high_part * self._high_boost)
+            if self._high_boost is not None:
+                data_filtered = npfft.ifft(indata_fft)
+                high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
+                    (env_mean * 0.9) / env
+                )
+                del data_filtered
+                indata_fft += npfft.fft(high_part * self._high_boost)
+                print("wer das liest ist doof")
         else:
             ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
