@@ -494,16 +494,14 @@ class HifiUi(QMainWindow):
         else:
             self.input_sample_rate = self._input_combo_rates[self.input_samplerate_combo.currentIndex()]
 
-    def on_decode_finished(self, decoded_filename: str = 'input stream'):
-        self.setWindowIcon(QIcon.fromTheme('document-open'))
-        # alerts user that decode is finished
+    def generic_message_box(self, title:str, message:str, type:QMessageBox.Icon=QMessageBox.Information):
         message_box = QMessageBox(
-            QMessageBox.Information,
-            'Decode Finished',
-            f'Decode of {decoded_filename} finished.',
+            type,
+            title,
+            message,
             parent=self
         )
-        message_box.setIcon(QMessageBox.Information)
+        message_box.setIcon(type)
         message_box.setDefaultButton(QMessageBox.Ok)
         # dark mode
         message_box.setStyleSheet("""
@@ -517,6 +515,14 @@ class HifiUi(QMainWindow):
             }
         """)
         message_box.exec_()
+
+    def on_decode_finished(self, decoded_filename: str = 'input stream'):
+        self.setWindowIcon(QIcon.fromTheme('document-open'))
+        # alerts user that decode is finished
+        self.generic_message_box(
+            "Decode Finished",
+            f'Decode of {decoded_filename} finished.'
+        )
 
 
 class FileOutputDialogUI(HifiUi):

@@ -1,4 +1,7 @@
 import argparse
+import os
+from typing import Optional
+
 import lddecode.utils as lddu
 import sys
 
@@ -7,6 +10,83 @@ CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
 CXADC_FREQ_HIGH = 3150.0 / 88.0  # 35.795454545
 CXADC_TENBIT_FREQ = (8 * 315.0) / 88.0 / 2.0  # 14.318181818
 CXADC_TENBIT_FREQ_HIGH = 3150.0 / 88.0 / 2.0  # 17.897727272
+
+DEFAULT_THREADS = 4
+DEFAULT_INPUT_FILENAME = ""
+DEFAULT_OUTPUT_FILENAME = ""
+
+
+# size bytes to human-readable string
+def sizeof_fmt(num: int, suffix: str = "B") -> str:
+    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei", "Zi"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f} {unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f} Yi{suffix}"
+
+
+# checks if the input file can be read
+def test_input_file(input_file: Optional[str]) -> bool:
+    if input_file == '-':
+        return True
+
+    if input_file is DEFAULT_INPUT_FILENAME:
+        print("WARN: input file not specified")
+        return False
+
+    try:
+        with open(input_file, "rb") as f:
+            pass
+    except FileNotFoundError:
+        print(f"WARN: input file '{input_file}' not found")
+        return False
+    return True
+
+
+# checks if the output file can be written
+def test_output_file(output_file: Optional[str]) -> bool:
+
+    # checks for free space on the output file directory
+    output_file_dir = '.' if os.path.dirname(output_file) == '' else os.path.dirname(output_file)
+    if not os.access(output_file_dir, os.W_OK):
+        print(f"Error: output file directory '{output_file_dir}' is not writable")
+        return False
+
+    # get the free space in the output file directory
+    statvfs = os.statvfs(output_file_dir)
+    free_space = statvfs.f_frsize * statvfs.f_bavail
+    if free_space < 1024 * 1024 * 1024:
+        print(f"WARN: output file directory {output_file_dir} has {sizeof_fmt(free_space)} free space")
+
+    try:
+        with open(output_file, "ab") as f:
+            pass
+    except FileNotFoundError:
+        print(f"WARN: output file '{output_file}' not found")
+        return False
+
+    return True
+
+
+# checks if the input file can be read and the output file can be written
+def test_io(input_file: Optional[str], output_file: Optional[str]) -> bool:
+    if not test_input_file(input_file):
+        return False
+    if not test_output_file(output_file):
+        return False
+    return True
+
+
+class TestInputFile(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if test_input_file(values):
+            setattr(namespace, self.dest, values)
+
+
+class TestOutputFile(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if test_output_file(values):
+            setattr(namespace, self.dest, values)
 
 
 def add_argument_hidden_in_gui(parser, use_gui, *args, **kwargs):
@@ -48,11 +128,25 @@ def common_parser_gui(meta_title):
     return common_parser_gui_inner(meta_title)
 
 
-def common_parser_cli(meta_title, default_threads=5):
+def common_parser_cli(meta_title, default_threads=DEFAULT_THREADS + 1):
     parser = argparse.ArgumentParser(description=meta_title)
-    parser.add_argument("infile", metavar="infile", type=str, help="source file")
     parser.add_argument(
-        "outfile", metavar="outfile", type=str, help="base name for destination files"
+        "infile",
+        metavar="infile",
+        type=str,
+        help="source file",
+        nargs='?',
+        default=DEFAULT_INPUT_FILENAME,
+        action=TestInputFile
+    )
+    parser.add_argument(
+        "outfile",
+        metavar="outfile",
+        type=str,
+        help="base name for destination files",
+        nargs='?',
+        default=DEFAULT_OUTPUT_FILENAME,
+        action=TestOutputFile
     )
     # help="Disable AGC (deprecated, already disabled by default)
     parser.add_argument(
@@ -69,7 +163,7 @@ def common_parser_cli(meta_title, default_threads=5):
     return common_parser_inner(parser, default_threads=default_threads)
 
 
-def common_parser_inner(parser, use_gui=False, default_threads=4):
+def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
     parser.add_argument(
         "--system",
         metavar="system",
@@ -289,7 +383,15 @@ def select_system(args):
     return system
 
 
+class IOArgsException(Exception):
+    pass
+
+
 def get_basics(args):
+    can_io = test_io(args.infile, args.outfile)
+    if not 'UI' in args:
+        if not can_io:
+            raise IOArgsException("Input/output file error")
     return args.infile, args.outfile, args.start, args.length
 
 

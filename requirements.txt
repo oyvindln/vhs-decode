@@ -1,8 +1,8 @@
 Cython
 matplotlib
-numba>=0.55.1
-numpy
+numba>=0.58.1
+numpy>=1.22
 samplerate
-scipy
+scipy>=1.10.1
 soundfile
 sounddevice

@@ -23,6 +23,9 @@ from vhsdecode.cmdcommons import (
     get_basics,
     get_rf_options,
     get_extra_options,
+    IOArgsException,
+    test_input_file,
+    test_output_file,
 )
 
 supported_tape_formats = {
@@ -282,7 +285,14 @@ def main(args=None, use_gui=False):
 
     args = parser.parse_args(args)
 
-    filename, outname, firstframe, req_frames = get_basics(args)
+    try:
+        filename, outname, firstframe, req_frames = get_basics(args)
+    except IOArgsException as e:
+        parser.print_help()
+        print(e)
+        print(f"ERROR: input file '{args.infile}' not found" if not test_input_file(args.infile) else "Input file: OK")
+        print(f"ERROR: output file '{args.outfile}' is not writable" if not test_output_file(args.outfile) else "Output file: OK")
+        sys.exit(1)
 
     if not args.overwrite:
         conflicts_ext = [".tbc", "_chroma.tbc", ".log", ".tbc.json"]

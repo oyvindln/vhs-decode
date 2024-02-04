@@ -17,6 +17,8 @@ from vhsdecode.cmdcommons import (
     select_sample_freq,
     select_system,
     get_basics,
+    test_input_file,
+    test_output_file
 )
 from vhsdecode.hifi.HiFiDecode import HiFiDecode, NoiseReduction, DEFAULT_NR_GAIN_, discard_stereo
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
@@ -24,7 +26,7 @@ import io
 import sounddevice as sd
 
 try:
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QMessageBox
     from vhsdecode.hifi.HifiUi import ui_parameters_to_decode_options, decode_options_to_ui_parameters, \
         FileIODialogUI, FileOutputDialogUI
     HIFI_UI = True
@@ -704,9 +706,22 @@ def main() -> int:
                     # change to output file directory
                     if os.path.dirname(options["output_file"]) != '':
                         os.chdir(os.path.dirname(options["output_file"]))
-                    decoder_state = run_decoder(args, options, ui_t=ui_t)
-                    ui_t.window.transport_state = 0
-                    ui_t.window.on_decode_finished()
+
+                    # test input and output files
+                    if test_input_file(options["input_file"]) and test_output_file(options["output_file"]):
+                        decoder_state = run_decoder(args, options, ui_t=ui_t)
+                        ui_t.window.transport_state = 0
+                        ui_t.window.on_decode_finished()
+                    else:
+                        message = None
+                        if not test_input_file(options['input_file']):
+                            message = f"Input file '{options['input_file']}' not found"
+                        elif not test_output_file(options['output_file']):
+                            message = f"Output file '{options['output_file']}' cannot be created nor overwritten"
+
+                        ui_t.window.generic_message_box("I/O Error", message, QMessageBox.Critical)
+                        ui_t.window.on_stop_clicked()
+
                 ui_t.app.processEvents()
                 time.sleep(0.01)
             ui_t.window.transport_state = 0
@@ -715,7 +730,12 @@ def main() -> int:
 
         return decoder_state
     else:
-        return run_decoder(args, decode_options)
+        if test_input_file(filename) and test_output_file(outname):
+            return run_decoder(args, decode_options)
+        else:
+            parser.print_help()
+            print("ERROR: input file not found" if not test_input_file(filename) else f"ERROR: output file '{outname}' cannot be ceated nor overwritten")
+            return 1
 
 
 if __name__ == "__main__":
