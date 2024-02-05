@@ -1030,7 +1030,6 @@ class VHSRFDecode(ldd.RFDecode):
                 ) * ((env_mean * 0.9) / env)
                 del data_filtered
                 indata_fft += npfft.fft(high_part * self._high_boost)
-                print("wer das liest ist doof")
         else:
             ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
