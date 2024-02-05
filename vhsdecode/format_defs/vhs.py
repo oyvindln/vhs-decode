@@ -15,8 +15,10 @@ def fill_rfparams_vhs_shared(rfparams):
     #  resistor divider ratio: 4:1 (=> gain factor 5)
 
     rfparams["deemph_mid"] = 273755.82  # sqrt(gain_factor)/(2*pi*r*c)
-    rfparams["deemph_gain"] = 13.9794   # 20*log10(gain_factor)
-    rfparams["deemph_q"] = 0.462088186  # 1/sqrt(sqrt(gain_factor) + 1/sqrt(gain_factor) + 2)
+    rfparams["deemph_gain"] = 13.9794  # 20*log10(gain_factor)
+    rfparams[
+        "deemph_q"
+    ] = 0.462088186  # 1/sqrt(sqrt(gain_factor) + 1/sqrt(gain_factor) + 2)
 
     # Parameters for high-pass filter used for non-linear deemphasis, these are
     # probably not correct.
@@ -45,21 +47,39 @@ def fill_rfparams_svhs_shared(rfparams):
     rfparams["video_hpf_extra_order"] = 3
 
     # Low-pass filter on Y after demodulation
-    rfparams["video_lpf_freq"] = 6500000
+    rfparams["video_lpf_freq"] = 7500000
     rfparams["video_lpf_order"] = 6
+    rfparams["video_lpf_supergauss"] = True
+
+    rfparams["video_custom_luma_filters"] = [
+        {"type": "file", "filename": "svhs-sp-linear-subdeemphasis"},
+        {"type": "highshelf", "gain": 4.0, "midfreq": 2000000, "q": 0.4967045},
+    ]
 
     rfparams["boost_bpf_low"] = 7000000
     rfparams["boost_bpf_high"] = 8400000
     # Multiplier for the boosted signal to add in.
-    rfparams["boost_bpf_mult"] = 1.1
+    rfparams["boost_bpf_mult"] = None
+
+    # Use linear ramp to boost RF
+    rfparams["boost_rf_linear_0"] = 0.5
+    rfparams["boost_rf_linear_20"] = 100
 
     # SVHS uses the emphasis curve from VHS + an additional sub-emphasis filter
     # The latter isn't properly implemented yet but
     # adjusting the corner frequency here makes it look a bit closer
     # than just using the values for VHS, it needs to be properly
     # sorted though.
-    rfparams["deemph_mid"] = 350000
-    #rfparams["deemph_gain"] = 14
+    # rfparams["deemph_mid"] = 335000 # the optimal value of this parameter is currently dependant on the recording devices
+    # rfparams["deemph_gain"] = 14
+
+    rfparams["nonlinear_highpass_freq"] = 320000
+    rfparams["nonlinear_amp_lpf_freq"] = 590000
+    rfparams["nonlinear_exp_scaling"] = 0.23
+    rfparams["nonlinear_scaling_2"] = 0.72
+    rfparams["nonlinear_logistic_mid"] = 0.2
+    rfparams["nonlinear_logistic_rate"] = 14.0
+    rfparams["use_sub_deemphasis"] = True
 
 
 def get_rfparams_pal_vhs(rfparams_pal):
@@ -155,7 +175,7 @@ def get_rfparams_pal_svhs(sysparams_pal):
 
     fill_rfparams_svhs_shared(RFParams_PAL_SVHS)
 
-    RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
+    # RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_l"] = -250000
 
@@ -178,6 +198,7 @@ def get_sysparams_pal_svhs(sysparams_pal):
 
     return SysParams_PAL_SVHS
 
+
 def get_sysparams_pal_vhshq(sysparams_pal):
     SysParams_PAL_VHSHQ = get_sysparams_pal_vhs(sysparams_pal)
 
@@ -185,6 +206,7 @@ def get_sysparams_pal_vhshq(sysparams_pal):
     SysParams_PAL_VHSHQ["track_ire0_offset"] = [7812.5, 0]
 
     return SysParams_PAL_VHSHQ
+
 
 def get_rfparams_ntsc_vhs(rfparams_ntsc):
     """Get RF params for NTSC VHS"""
@@ -276,6 +298,7 @@ def get_sysparams_ntsc_svhs(sysparams_ntsc):
 
     return SysParams_NTSC_SVHS
 
+
 def get_sysparams_ntsc_vhshq(sysparams_ntsc):
     SysParams_NTSC_VHSHQ = get_sysparams_ntsc_vhs(sysparams_ntsc)
 
@@ -283,6 +306,7 @@ def get_sysparams_ntsc_vhshq(sysparams_ntsc):
     SysParams_NTSC_VHSHQ["track_ire0_offset"] = [7867, 0]
 
     return SysParams_NTSC_VHSHQ
+
 
 def get_rfparams_mpal_vhs(rfparams_ntsc):
     params = get_rfparams_ntsc_vhs(rfparams_ntsc)

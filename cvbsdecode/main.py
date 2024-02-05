@@ -39,6 +39,35 @@ def main(args=None):
         help="Enable auto sync level detection.",
     )
     parser.add_argument(
+        "-C",
+        "--clamp_agc",
+        dest="clamp_agc",
+        action="store_true",
+        default=False,
+        help="Clamp signal (black level) and enable automatic gain control.",
+    )
+    parser.add_argument(
+        "--agc_speed",
+        metavar="speed",
+        type=float,
+        default=0.1,
+        help="sets how fast the AGC should react (0 = never, 1 = immediate).",
+    )
+    parser.add_argument(
+        "--agc_gain_factor",
+        metavar="factor",
+        type=float,
+        default=1.0,
+        help="adjusts the AGC white level by given factor.",
+    )
+    parser.add_argument(
+        "--agc_set_gain",
+        metavar="gain",
+        type=float,
+        default=0.0,
+        help="override gain of AGC.",
+    )
+    parser.add_argument(
         "--right_hand_hsync",
         dest="rhs_hsync",
         action="store_true",
@@ -69,7 +98,9 @@ def main(args=None):
                 conflicts.append(outname + ext)
 
         if conflicts:
-            print("Existing decode files found, remove them or run command with --overwrite")
+            print(
+                "Existing decode files found, remove them or run command with --overwrite"
+            )
             for conflict in conflicts:
                 print("\t", conflict)
             sys.exit(1)
@@ -82,6 +113,10 @@ def main(args=None):
 
     rf_options = get_rf_options(args)
     rf_options["auto_sync"] = args.auto_sync
+    rf_options["clamp_agc"] = args.clamp_agc
+    rf_options["agc_speed"] = args.agc_speed
+    rf_options["agc_gain_factor"] = args.agc_gain_factor
+    rf_options["agc_set_gain"] = args.agc_set_gain
     rf_options["rhs_hsync"] = args.rhs_hsync
 
     extra_options = get_extra_options(args)
@@ -178,6 +213,28 @@ def main(args=None):
         if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
             jsondumper.put(vhsd.build_json())
 
+    if "lowest_agc_gain" in vhsd.rf.DecoderParams:
+        print("Automatic gain control statistics:", file=sys.stderr)
+        print(
+            " Lowest detected gain:  ",
+            vhsd.rf.DecoderParams["lowest_agc_gain"],
+            file=sys.stderr,
+        )
+        print(
+            " Highest detected gain: ",
+            vhsd.rf.DecoderParams["highest_agc_gain"],
+            file=sys.stderr,
+        )
+        print(
+            " Lowest used gain:      ",
+            vhsd.rf.DecoderParams["lowest_used_agc_gain"],
+            file=sys.stderr,
+        )
+        print(
+            " Highest used gain:     ",
+            vhsd.rf.DecoderParams["highest_used_agc_gain"],
+            file=sys.stderr,
+        )
     print("saving JSON and exiting")
     cleanup(outname)
     sys.exit(0)

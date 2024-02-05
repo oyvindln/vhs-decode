@@ -14,7 +14,7 @@ classifiers = [
     "Topic :: Multimedia :: Video",
 ]
 dependencies = [
-    "numpy>=1.22","numba>=0.58.1","scipy>=1.10.1","samplerate", "static-ffmpeg", "cython", "soundfile", "sounddevice"
+    "numpy>=1.22","numba>=0.58.1","scipy>=1.10.1","samplerate", "static-ffmpeg", "cython", "soundfile", "sounddevice", "importlib_resources >= 5.0; python_version < '3.10'"
 ]
 dynamic = ["version"]
 # version = "0.2.1dev0"
@@ -41,3 +41,9 @@ Homepage = "https://www.domesday86.com"
 [tool.setuptools_scm]
 write_to = "vhsdecode/_version.py"
 local_scheme = "no-local-version"
+
+[tool.setuptools.packages.find]
+where = ["vhsdecode"]
+
+[tool.setuptools.package-data]
+vhs_decode = ["*.txt"]

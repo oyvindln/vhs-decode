@@ -24,6 +24,8 @@ def _sub_deemphasis_debug(
         sub_emphasis_params.exponential_scaling,
         sub_emphasis_params.scaling_1,
         sub_emphasis_params.scaling_2,
+        sub_emphasis_params.logistic_mid,
+        sub_emphasis_params.logistic_rate,
         sub_emphasis_params.static_factor,
         # debug_const_amplitude=const_amplitude,
     )
@@ -39,6 +41,8 @@ def sub_deemphasis_inner(
     exponential_scale=0.33,
     linear_scale_1=None,
     linear_scale_2=None,
+    logistic_mid=0,
+    logistic_rate=0,
     static_factor=None,
     debug_const_amplitude=False,
 ):
@@ -81,6 +85,9 @@ def sub_deemphasis_inner(
     if linear_scale_2 is not None:
         amplitude *= linear_scale_2
 
+    if logistic_rate is not None and logistic_rate > 0:
+        amplitude *= (1 / (1 + np.e**(-logistic_rate * (amplitude - logistic_mid))))
+
     # Scale the band-pass filtered signal by one minus the resulting referenc
     # e.g this means it get scaled more at lower amplitudes.
     hf_part *= 1 - amplitude
@@ -97,6 +104,8 @@ def sub_deemphasis(
     exponential_scale=0.33,
     linear_scale_1=None,
     linear_scale_2=None,
+    logistic_mid=0,
+    logistic_rate=0,
     static_factor=None,
     debug_const_amplitude=False,
 ):
@@ -123,6 +132,8 @@ def sub_deemphasis(
         exponential_scale,
         linear_scale_1,
         linear_scale_2,
+        logistic_mid,
+        logistic_rate,
         static_factor,
         debug_const_amplitude,
     )

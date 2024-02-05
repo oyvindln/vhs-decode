@@ -35,7 +35,9 @@ from vhsdecode.compute_video_filters import (
     gen_video_lpf_params,
     gen_nonlinear_bandpass_params,
     gen_nonlinear_amplitude_lpf,
+    gen_custom_video_filters,
     create_sub_emphasis_params,
+    supergauss,
     NONLINEAR_AMP_LPF_FREQ_DEFAULT,
 )
 from vhsdecode.demodcache import DemodCacheTape
@@ -862,6 +864,14 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.Filters["RFVideo"] = abs(y_fm) * abs(y_fm_lowpass) * abs(y_fm_highpass)
 
+        if DP.get("boost_rf_linear_0", None) is not None:
+            ramp = np.linspace(
+                DP["boost_rf_linear_0"],
+                DP["boost_rf_linear_20"] * (self.freq_hz_half / 20e6),
+                self.blocklen // 2,
+            )
+            self.Filters["RFVideo"] *= np.concatenate((ramp, np.flip(ramp)))
+
         self.Filters["RFTop"] = sps.butter(
             1,
             [
@@ -878,6 +888,15 @@ class VHSRFDecode(ldd.RFDecode):
         (_, filter_video_lpf) = gen_video_lpf_params(
             DP, self.freq_hz_half, self.blocklen
         )
+
+        if DP.get("video_custom_luma_filters", None) is not None:
+            self.Filters["FCustomVideo"] = gen_custom_video_filters(
+                DP["video_custom_luma_filters"],
+                self.freq_hz,
+                self.blocklen,
+            )
+        else:
+            self.Filters["FCustomVideo"] = 1.0
 
         # additional filters:  0.5mhz, used for sync detection.
         # Using an FIR filter here to get a known delay
@@ -904,7 +923,9 @@ class VHSRFDecode(ldd.RFDecode):
 
         self.Filters["FDeemp"] = filter_deemp
 
-        self.Filters["FVideo"] = filter_deemp * filter_video_lpf
+        self.Filters["FVideo"] = (
+            filter_deemp * filter_video_lpf * self.Filters["FCustomVideo"]
+        )
 
         SF["FVideo05"] = filter_video_lpf * filter_deemp * filter_05
 
@@ -921,6 +942,11 @@ class VHSRFDecode(ldd.RFDecode):
             SF["NLHighPassF"] = gen_nonlinear_bandpass_params(
                 DP, self.freq_hz_half, self.blocklen
             )
+
+        if self.debug_plot and self.debug_plot.is_plot_requested("rf_luma"):
+            from vhsdecode.debug_plot import plot_luma_rf
+
+            plot_luma_rf(self, self.Filters["RFVideo"])
 
         if (
             self.debug_plot
@@ -997,12 +1023,13 @@ class VHSRFDecode(ldd.RFDecode):
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
-            data_filtered = npfft.ifft(indata_fft)
-            high_part = utils.filter_simple(data_filtered, self.Filters["RFTop"]) * (
-                (env_mean * 0.9) / env
-            )
-            del data_filtered
-            indata_fft += npfft.fft(high_part * self._high_boost)
+            if self._high_boost is not None:
+                data_filtered = npfft.ifft(indata_fft)
+                high_part = utils.filter_simple(
+                    data_filtered, self.Filters["RFTop"]
+                ) * ((env_mean * 0.9) / env)
+                del data_filtered
+                indata_fft += npfft.fft(high_part * self._high_boost)
         else:
             ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
@@ -1068,6 +1095,8 @@ class VHSRFDecode(ldd.RFDecode):
                 self._sub_emphasis_params.exponential_scaling,
                 self._sub_emphasis_params.scaling_1,
                 self._sub_emphasis_params.scaling_2,
+                self._sub_emphasis_params.logistic_mid,
+                self._sub_emphasis_params.logistic_rate,
                 self._sub_emphasis_params.static_factor,
             )
 
@@ -1097,6 +1126,15 @@ class VHSRFDecode(ldd.RFDecode):
             if not self._do_cafc
             else data[: self.blocklen]
         )
+
+        if self.debug_plot and self.debug_plot.is_plot_requested("magdens"):
+            from vhsdecode.debug_plot import plot_magnitude_density
+
+            plot_magnitude_density(
+                raw_data=data[: self.blocklen],
+                filtered_data=npfft.ifft(indata_fft).real,
+                rfdecode=self,
+            )
 
         if self.debug_plot and self.debug_plot.is_plot_requested("demodblock"):
             from vhsdecode.debug_plot import plot_input_data

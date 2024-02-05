@@ -19,10 +19,16 @@ def plot_filters(
     figure,
     sub_emph_plotter=None,
     sub_emphasis_params=None,
+    sub_emphasis_reference=None
 ):
     import matplotlib.pyplot as plt
 
     ax = figure.subplots(3, 1, sharex=False)
+
+    if sub_emphasis_reference is None:
+        sub_emphasis_levels = [0, -3, -6, -10, -15, -20]
+    else:
+        sub_emphasis_levels = sub_emphasis_reference["levels"]
 
     # hpf = filters["NLHighPassF"].real
     freqs = np.fft.rfftfreq(block_len, 1.0 / sample_rate)
@@ -30,19 +36,19 @@ def plot_filters(
     ax[2].plot(freqs, to_db(filters["FVideo"]))
 
     if sub_emph_plotter and sub_emphasis_params:
-        sub_emph_plotter.plot_sub_emphasis(0, ax[1], sub_emphasis_params)
-        sub_emph_plotter.plot_sub_emphasis(-3, ax[1], sub_emphasis_params)
-        sub_emph_plotter.plot_sub_emphasis(-6, ax[1], sub_emphasis_params)
-        sub_emph_plotter.plot_sub_emphasis(-10, ax[1], sub_emphasis_params)
-        sub_emph_plotter.plot_sub_emphasis(-15, ax[1], sub_emphasis_params)
-        sub_emph_plotter.plot_sub_emphasis(-20, ax[1], sub_emphasis_params)
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2',  '#7f7f7f', '#bcbd22', '#17becf']
+        for idx, db in enumerate(sub_emphasis_levels):
+            sub_emph_plotter.plot_sub_emphasis(db, ax[1], sub_emphasis_params, color = colors[idx % 10])
+            if sub_emphasis_reference is not None:
+                ax[1].scatter(sub_emphasis_reference["x"], sub_emphasis_reference["y"][idx], color = colors[idx % 10], marker = "x")
 
 
 class SubEmphPlotter:
-    def __init__(self, block_len, sample_rate, filters, debug_ax=None):
+    def __init__(self, block_len, sample_rate, filters, signal_filter=1, debug_ax=None):
         self.freqs = np.fft.rfftfreq(block_len, 1.0 / sample_rate)
         self.deviation = 2
         self._filters = filters
+        self._signal_filter = signal_filter
         ratio = block_len / sample_rate
 
         t = np.linspace(0, ratio, block_len)
@@ -53,16 +59,19 @@ class SubEmphPlotter:
             debug_ax.plot(self.chirp_signal)
         self.chirp_fft = npfft.rfft(self.chirp_signal)
 
-        self.hf_part = npfft.irfft(self.chirp_fft * filters["NLHighPassF"])
+        #self.hf_part = npfft.irfft(self.chirp_fft * filters["NLHighPassF"])
 
         if debug_ax is not None:
             amplitude = abs(sps.hilbert(self.hf_part)) / (self.deviation / 2)
             debug_ax.plot(amplitude)
 
+    def update_signal_filters(self, signal_filter):
+        self._signal_filter = signal_filter
+
     def plot_sub_emphasis(self, amplitude_db, ax, sub_emphasis_params, **kwargs):
         filtered = _sub_deemphasis_debug(
-            self.chirp_signal,
-            self.chirp_fft,
+            npfft.irfft(self.chirp_fft * self._signal_filter),
+            self.chirp_fft * self._signal_filter,
             self._filters,
             self.deviation,
             from_db(amplitude_db),
