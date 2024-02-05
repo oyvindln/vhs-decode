@@ -36,6 +36,7 @@ def test_input_file(input_file: Optional[str]) -> bool:
 
     try:
         with open(input_file, "rb") as f:
+            f.close()
             pass
     except FileNotFoundError:
         print(f"WARN: input file '{input_file}' not found")
@@ -63,6 +64,7 @@ def test_output_file(output_file: Optional[str]) -> bool:
 
     try:
         with open(output_file, "ab") as f:
+            f.close()
             pass
     except FileNotFoundError:
         print(f"WARN: output file '{output_file}' not found")
