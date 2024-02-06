@@ -129,21 +129,26 @@ parser.add_argument(
 )
 
 
-def test_if_ldf_reader_is_installed():
-    shell_command = "ld-ldf-reader"
+def test_if_ffmpeg_is_installed():
+    shell_command = ["ffmpeg", "-version"]
     try:
         p = subprocess.Popen(shell_command, shell=False,
                              stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE,
                              universal_newlines=False)
+        # prints ffmpeg version and closes the process
+        stdout_as_string = p.stdout.read().decode('utf-8')
+        version = stdout_as_string.split('\n')[0]
+        print(f"Found {version}")
+        p.communicate()
         return True
     except (FileNotFoundError, subprocess.CalledProcessError):
-        print("WARN: ldf-reader not installed, please install it to speed up file reading")
+        print("WARN: ffmpeg not installed (or not in PATH), please install it to speed up file reading")
         return False
 
 
-class LDFReaderStdinStream(io.RawIOBase):
+class BufferedInputStream(io.RawIOBase):
     def __init__(self, buffer):
         self.buffer = buffer
         self._pos: int = 0
@@ -182,10 +187,10 @@ class LDFReaderStdinStream(io.RawIOBase):
         return self.tell()
 
 
-# executes ld-ldf-reader <file_path> and reads stdout as a file
-class LDFReaderFile(LDFReaderStdinStream):
+# executes ffmpeg and reads stdout as a file
+class FfmpegFileReader(BufferedInputStream):
     def __init__(self, file_path):
-        shell_command = ["ld-ldf-reader", file_path]
+        shell_command = ["ffmpeg", '-i', file_path, '-f', 's16le', 'pipe:1']
         p = subprocess.Popen(shell_command, shell=False,
                              stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE,
@@ -309,7 +314,7 @@ def as_soundfile(pathR, sample_rate=44100):
         )
     elif "-" == path:
         return UnseekableSoundFile(
-            LDFReaderStdinStream(sys.stdin.buffer),
+            BufferedInputStream(sys.stdin.buffer),
             "r",
             channels=1,
             samplerate=int(sample_rate),
@@ -318,9 +323,9 @@ def as_soundfile(pathR, sample_rate=44100):
             endian="LITTLE",
         )
     else:
-        if test_if_ldf_reader_is_installed():
+        if test_if_ffmpeg_is_installed():
             return UnseekableSoundFile(
-                LDFReaderFile(pathR),
+                FfmpegFileReader(pathR),
                 "r",
                 channels=1,
                 samplerate=int(sample_rate),
