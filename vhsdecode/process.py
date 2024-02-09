@@ -885,9 +885,16 @@ class VHSRFDecode(ldd.RFDecode):
         # Video (luma) main de-emphasis
         filter_deemp = gen_video_main_deemp_fft_params(DP, self.freq_hz, self.blocklen)
 
-        (_, filter_video_lpf) = gen_video_lpf_params(
-            DP, self.freq_hz_half, self.blocklen
-        )
+        if DP.get("video_lpf_supergauss", False) is True:
+            filter_video_lpf = supergauss(
+                np.linspace(0, self.freq_hz_half, self.blocklen // 2 + 1),
+                DP["video_lpf_freq"],
+                DP["video_lpf_order"],
+            )
+        else:
+            (_, filter_video_lpf) = gen_video_lpf_params(
+                DP, self.freq_hz_half, self.blocklen
+            )
 
         if DP.get("video_custom_luma_filters", None) is not None:
             self.Filters["FCustomVideo"] = gen_custom_video_filters(
