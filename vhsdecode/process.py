@@ -295,6 +295,8 @@ class VHSDecode(ldd.LDdecode):
 
             jout["videoParameters"]["black16bIre"] = black * (1 - self.level_adjust)
             jout["videoParameters"]["white16bIre"] = white * (1 + self.level_adjust)
+
+            jout["videoParameters"]["tapeFormat"] = self.rf.options.tape_format
             return jout
         except TypeError as e:
             traceback.print_exc()
