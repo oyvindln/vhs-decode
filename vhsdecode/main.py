@@ -461,12 +461,11 @@ def main(args=None, use_gui=False):
 
     if vhsd.fields_written:
         timeused = time.time() - firstdecode
-        timeused2 = time.time() - seconddecode
         frames = vhsd.fields_written // 2
-        fps = frames / timeused2
+        fps = frames / timeused
 
         print(
-            f"\nCompleted: saving JSON and exiting.  Took {timeused:.2f} seconds to decode {frames} frames ({fps:.2f} FPS post-setup)",
+            f"\nCompleted: saving JSON and exiting.  Took {timeused:.2f} seconds to decode {frames} frames ({fps:.2f} average FPS)",
             file=sys.stderr,
         )
     else:
