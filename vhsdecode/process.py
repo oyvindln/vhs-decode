@@ -910,41 +910,43 @@ class VHSRFDecode(ldd.RFDecode):
             1, [1.0 / self.freq_half], btype="lowpass"
         )
 
-        # Filter for rf before demodulating.
-        y_fm = lddu.filtfft(
-            sps.butter(
-                DP["video_bpf_order"],
-                [
-                    DP["video_bpf_low"] / self.freq_hz_half,
-                    DP["video_bpf_high"] / self.freq_hz_half,
-                ],
-                btype="bandpass",
-            ),
-            self.blocklen,
-        )
+        if DP.get("video_bpf_supergauss", False):
+            self.Filters["RFVideo"] = gen_bpf_supergauss(DP["video_bpf_low"], DP["video_bpf_high"], DP["video_bpf_order"], self.freq_hz_half, self.blocklen)[:-1]
+            # Mirror to negative frequencies
+            self.Filters["RFVideo"] = np.concatenate((self.Filters["RFVideo"], np.flip(self.Filters["RFVideo"])))
+        else:
+            # Filter for rf before demodulating.
+            y_fm = lddu.filtfft(
+                sps.butter(
+                    DP["video_bpf_order"],
+                    [
+                        DP["video_bpf_low"] / self.freq_hz_half,
+                        DP["video_bpf_high"] / self.freq_hz_half,
+                    ],
+                    btype="bandpass",
+                ),
+                self.blocklen,
+            )
 
-        y_fm_lowpass = lddu.filtfft(
-            sps.butter(
-                DP["video_lpf_extra_order"],
-                [DP["video_lpf_extra"] / self.freq_hz_half],
-                btype="lowpass",
-            ),
-            self.blocklen,
-        )
+            y_fm_lowpass = lddu.filtfft(
+                sps.butter(
+                    DP["video_lpf_extra_order"],
+                    [DP["video_lpf_extra"] / self.freq_hz_half],
+                    btype="lowpass",
+                ),
+                self.blocklen,
+            )
 
-        y_fm_highpass = lddu.filtfft(
-            sps.butter(
-                DP["video_hpf_extra_order"],
-                [DP["video_hpf_extra"] / self.freq_hz_half],
-                btype="highpass",
-            ),
-            self.blocklen,
-        )
+            y_fm_highpass = lddu.filtfft(
+                sps.butter(
+                    DP["video_hpf_extra_order"],
+                    [DP["video_hpf_extra"] / self.freq_hz_half],
+                    btype="highpass",
+                ),
+                self.blocklen,
+            )
 
-        self.Filters["RFVideo"] = abs(y_fm) * abs(y_fm_lowpass) * abs(y_fm_highpass)
-        # self.Filters["RFVideo"] = gen_bpf_supergauss(DP["video_bpf_low"], DP["video_bpf_high"], DP["video_bpf_order"], self.freq_hz_half, self.blocklen)[:-1]
-
-        # self.Filters["RFVideo"] =  np.concatenate((self.Filters["RFVideo"], np.flip(self.Filters["RFVideo"])))
+            self.Filters["RFVideo"] = abs(y_fm) * abs(y_fm_lowpass) * abs(y_fm_highpass)
 
         if DP.get("boost_rf_linear_0", None) is not None:
             ramp = np.linspace(

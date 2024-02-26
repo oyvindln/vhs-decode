@@ -34,7 +34,7 @@ def plot_filters(
     freqs = np.fft.rfftfreq(block_len, 1.0 / sample_rate)
     ax[2].plot(freqs, to_db(filters["FDeemp"]), color="#FF0000")
     ax[2].plot(freqs, to_db(filters["FVideo"]))
-    ax[2].set_ylim([-100, None])
+    ax[2].set_ylim([-40, 30])
 
     if sub_emph_plotter and sub_emphasis_params:
         colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2',  '#7f7f7f', '#bcbd22', '#17becf']

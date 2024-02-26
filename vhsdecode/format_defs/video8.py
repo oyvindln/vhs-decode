@@ -77,31 +77,36 @@ def fill_rfparams_hi8_shared(rfparams):
     # Temporary video emphasis filter constants
     # Ideally we would calculate this based on tau and 'x' value, for now
     # it's eyeballed based on graph and output.
-    rfparams["deemph_mid"] = 550000  # TODO: Not correct, needs to be fixed properly
-    rfparams["deemph_gain"] = 14
+    rfparams["deemph_mid"] = 605000  # TODO: Not correct, needs to be fixed properly
+    rfparams["deemph_gain"] = 11.5794
+    rfparams["deemph_q"] = 0.4613901
 
     # Parameters for high-pass filter used for non-linear deemphasis, these are
     # probably not correct.
-    rfparams["nonlinear_highpass_freq"] = 600000
-    rfparams["nonlinear_highpass_limit_h"] = 5000
-    rfparams["nonlinear_highpass_limit_l"] = -20000
+    # 198943.67
+    rfparams["nonlinear_highpass_freq"] = 260000
+    rfparams["nonlinear_exp_scaling"] = 0.53
+    rfparams["nonlinear_scaling_1"] = 0.45
+
+    rfparams["use_sub_deemphasis"] = True
 
     # Band-pass filter for Video rf.
     # TODO: Needs tweaking
-    rfparams["video_bpf_low"] = 2100000
-    rfparams["video_bpf_high"] = 8300000
+    rfparams["video_bpf_low"] = 1820000
+    rfparams["video_bpf_high"] = 9010000
+    rfparams["video_bpf_supergauss"] = False
     # Band-pass filter order.
     # Order may be fine as is.
     rfparams["video_bpf_order"] = 1
     # Sharper upper cutoff to get rid of high-frequency junk.
-    rfparams["video_lpf_extra"] = 8810000
-    rfparams["video_lpf_extra_order"] = 3
+    rfparams["video_lpf_extra"] = 9010000
+    rfparams["video_lpf_extra_order"] = 12
 
-    rfparams["video_hpf_extra"] = 2520000
-    rfparams["video_hpf_extra_order"] = 3
+    rfparams["video_hpf_extra"] = 1820000
+    rfparams["video_hpf_extra_order"] = 12
 
     # Low-pass filter on Y after demodulation
-    rfparams["video_lpf_freq"] = 6500000
+    rfparams["video_lpf_freq"] = 5000000
     rfparams["video_lpf_order"] = 6
 
     # Video Y FM de-emphasis
@@ -115,6 +120,10 @@ def fill_rfparams_hi8_shared(rfparams):
     rfparams["boost_bpf_high"] = 7800000
     # Multiplier for the boosted signal to add in.
     rfparams["boost_bpf_mult"] = 0
+
+    # Use linear ramp to boost RF
+    rfparams["boost_rf_linear_0"] = 0.25
+    rfparams["boost_rf_linear_20"] = 80
 
     # Video EQ after FM demod (PAL VHS)
     rfparams["video_eq"] = {

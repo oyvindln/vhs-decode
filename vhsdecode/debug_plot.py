@@ -224,17 +224,20 @@ def plot_input_data(
         ax5 = ax4.twinx()
         ax5.plot(
             freq_array,
-            np.clip(to_plot(filtered_fft[:half_size]), -80, None),
+            to_plot(filtered_fft[:half_size]),
             color="#FF0000",
             label="After rf filtering",
         )
+        ax5.set_ylim(bottom=-60)
         ax6 = ax4.twinx()
         ax6.plot(
             freq_array,
-            np.clip(to_plot(rf_filter[:half_size]), -100, None),
+            to_plot(rf_filter[:half_size]),
             color="#0000FF",
             label="rf filter",
         )
+        ax6.set_ylim(bottom=-60)
+        ax6.axhline(0, label="0db filter", ls="--")
         ax4.set_xlabel("frequency")
         if plot_db:
             ax4.set_ylabel("dB power")
@@ -394,7 +397,7 @@ def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):
 
     blocklen_half = rf.blocklen // 2
     freqs = np.linspace(0, rf.freq_hz_half, blocklen_half)
-    ax2.set_ylim(bottom=-100)
+    ax2.set_ylim(bottom=-60)
     ax2.plot(
         freqs, 20 * np.log10(filter_deemp[:blocklen_half]), label="Deemphasis only"
     )
@@ -404,6 +407,14 @@ def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):
         20 * np.log10(rf.Filters["FVideo"][:blocklen_half]),
         label="Deemphasis + lpf",
     )
+    ax2.axhline(-3, label="-3 db", ls="--", color="#000000")
+    ax3 = ax2.twinx()
+    ax3.plot(
+        freqs,
+        rf.Filters["FVideo"][:blocklen_half].imag,
+        label="Deemphasis + lpf phase", color="#990000",
+    )
     ax2.legend()
+    ax3.legend()
     plt.show()
     sys.exit()
