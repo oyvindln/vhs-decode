@@ -1067,6 +1067,31 @@ class FieldShared:
 class FieldPALShared(FieldShared, ldd.FieldPAL):
     def __init__(self, *args, **kwargs):
         super(FieldPALShared, self).__init__(*args, **kwargs)
+        self._start: int = 0
+        self._startloc: int = 0
+
+    @property
+    def start(self) -> int:
+        return self._start
+
+    @start.setter
+    def start(self, value: int):
+        self._start = value
+
+    @property
+    def startloc(self) -> int:
+        return self._startloc
+
+    @startloc.setter
+    def startloc(self, value: int):
+        self._startloc = value
+
+    @property
+    def offset(self):
+        readloc = int(self.start - self.rf.blockcut)
+        if readloc < 0:
+            readloc = 0
+        return self.nextfieldoffset - (readloc - self.startloc)
 
     def refine_linelocs_pilot(self, linelocs=None):
         """Override this as most regular band tape formats does not use have a pilot burst.
@@ -1089,6 +1114,31 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
     def __init__(self, *args, **kwargs):
         super(FieldNTSCShared, self).__init__(*args, **kwargs)
         self.fieldPhaseID = 0
+        self._start: int = 0
+        self._startloc: int = 0
+
+    @property
+    def start(self) -> int:
+        return self._start
+
+    @start.setter
+    def start(self, value: int):
+        self._start = value
+
+    @property
+    def startloc(self) -> int:
+        return self._startloc
+
+    @startloc.setter
+    def startloc(self, value: int):
+        self._startloc = value
+
+    @property
+    def offset(self):
+        readloc = int(self.start - self.rf.blockcut)
+        if readloc < 0:
+            readloc = 0
+        return self.nextfieldoffset - (readloc - self.startloc)
 
     def refine_linelocs_burst(self, linelocs=None):
         """Override this as it's LD specific

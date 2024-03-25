@@ -23,6 +23,7 @@ dynamic = ["version"]
 hifi_gui = [ "PyQt5>=5.14.1" ]
 hifi_gui_qt6 = [ "PyQt6>=6.4.2" ]
 hifi_gnuradio = [ "pyzmq" ]
+fftw3 = [ 'pyfftw' ]
 
 [project.scripts]
 ld-decode = "lddecode.main:main"

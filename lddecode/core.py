@@ -1473,6 +1473,13 @@ class Field:
         self.outlinecount = (self.rf.SysParams["frame_lines"] // 2) + 1
         # this is eventually set to 262/263 and 312/313 for audio timing
         self.linecount = None
+        self.out_scale = np.double(0xD300 - 0x0100) / (
+            100 - self.rf.DecoderParams["vsync_ire"]
+        )
+
+    @property
+    def estimated_nextfieldoffset(self):
+        return self.rf.linelen * 200
 
     #@profile
     def process(self):
@@ -1480,7 +1487,7 @@ class Field:
         #print(self.readloc, self.linelocs1, self.nextfieldoffset)
         if self.linelocs1 is None:
             if self.nextfieldoffset is None:
-                self.nextfieldoffset = self.rf.linelen * 200
+                self.nextfieldoffset = self.estimated_nextfieldoffset()
 
             return
 
