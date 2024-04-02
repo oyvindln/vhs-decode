@@ -52,7 +52,7 @@ class MainUIParameters:
         self.grc = False
         self.preview: bool = False
         self.preview_available: bool = True
-        self.audio_sample_rate: int = 44100
+        self.audio_sample_rate: int = 48000
         self.standard: str = "PAL"
         self.format: str = "VHS"
         self.audio_mode: str = "Stereo"
@@ -82,7 +82,7 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
     decode_options = {
         "input_rate": float(values.input_sample_rate) * 1e6,
         "standard": "p" if values.standard == "PAL" else "n",
-        "format": "vhs" if values.format == "VHS" else "h8",
+        "format": "vhs" if values.format == "VHS" else "8mm",
         "preview": values.preview,
         "original": False,
         "noise_reduction": values.noise_reduction,
@@ -283,6 +283,8 @@ class HifiUi(QMainWindow):
         self.input_samplerate_combo.addItems(
             [
                 "DdD (40.0)",
+                "Clockgen (10.0)"
+                "RTLSDR (8.0)"
                 "cxadc (28.64)",
                 "cxadc3 (35.8)",
                 "10cxadc (14.32)",
@@ -292,6 +294,8 @@ class HifiUi(QMainWindow):
         )
         self._input_combo_rates = [
             40.0,
+            10.0,
+            8.0,
             28.64,
             35.8,
             14.32,

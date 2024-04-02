@@ -63,12 +63,16 @@ parser.add_argument(
     "--audio_rate",
     dest="rate",
     type=int,
-    default=44100,
-    help="Output sample rate in Hz (default 44100)",
+    default=48000,
+    help="Output sample rate in Hz (default 48000)",
 )
 
 parser.add_argument(
-    "--bg", dest="BG", action="store_true", default=False, help="Do carrier bias guess"
+    "--bg", "--bias_guess",
+    dest="BG", 
+    action="store_true", 
+    default=False, 
+    help="Do carrier bias guess"
 )
 
 parser.add_argument(
@@ -121,11 +125,11 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--h8",
-    dest="H8",
+    "--8mm",
+    dest="8mm",
     action="store_true",
     default=False,
-    help="Video8/Hi8, 8mm tape format",
+    help="Sony 8mm formats Video8 & Hi8",
 )
 
 parser.add_argument(
@@ -137,11 +141,11 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--ui",
+    "--gui", "--ui",
     dest="UI",
     action="store_true",
     default=False,
-    help="Opens hifi-ui",
+    help="Opens hifi-decode graphical interface",
 )
 
 parser.add_argument(
@@ -500,7 +504,7 @@ class AppWindow:
 
     def open_ui(self, argv, decode_options):
         app = QApplication(argv)
-        print("Opening hifi-ui...")
+        print("Opening hifi-decode-gui...")
         if decode_options["input_file"] == "-":
             window = FileOutputDialogUI(decode_options_to_ui_parameters(decode_options))
         else:
@@ -768,13 +772,13 @@ def main() -> int:
 
     print("Initializing ...")
 
-    real_mode = "s" if not args.H8 else "mpx"
+    real_mode = "s" if not args.8mm else "mpx"
     real_mode = args.mode if args.mode in ["l", "r", "sum"] else real_mode
 
     decode_options = {
         "input_rate": sample_freq * 1e6,
         "standard": "p" if system == "PAL" else "n",
-        "format": "vhs" if not args.H8 else "h8",
+        "format": "vhs" if not args.8mm else "8mm",
         "preview": args.preview,
         "preview_available": SOUNDDEVICE_AVAILABLE,
         "original": args.original,
