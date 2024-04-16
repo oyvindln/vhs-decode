@@ -1285,7 +1285,7 @@ class DemodCache:
 def _downscale_audio_compute_locs_and_swow(
     lineinfo, line_period, linelen, linecount, timeoffset, freq, scale
 ):
-    """compute locations and wow for audio scaling?
+    """compute locations and wow for audio scaling
 
     Parameters:
         lineinfo (list(float)): line locations
@@ -2471,8 +2471,10 @@ class Field:
             # for video always output 263/313 lines
             linesout = self.outlinecount
 
-        if lastfieldwritten and audio > 16000:
-            # Compute field # and line count
+        if lastfieldwritten and audio >= 16000:
+            # This computes the current field based on checking the raw data location
+            # against the last written field's, then computes the location of the
+            # last audio sample written, so the A/V sync will remain (hopefully) correct
 
             rf_samples_per_field = self.rf.freq_hz / self.rf.SysParams['FPS'] / 2
             read_gap = (self.readloc - lastfieldwritten[1]) / rf_samples_per_field
@@ -2487,10 +2489,12 @@ class Field:
             samples_per_line = (self.rf.SysParams['line_period'] / 1000000) / (1 / audio)
 
             audsamp_count = linecount * samples_per_line
-            audsamp_offset = (np.floor(audsamp_count) + 1) - audsamp_count
+            audsamp_offset = (audsamp_count - np.floor(audsamp_count))
 
-            # Finally convert to a time value
-            audio_offset = -audsamp_offset * (self.rf.SysParams['line_period'] / 10000000)
+            if audsamp_offset > .5:
+                audio_offset = (1 - audsamp_offset) * (1 / audio)
+            else: 
+                audio_offset = -audsamp_offset * (1 / audio)
         else:
             # Either analog audio is disabled, or we're using hsync-locked sampling
             audio_offset = 0
@@ -2506,7 +2510,7 @@ class Field:
                 audio_offset,
                 audio,
                 audio_rv)
-            
+
             if self.use_threads:
                 audio_thread = threading.Thread(target=downscale_audio, args=dsa_args)
                 audio_thread.start()
