@@ -53,16 +53,22 @@ public slots:
 private slots:
     void on_blackLevelSpinBox_valueChanged(int value);
     void on_whiteLevelSpinBox_valueChanged(int value);
+    void on_activeVideoStartSpinBox_valueChanged(int value);
+    void on_activeVideoWidthSpinBox_valueChanged(int value);
 
     void on_blackLevelResetButton_clicked();
     void on_blackLevelAltResetButton_clicked();
     void on_whiteLevelResetButton_clicked();
+    void on_activeVideoStartResetButton_clicked();
+    void on_activeVideoWidthResetButton_clicked();
 
     void on_aspectRatioButtonGroup_buttonClicked(QAbstractButton *button);
 
 private:
     Ui::VideoParametersDialog *ui;
     LdDecodeMetaData::VideoParameters videoParameters;
+    qint32 originalActiveVideoStart = -1;
+    qint32 originalActiveVideoWidth = -1;
 
     void updateDialog();
 };
