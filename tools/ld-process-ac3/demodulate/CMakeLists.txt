@@ -6,5 +6,12 @@ if(MSVC)
     target_include_directories(ld-ac3-demodulate PRIVATE ${Getopt_INCLUDE_DIRS})
 endif()
 
-
-install(TARGETS ld-ac3-demodulate)
+if(BUILD_PYTHON_TOOL)
+    install(TARGETS ld-ac3-demodulate
+            EXCLUDE_FROM_ALL
+            COMPONENT python_binaries
+            RUNTIME DESTINATION ${PY_BUILD_CMAKE_PACKAGE_NAME}-${PY_BUILD_CMAKE_PACKAGE_VERSION}.data/scripts
+            LIBRARY DESTINATION ${PY_BUILD_CMAKE_PACKAGE_NAME}-${PY_BUILD_CMAKE_PACKAGE_VERSION}.data/platlib)
+else()
+    install(TARGETS ld-ac3-demodulate)
+endif()

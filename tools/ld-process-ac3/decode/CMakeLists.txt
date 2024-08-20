@@ -8,4 +8,13 @@ if(MSVC)
 endif()
 target_include_directories(ld-ac3-decode PRIVATE . ../../ld-process-efm)
 
-install(TARGETS ld-ac3-decode)
+if(BUILD_PYTHON_TOOL)
+    # If building as part of vhs-decode wheel we need some extra arguments
+    install(TARGETS ld-ac3-decode
+            EXCLUDE_FROM_ALL
+            COMPONENT python_binaries
+            RUNTIME DESTINATION ${PY_BUILD_CMAKE_PACKAGE_NAME}-${PY_BUILD_CMAKE_PACKAGE_VERSION}.data/scripts
+            LIBRARY DESTINATION ${PY_BUILD_CMAKE_PACKAGE_NAME}-${PY_BUILD_CMAKE_PACKAGE_VERSION}.data/platlib)
+else()
+    install(TARGETS ld-ac3-decode)
+endif()

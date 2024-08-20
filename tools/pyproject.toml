@@ -1,0 +1,38 @@
+[project]
+name = "ld-process-ac3"
+readme = {file = "ld-process-ac3/README.md", content-type = "text/markdown"}
+requires-python = ">=3.7"
+license = { "file" = "ld-process-ac3/LICENSE" }
+authors = [{ "name" = "Leighton Smallshire"}, { "name" = "Ian Smallshire" }, { "name" = "Staffan Ulfberg"}]
+keywords = ["program", "binary", "executable", "decoder", "laserdisc"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: C++",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+]
+urls = { "Repository" = "https://github.com/happycube/ld-decode/tree/main/tools/ld-process-ac3" }
+dependencies = []
+dynamic = ["version", "description"]
+
+[build-system]
+requires = ["py-build-cmake~=0.1.8"]
+build-backend = "py_build_cmake.build"
+
+[tool.py-build-cmake.module]
+name = "ld-process-ac3"
+directory = "ld-process-ac3"
+
+[tool.py-build-cmake.sdist]
+include = ["ld-process-ac3/cmake_modules/FindGetopt.cmake","ld-process-ac3/*", "ld-process-efm/ezpwd/*", "./CMakeLists.txt"]
+
+[tool.py-build-cmake.cmake]
+minimum_version = "3.21"
+build_type = "Release"
+source_path = "."
+build_args = ["-j"]
+install_components = ["python_binaries"]
+options = {"BUILD_PYTHON_WHEEL" = "On"}
+
