@@ -8,7 +8,7 @@ if(MSVC)
 endif()
 target_include_directories(ld-ac3-decode PRIVATE . ../../ld-process-efm)
 
-if(BUILD_PYTHON_TOOL)
+if(BUILD_PYTHON_WHEEL)
     # If building as part of vhs-decode wheel we need some extra arguments
     install(TARGETS ld-ac3-decode
             EXCLUDE_FROM_ALL

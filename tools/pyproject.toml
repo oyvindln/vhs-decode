@@ -26,7 +26,7 @@ name = "ld-process-ac3"
 directory = "ld-process-ac3"
 
 [tool.py-build-cmake.sdist]
-include = ["ld-process-ac3/cmake_modules/FindGetopt.cmake","ld-process-ac3/*", "ld-process-efm/ezpwd/*", "./CMakeLists.txt"]
+include = ["ld-process-ac3/cmake_modules/FindGetopt.cmake","ld-process-ac3/*", "ld-process-efm/ezpwd/*", "./CMakeLists.txt", "./vcpkg*"]
 
 [tool.py-build-cmake.cmake]
 minimum_version = "3.21"

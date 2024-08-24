@@ -6,7 +6,7 @@ if(MSVC)
     target_include_directories(ld-ac3-demodulate PRIVATE ${Getopt_INCLUDE_DIRS})
 endif()
 
-if(BUILD_PYTHON_TOOL)
+if(BUILD_PYTHON_WHEEL)
     install(TARGETS ld-ac3-demodulate
             EXCLUDE_FROM_ALL
             COMPONENT python_binaries
