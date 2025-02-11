@@ -137,6 +137,11 @@ def filtfft(filt, blocklen, whole=True):
     return signal.freqz(filt[0], filt[1], worN, whole=True)[1][:output_size]
 
 
+# This converts a analog B, A filter to an FFT of our selected block length
+def analog_filtfft(filt, blocklen, samp_rate):
+    return signal.freqs(filt[0], filt[1], worN = np.linspace(0, samp_rate*np.pi, (blocklen // 2) + 1))[1]
+
+
 def design_filter(samp_rate, passband, stopband, order_limit=20):
     max_loss_passband = 3  # The maximum loss allowed in the passband
     min_loss_stopband = 30  # The minimum loss allowed in the stopband
