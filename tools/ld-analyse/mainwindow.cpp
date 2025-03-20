@@ -165,6 +165,7 @@ void MainWindow::setGuiEnabled(bool enabled)
     ui->actionVisible_Dropout_analysis->setEnabled(enabled);
     ui->actionSNR_analysis->setEnabled(enabled); // Black SNR
     ui->actionWhite_SNR_analysis->setEnabled(enabled);
+    ui->actionCopy_frame_to_Clipboard->setEnabled(enabled);
     ui->actionSave_frame_as_PNG->setEnabled(enabled);
     ui->actionClosed_Captions->setEnabled(enabled);
     ui->actionVideo_parameters->setEnabled(enabled);
@@ -726,6 +727,32 @@ void MainWindow::on_actionWhite_SNR_analysis_triggered()
 {
     // Show the white SNR analysis dialogue
     whiteSnrAnalysisDialog->show();
+}
+
+// Copy current frame to Clipboard when copy command issued
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (event->type() == QKeyEvent::KeyPress && event->matches(QKeySequence::Copy)) {
+        MainWindow::on_actionCopy_frame_to_Clipboard_triggered();
+    }
+}
+
+// Copy current frame to Clipboard
+void MainWindow::on_actionCopy_frame_to_Clipboard_triggered()
+{
+    qDebug() << "MainWindow::on_actionCopy_frame_to_Clipboard_triggered(): Called";
+
+    // Generate QImage for the current frame
+    QImage imageToCopy = tbcSource.getImage();
+
+    // Get the aspect ratio adjustment, and scale the image if needed
+    qint32 adjustment = getAspectAdjustment();
+    if (adjustment != 0) {
+        imageToCopy = imageToCopy.scaled((imageToCopy.size().width() + adjustment),
+                                         (imageToCopy.size().height()),
+                                         Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+	void QClipboard::setImage(const QImage &imageToCopy, QClipboard::Mode mode = Clipboard)
 }
 
 // Save current frame as PNG
