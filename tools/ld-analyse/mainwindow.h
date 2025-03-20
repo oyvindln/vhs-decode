@@ -33,6 +33,7 @@
 #include <QMessageBox>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QClipboard>
 
 #include "oscilloscopedialog.h"
 #include "vectorscopedialog.h"
@@ -75,6 +76,7 @@ private slots:
     void on_actionVisible_Dropout_analysis_triggered();
     void on_actionSNR_analysis_triggered();
     void on_actionWhite_SNR_analysis_triggered();
+    void on_actionCopy_frame_to_Clipboard_triggered();
     void on_actionSave_frame_as_PNG_triggered();
     void on_actionZoom_In_triggered();
     void on_actionZoom_Out_triggered();
