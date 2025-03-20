@@ -733,14 +733,14 @@ void MainWindow::on_actionWhite_SNR_analysis_triggered()
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->type() == QKeyEvent::KeyPress && event->matches(QKeySequence::Copy)) {
-        MainWindow::on_actionCopy_frame_to_Clipboard_triggered();
+        MainWindow::on_actionCopy_frame_to_clipboard_triggered();
     }
 }
 
 // Copy current frame to Clipboard
-void MainWindow::on_actionCopy_frame_to_Clipboard_triggered()
+void MainWindow::on_actionCopy_frame_to_clipboard_triggered()
 {
-    qDebug() << "MainWindow::on_actionCopy_frame_to_Clipboard_triggered(): Called";
+    qDebug() << "MainWindow::on_actionCopy_frame_to_clipboard_triggered(): Called";
 
     // Generate QImage for the current frame
     QImage imageToCopy = tbcSource.getImage();
