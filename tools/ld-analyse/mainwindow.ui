@@ -640,6 +640,14 @@
     <string>Ctrl+D</string>
    </property>
   </action>
+  <action name="actionCopy_frame_to_clipboard">
+   <property name="text">
+    <string>Copy frame to clipboard</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+C</string>
+   </property>
+  </action>
   <action name="actionSave_frame_as_PNG">
    <property name="text">
     <string>Save frame as PNG...</string>
