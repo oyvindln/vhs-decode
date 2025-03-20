@@ -165,7 +165,7 @@ void MainWindow::setGuiEnabled(bool enabled)
     ui->actionVisible_Dropout_analysis->setEnabled(enabled);
     ui->actionSNR_analysis->setEnabled(enabled); // Black SNR
     ui->actionWhite_SNR_analysis->setEnabled(enabled);
-    ui->actionCopy_frame_to_Clipboard->setEnabled(enabled);
+    ui->actionCopy_frame_to_clipboard->setEnabled(enabled);
     ui->actionSave_frame_as_PNG->setEnabled(enabled);
     ui->actionClosed_Captions->setEnabled(enabled);
     ui->actionVideo_parameters->setEnabled(enabled);
