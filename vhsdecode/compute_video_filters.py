@@ -11,7 +11,7 @@ else:
     # Need Python 3.10 for using namespace in files
     from importlib.resources import files
 
-from vhsdecode.utils import filtfft
+from vhsdecode.utils import filtfft, analog_filtfft
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_shelf
 
 NONLINEAR_AMP_LPF_FREQ_DEFAULT = 700000
@@ -86,6 +86,11 @@ def gen_custom_video_filters(filter_list, freq_hz, block_len):
                     f["midfreq"], f["gain"], "low", freq_hz / 2.0, qfactor=f["q"]
                 )
                 ret *= filtfft((db, da), block_len, whole=False)
+            case "coefficients":
+                if f.get("analog", True):
+                    ret *= analog_filtfft((f["b"], f["a"]), block_len, freq_hz)
+                else:
+                    ret *= filtfft((f["b"], f["a"]), block_len, whole=False)
     return ret
 
 

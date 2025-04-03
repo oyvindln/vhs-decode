@@ -4,6 +4,28 @@ PAL_ROTATION = [0, -1]
 NTSC_ROTATION = [-1, 1]
 
 
+def get_svhs_linear_subdeemphasis_filter(r0: float, r1: float, c1: float, r2: float, c2: float) -> tuple:
+    """ Calculates the filter parameters for the linear part of the S-VHS sub-de-emphasis """
+
+    # The calculation is based on this circuit. Values differ between SP/LP
+    # and also between devices
+    #
+    #     │╲   Out             C1
+    # In──┤+╲   │ ______   ┌───┤├───┐    ______  C2
+    #     │  >──┴─┤ R0 ├───┤ ______ ├─┬──┤ R2 ├──┤├──▷ GND
+    #  ┌──┤-╱     ‾‾‾‾‾‾   └─┤ R1 ├─┘ │  ‾‾‾‾‾‾
+    #  │  │╱                 ‾‾‾‾‾‾   │
+    #  └──────────────────────────────┘
+
+    b2 = 1
+    b1 = c2*r0+c1*r1+c2*r1+c2*r2
+    b0 = c1*c2*r0*r1+c1*c2*r1*r2
+    a2 = 1
+    a1 = c1*r1+c2*r2
+    a0 = c1*c2*r1*r2
+    return ((b0, b1, b2), (a0, a1, a2))
+
+
 def fill_rfparams_vhs_shared(rfparams: dict, tape_speed: int = 0) -> None:
     """Fill in parameters that are shared between systems for VHS"""
 
@@ -31,7 +53,7 @@ def fill_rfparams_vhs_shared(rfparams: dict, tape_speed: int = 0) -> None:
     rfparams["use_sub_deemphasis"] = [False, True, True, True][tape_speed]
 
 
-def fill_rfparams_svhs_shared(rfparams: dict) -> None:
+def fill_rfparams_svhs_shared(rfparams: dict, tape_speed: int = 0) -> None:
     """Fill in parameters that are shared between systems for Super VHS
     SVHS uses the same luma frequencies for NTSC and PAL
     """
@@ -55,9 +77,15 @@ def fill_rfparams_svhs_shared(rfparams: dict) -> None:
     rfparams["video_lpf_order"] = 6
     rfparams["video_lpf_supergauss"] = True
 
+    if tape_speed == 0:
+      # ab, aa = get_svhs_linear_subdeemphasis_filter(r0=470, r1=1000, c1= 82e-12, r2=3300, c2=270e-12) # panasonic
+      # ab, aa = get_svhs_linear_subdeemphasis_filter(r0=330, r1= 560, c1=150e-12, r2=1800, c2=470e-12) # sony
+        ab, aa = get_svhs_linear_subdeemphasis_filter(r0=370, r1= 560, c1= 82e-12, r2=1500, c2=680e-12) # optimized to recording on JVC HR-S7611
+    else:
+        ab, aa = get_svhs_linear_subdeemphasis_filter(r0=  0, r1=1500, c1=220e-12, r2=3300, c2=270e-12) # panasonic LP
+
     rfparams["video_custom_luma_filters"] = [
-        {"type": "file", "filename": "svhs-sp-linear-subdeemphasis"},
-        {"type": "highshelf", "gain": 4.0, "midfreq": 2000000, "q": 0.4967045},
+         {"type": "coefficients", "analog": True, "b": ab, "a": aa },
     ]
 
     rfparams["boost_bpf_low"] = 7000000
@@ -194,13 +222,13 @@ def get_sysparams_pal_vhs(sysparams_pal: dict, tape_speed: int = 0) -> dict:
     return SysParams_PAL_VHS
 
 
-def get_rfparams_pal_svhs(sysparams_pal):
+def get_rfparams_pal_svhs(sysparams_pal: dict, tape_speed: int = 0) -> dict:
     """Get RF params for PAL SVHS"""
     # Super-VHS
 
-    RFParams_PAL_SVHS = get_rfparams_pal_vhs(sysparams_pal)
+    RFParams_PAL_SVHS = get_rfparams_pal_vhs(sysparams_pal, tape_speed)
 
-    fill_rfparams_svhs_shared(RFParams_PAL_SVHS)
+    fill_rfparams_svhs_shared(RFParams_PAL_SVHS, tape_speed)
 
     # RFParams_PAL_SVHS["nonlinear_highpass_freq"] = 500000
     RFParams_PAL_SVHS["nonlinear_highpass_limit_h"] = 5000
@@ -220,19 +248,7 @@ def get_sysparams_pal_svhs(sysparams_pal):
     # 0 IRE level after demodulation
     SysParams_PAL_SVHS["ire0"] = 7e6 - (SysParams_PAL_SVHS["hz_ire"] * 100)
 
-    # One track has an offset of f_h/2
-    # SysParams_PAL_SVHS["track_ire0_offset"] = [7812.5, 0]
-
     return SysParams_PAL_SVHS
-
-
-def get_sysparams_pal_vhshq(sysparams_pal: dict, tape_speed: int) -> dict:
-    SysParams_PAL_VHSHQ = get_sysparams_pal_vhs(sysparams_pal)
-
-    # One track has an offset of f_h/2
-    SysParams_PAL_VHSHQ["track_ire0_offset"] = [7812.5, 0]
-
-    return SysParams_PAL_VHSHQ
 
 
 def get_rfparams_ntsc_vhs(rfparams_ntsc: dict, tape_speed: int = 0) -> dict:
@@ -314,11 +330,11 @@ def get_sysparams_ntsc_vhs(sysparams_ntsc: dict, tape_speed: int = 0) -> dict:
     return SysParams_NTSC_VHS
 
 
-def get_rfparams_ntsc_svhs(rfparams_ntsc):
-    RFParams_NTSC_SVHS = get_rfparams_ntsc_vhs(rfparams_ntsc)
+def get_rfparams_ntsc_svhs(rfparams_ntsc: dict, tape_speed: int = 0) -> dict:
+    RFParams_NTSC_SVHS = get_rfparams_ntsc_vhs(rfparams_ntsc, tape_speed)
 
     # PAL and NTSC use much of the same values for SVHS.
-    fill_rfparams_svhs_shared(RFParams_NTSC_SVHS)
+    fill_rfparams_svhs_shared(RFParams_NTSC_SVHS, tape_speed)
 
     return RFParams_NTSC_SVHS
 
@@ -332,20 +348,7 @@ def get_sysparams_ntsc_svhs(sysparams_ntsc):
     # 0 IRE level after demodulation
     SysParams_NTSC_SVHS["ire0"] = 7e6 - (SysParams_NTSC_SVHS["hz_ire"] * 100)
 
-    # One track has an offset of f_h/2
-    # TODO: Test
-    # SysParams_NTSC_SVHS["track_ire0_offset"] = [0, 7867]
-
     return SysParams_NTSC_SVHS
-
-
-def get_sysparams_ntsc_vhshq(sysparams_ntsc: dict, tape_speed: int = 0) -> dict:
-    SysParams_NTSC_VHSHQ = get_sysparams_ntsc_vhs(sysparams_ntsc, tape_speed)
-
-    # One track has an offset of f_h/2
-    # SysParams_NTSC_VHSHQ["track_ire0_offset"] = [0, 7867]
-
-    return SysParams_NTSC_VHSHQ
 
 
 def get_rfparams_mpal_vhs(rfparams_ntsc: dict, tape_speed: int = 0) -> dict:

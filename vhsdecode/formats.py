@@ -125,15 +125,6 @@ def get_format_params(system: str, tape_format: str, tape_speed: int, logger) ->
             return get_sysparams_pal_betamax(SysParams_PAL), get_rfparams_pal_betamax(
                 FilterParams_PAL
             )
-        elif tape_format == "VHSHQ":
-            from vhsdecode.format_defs.vhs import (
-                get_rfparams_pal_vhs,
-                get_sysparams_pal_vhshq,
-            )
-
-            return get_sysparams_pal_vhshq(
-                SysParams_PAL, tape_speed
-            ), get_rfparams_pal_vhs(FilterParams_PAL, tape_speed)
         elif tape_format == "SVHS":
             from vhsdecode.format_defs.vhs import (
                 get_rfparams_pal_svhs,
@@ -238,15 +229,6 @@ def get_format_params(system: str, tape_format: str, tape_speed: int, logger) ->
             return get_sysparams_ntsc_umatic(SysParams_NTSC), get_rfparams_ntsc_umatic(
                 FilterParams_NTSC
             )
-        elif tape_format == "VHSHQ":
-            from vhsdecode.format_defs.vhs import (
-                get_rfparams_ntsc_vhs,
-                get_sysparams_ntsc_vhshq,
-            )
-
-            return get_sysparams_ntsc_vhshq(
-                SysParams_NTSC, tape_speed
-            ), get_rfparams_ntsc_vhs(FilterParams_NTSC, tape_speed)
         elif tape_format == "SVHS":
             from vhsdecode.format_defs.vhs import (
                 get_rfparams_ntsc_svhs,

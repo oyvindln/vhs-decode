@@ -80,7 +80,7 @@ def main(args=None, use_gui=False):
         metavar="tape_format",
         default="VHS",
         choices=supported_tape_formats,
-        help="Tape format, currently VHS (Default), VHSHQ, SVHS, UMATIC, UMATIC_HI, BETAMAX, BETAMAX_HIFI, SUPERBETA, VIDEO8, HI8 ,EIAJ, VCR, VCR_LP, TYPEC and TYPEB, are supported",
+        help="Tape format, currently VHS (Default), SVHS, UMATIC, UMATIC_HI, BETAMAX, BETAMAX_HIFI, SUPERBETA, VIDEO8, HI8 ,EIAJ, VCR, VCR_LP, TYPEC and TYPEB, are supported",
     )
     parser.add_argument(
         "--ts",
@@ -426,6 +426,10 @@ def main(args=None, use_gui=False):
         tape_format = args.tape_format.upper()
     if tape_format not in supported_tape_formats:
         logger.warning("Tape format %s not supported! Defaulting to VHS", tape_format)
+    if tape_format == "VHSHQ":
+        logger.warning("The VHSHQ format is deprecated. Using VHS with '--ire0_adjust' enabled to compensate luma offset in VHS-HQ")
+        tape_format = "VHS"
+        rf_options["ire0_adjust"] = True
 
     if not use_gui and args.dodod:
         logger.warning(
