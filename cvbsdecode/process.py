@@ -399,9 +399,10 @@ class FieldPALCVBS(FieldCVBSShared, ldd.FieldPAL):
 
     def refine_linelocs_hsync(self):
         if not self.rf.options.skip_hsync_refine:
+            threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
             return sync.refine_linelocs_hsync(
-                self, self.linebad, 0
-            )  # TODO fix last param once it's actually used.
+                self, self.linebad, threshold
+            )
         else:
             return self.linelocs1.copy()
 
@@ -443,9 +444,10 @@ class FieldNTSCCVBS(FieldCVBSShared, ldd.FieldNTSC):
 
     def refine_linelocs_hsync(self):
         if not self.rf.options.skip_hsync_refine:
+            threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
             return sync.refine_linelocs_hsync(
-                self, self.linebad, 0
-            )  # TODO fix last param once it's actually used.
+                self, self.linebad, threshold
+            )
             return super(FieldNTSCCVBS, self).refine_linelocs_hsync()
         else:
             return self.linelocs1.copy()
