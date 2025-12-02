@@ -858,7 +858,8 @@ def get_line0_fallback(
     if (line_0 is None or line_0 > (linelen * (frame_lines - 1) / 2)) and expected_line0 is not None:
         limit = (linelen * (frame_lines - 1) / 2)
         if expected_line0 < limit and expected_line0 > -5 * linelen:
-            ldd.logger.info(f"Attempting to use predicted line0 from previous field: {expected_line0}")
+            if DEBUG_PRINT:
+                print(f"Attempting to use predicted line0 from previous field: {expected_line0}")
             best_p = None
             min_diff = 1000000
             # Search range: Only snap to a pulse if it is very close to the prediction (0.7 lines).
@@ -879,7 +880,8 @@ def get_line0_fallback(
                     first_field = expected_first_field
                     first_field_confidence = 50
             elif relaxed and expected_line0 > 0:
-                ldd.logger.info(f"No pulse found near prediction, forcing expected location: {expected_line0}")
+                if DEBUG_PRINT:
+                    print(f"No pulse found near prediction, forcing expected location: {expected_line0}")
                 line_0 = expected_line0
                 if expected_first_field is not None:
                     first_field = expected_first_field
