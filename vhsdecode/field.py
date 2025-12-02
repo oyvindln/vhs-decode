@@ -429,7 +429,7 @@ def get_line0_fallback(
                     first_field_backup = first_field
                     first_field_confidence_backup = first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 20), i):
+                for j in range(max(0, i - 20), i) if relaxed else range(max(0, i - 16), i - 4):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         line_0 = filtered_pulses[j].start
                         break
@@ -520,7 +520,7 @@ def get_line0_fallback(
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 15), i):
+                for j in range(max(0, i - 15), i) if relaxed else range(max(0, i - 10), i - 3):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         if (
                             line_0 != filtered_pulses[j].start
@@ -554,8 +554,8 @@ def get_line0_fallback(
             abs(disPpspp - 0.5) < 0.06
             and abs(disPPspp - 0.5) < 0.06
             and abs(dispPSpp - 0.5) < 0.06
-            and abs(disppSPp - 0.5) < 0.06
-            and abs(disppsPP - 0.5) < 0.06
+            and abs(disppSPp - 1.0) < 0.06
+            and abs(disppsPP - 1.0) < 0.06
         )
         check_relaxed = (
             # abs(disPpspp - 0.5) < 0.06 and 
@@ -588,28 +588,24 @@ def get_line0_fallback(
             ) / 2.0
 
             if hsync_pulse_len / eq_pulse_len > 1.75:
-                # Assume we found the transition point
-                if frame_lines == 625:
-                     line_offset = 7.0
-                else:
-                     line_offset = 8.0
-                _first_field = 0
-                _first_field_confidence = 60
-                
                 if filtered_pulses[i].len < eq_pulse_len * 1.25:
-                    # i is likely an EQ pulse, so i+1 is the start of HSYNCs
-                    # This matches the standard pattern (EQ, EQ, EQ, HSYNC, HSYNC)
-                    # line_0 should be HSYNC
-                    pass
-                elif filtered_pulses[i].len > hsync_pulse_len * 0.75:
-                    # i is likely an HSYNC pulse
-                    # If i is HSYNC, and i-1 is EQ (implied by transition)
-                    # Then we shift prediction.
                     if frame_lines == 625:
-                        line_offset = 7.0 # Adjust?
+                        line_offset = 7.0
+                    else:
+                        line_offset = 8.0
+                    _first_field = 0
+                    _first_field_confidence = (
+                        80 if filtered_pulses[i].len < eq_pulse_len * 1.1 else 60
+                    )
+                elif filtered_pulses[i].len > hsync_pulse_len * 0.75:
+                    if frame_lines == 625:
+                        line_offset = 7.0
                     else:
                         line_offset = 9.0
                     _first_field = 1
+                    _first_field_confidence = (
+                        80 if filtered_pulses[i].len > hsync_pulse_len * 0.9 else 60
+                    )
                     
             if line_offset is not None:
                 # in case we cannot find a matching pulse, we can still use this prediction
@@ -625,7 +621,7 @@ def get_line0_fallback(
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 25), i):
+                for j in range(max(0, i - 25), i) if relaxed else range(max(0, i - 20), i - 4):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         if (
                             line_0 != filtered_pulses[j].start
