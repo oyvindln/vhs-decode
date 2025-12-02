@@ -874,7 +874,8 @@ def get_line0_fallback(
                         min_diff = diff
                         best_p = p
             if best_p:
-                ldd.logger.info(f"Found pulse near prediction: {best_p.start} (diff {min_diff/linelen:.2f} lines)")
+                if DEBUG_PRINT:
+                    print(f"Found pulse near prediction: {best_p.start} (diff {min_diff/linelen:.2f} lines)")
                 line_0 = best_p.start
                 if expected_first_field is not None:
                     first_field = expected_first_field
@@ -887,7 +888,8 @@ def get_line0_fallback(
                     first_field = expected_first_field
                     first_field_confidence = 40
             else:
-                ldd.logger.info("Prediction available but no matching pulse found and relaxed mode disabled.")
+                if DEBUG_PRINT:
+                    print("Prediction available but no matching pulse found and relaxed mode disabled.")
                 if line_0 is not None and line_0 > (linelen * (frame_lines - 1) / 2):
                     ldd.logger.info(
                         "WARNING, line0 hsync not found for current field, probably skipping one field."
