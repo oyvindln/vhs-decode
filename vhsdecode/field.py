@@ -290,7 +290,7 @@ def get_line0_fallback(
     LONG_PULSE_MIN = 0.35 * linelen
 
     if DEBUG_PRINT:
-        print("get_line0_fallback called")
+        print(f"get_line0_fallback called. Raw pulses: {len(raw_pulses)}, Filtered: {len(filtered_pulses)} (filtering logic skipped for debug print)")
 
     # First try: Find end of long sync pulses
     i = 15
@@ -549,6 +549,10 @@ def get_line0_fallback(
             filtered_pulses[i + 2].start - filtered_pulses[i + 1].start
         ) / linelen
 
+        if DEBUG_PRINT and i < 60:
+             print(f"Try 3 scan i={i}: Pps={disPpspp:.3f} PPs={disPPspp:.3f} pSP={dispPSpp:.3f} ppS={disppSPp:.3f} pps={disppsPP:.3f}")
+             print(f"  lens: {filtered_pulses[i - 2].len:.1f}, {filtered_pulses[i - 1].len:.1f}, {filtered_pulses[i].len:.1f}")
+
         # Relaxed check: ignore the first interval (disPpspp) to handle dropouts better
         check_strict = (
             abs(disPpspp - 0.5) < 0.06
@@ -621,8 +625,14 @@ def get_line0_fallback(
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
+                if DEBUG_PRINT:
+                     print(f"Searching for pulse near {line_0_est} (range {max(0, i - 25)} to {i})")
                 for j in range(max(0, i - 25), i) if relaxed else range(max(0, i - 20), i - 4):
-                    if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
+                    diff = abs(filtered_pulses[j].start - line_0_est) / linelen
+                    if DEBUG_PRINT:
+                        print(f"    Checking pulse {j}: start={filtered_pulses[j].start}, est={line_0_est}, diff_lines={diff:.4f}")
+
+                    if diff < 0.08:
                         if (
                             line_0 != filtered_pulses[j].start
                             or _first_field_confidence > first_field_confidence
