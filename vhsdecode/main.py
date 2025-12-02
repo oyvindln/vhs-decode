@@ -290,6 +290,16 @@ def main(args=None, use_gui=False):
         ),
     )
     debug_group.add_argument(
+        "--relaxed_line0",
+        dest="relaxed_line0",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable relaxed line0 detection fallback logic. Useful for damaged tapes where "
+            "standard detection fails. Requires --fallback_vsync."
+        ),
+    )
+    debug_group.add_argument(
         "--field_order_confidence",
         dest="field_order_confidence",
         default=100,
@@ -476,6 +486,7 @@ def main(args=None, use_gui=False):
     rf_options["disable_right_hsync"] = args.disable_right_hsync
     rf_options["level_detect_divisor"] = args.level_detect_divisor
     rf_options["fallback_vsync"] = args.fallback_vsync
+    rf_options["relaxed_line0"] = args.relaxed_line0
     rf_options["field_order_confidence"] = int(max(0, min(100, args.field_order_confidence)))
     rf_options["saved_levels"] = args.saved_levels
     rf_options["skip_hsync_refine"] = args.skip_hsync_refine

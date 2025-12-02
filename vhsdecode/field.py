@@ -231,7 +231,7 @@ def debug_plot_line0_fallback(
 
 
 def get_line0_fallback(
-    valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses, frame_lines
+    valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses, frame_lines, relaxed=False
 ):
     """
     Try a more primitive way of locating line 0 if the normal approach fails.
@@ -429,7 +429,7 @@ def get_line0_fallback(
                     first_field_backup = first_field
                     first_field_confidence_backup = first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 16), i - 4):
+                for j in range(max(0, i - 20), i):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         line_0 = filtered_pulses[j].start
                         break
@@ -520,7 +520,7 @@ def get_line0_fallback(
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 10), i - 3):
+                for j in range(max(0, i - 15), i):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         if (
                             line_0 != filtered_pulses[j].start
@@ -549,12 +549,24 @@ def get_line0_fallback(
             filtered_pulses[i + 2].start - filtered_pulses[i + 1].start
         ) / linelen
 
-        if (
+        # Relaxed check: ignore the first interval (disPpspp) to handle dropouts better
+        check_strict = (
             abs(disPpspp - 0.5) < 0.06
             and abs(disPPspp - 0.5) < 0.06
             and abs(dispPSpp - 0.5) < 0.06
+            and abs(disppSPp - 0.5) < 0.06
+            and abs(disppsPP - 0.5) < 0.06
+        )
+        check_relaxed = (
+            # abs(disPpspp - 0.5) < 0.06 and 
+            abs(disPPspp - 0.5) < 0.06
+            and abs(dispPSpp - 0.5) < 0.06
             and abs(disppSPp - 1.0) < 0.06
             and abs(disppsPP - 1.0) < 0.06
+        )
+
+        if (
+            (check_relaxed if relaxed else check_strict)
             and filtered_pulses[i - 2].len < SHORT_PULSE_MAX
             and filtered_pulses[i - 1].len < SHORT_PULSE_MAX
             and filtered_pulses[i].len < SHORT_PULSE_MAX
@@ -576,24 +588,29 @@ def get_line0_fallback(
             ) / 2.0
 
             if hsync_pulse_len / eq_pulse_len > 1.75:
+                # Assume we found the transition point
+                if frame_lines == 625:
+                     line_offset = 7.0
+                else:
+                     line_offset = 8.0
+                _first_field = 0
+                _first_field_confidence = 60
+                
                 if filtered_pulses[i].len < eq_pulse_len * 1.25:
-                    if frame_lines == 625:
-                        line_offset = 7.0
-                    else:
-                        line_offset = 8.0
-                    _first_field = 0
-                    _first_field_confidence = (
-                        80 if filtered_pulses[i].len < eq_pulse_len * 1.1 else 60
-                    )
+                    # i is likely an EQ pulse, so i+1 is the start of HSYNCs
+                    # This matches the standard pattern (EQ, EQ, EQ, HSYNC, HSYNC)
+                    # line_0 should be HSYNC
+                    pass
                 elif filtered_pulses[i].len > hsync_pulse_len * 0.75:
+                    # i is likely an HSYNC pulse
+                    # If i is HSYNC, and i-1 is EQ (implied by transition)
+                    # Then we shift prediction.
                     if frame_lines == 625:
-                        line_offset = 7.0
+                        line_offset = 7.0 # Adjust?
                     else:
                         line_offset = 9.0
                     _first_field = 1
-                    _first_field_confidence = (
-                        80 if filtered_pulses[i].len > hsync_pulse_len * 0.9 else 60
-                    )
+                    
             if line_offset is not None:
                 # in case we cannot find a matching pulse, we can still use this prediction
                 line_0_est = (
@@ -608,7 +625,7 @@ def get_line0_fallback(
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
-                for j in range(max(0, i - 20), i - 4):
+                for j in range(max(0, i - 25), i):
                     if abs(filtered_pulses[j].start - line_0_est) / linelen < 0.08:
                         if (
                             line_0 != filtered_pulses[j].start
@@ -637,12 +654,24 @@ def get_line0_fallback(
             filtered_pulses[i + 3].start - filtered_pulses[i + 2].start
         ) / linelen
 
-        if (
+        # Relaxed check: ignore the last interval (disppspP)
+        check_strict = (
             abs(disPPspp - 1.0) < 0.06
             and abs(dispPSpp - 1.0) < 0.06
             and abs(disppSPp - 0.5) < 0.06
             and abs(disppsPP - 0.5) < 0.06
             and abs(disppspP - 0.5) < 0.06
+        )
+        check_relaxed = (
+            abs(disPPspp - 1.0) < 0.06
+            and abs(dispPSpp - 1.0) < 0.06
+            and abs(disppSPp - 0.5) < 0.06
+            and abs(disppsPP - 0.5) < 0.06
+            # and abs(disppspP - 0.5) < 0.06
+        )
+
+        if (
+            (check_relaxed if relaxed else check_strict)
             and filtered_pulses[i - 2].len < SHORT_PULSE_MAX
             and filtered_pulses[i - 1].len < SHORT_PULSE_MAX
             and filtered_pulses[i].len < SHORT_PULSE_MAX
@@ -791,9 +820,16 @@ def get_line0_fallback(
         first_field = first_field_backup
         first_field_confidence = first_field_confidence_backup - 20
     elif line_0 is not None and line_0 > (linelen * (frame_lines - 1) / 2):
-        ldd.logger.info(
-            "WARNING, line0 hsync not found for current field, probably skipping one field."
-        )
+        # Check if we have a backup that is valid (within first half of frame)
+        if relaxed and line_0_backup is not None and line_0_backup < (linelen * (frame_lines - 1) / 2):
+             ldd.logger.info("Switching to backup line0 estimation as primary is out of range.")
+             line_0 = line_0_backup
+             first_field = first_field_backup
+             first_field_confidence = first_field_confidence_backup - 20
+        else:
+            ldd.logger.info(
+                "WARNING, line0 hsync not found for current field, probably skipping one field."
+            )
 
     if line_0 is None and line_0_backup is not None:
         ldd.logger.info(
@@ -1075,6 +1111,7 @@ class FieldShared:
             self.inlinelen,
             self.rf.SysParams["numPulses"],
             self.rf.SysParams["frame_lines"],
+            relaxed=self.rf.options.relaxed_line0,
         )
         # Not needed after this.
         del self.lt_vsync
