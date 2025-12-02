@@ -231,7 +231,16 @@ def debug_plot_line0_fallback(
 
 
 def get_line0_fallback(
-    valid_pulses, raw_pulses, demod_05, lt_vsync, linelen, num_eq_pulses, frame_lines, relaxed=False
+    valid_pulses,
+    raw_pulses,
+    demod_05,
+    lt_vsync,
+    linelen,
+    num_eq_pulses,
+    frame_lines,
+    relaxed=False,
+    expected_line0=None,
+    expected_first_field=None,
 ):
     """
     Try a more primitive way of locating line 0 if the normal approach fails.
@@ -833,9 +842,10 @@ def get_line0_fallback(
              first_field = first_field_backup
              first_field_confidence = first_field_confidence_backup - 20
         else:
-            ldd.logger.info(
-                "WARNING, line0 hsync not found for current field, probably skipping one field."
-            )
+            if expected_line0 is None:
+                ldd.logger.info(
+                    "WARNING, line0 hsync not found for current field, probably skipping one field."
+                )
 
     if line_0 is None and line_0_backup is not None:
         ldd.logger.info(
@@ -844,6 +854,43 @@ def get_line0_fallback(
         line_0 = line_0_backup
         first_field = first_field_backup
         first_field_confidence = first_field_confidence_backup - 20
+
+    if (line_0 is None or line_0 > (linelen * (frame_lines - 1) / 2)) and expected_line0 is not None:
+        limit = (linelen * (frame_lines - 1) / 2)
+        if expected_line0 < limit and expected_line0 > -5 * linelen:
+            ldd.logger.info(f"Attempting to use predicted line0 from previous field: {expected_line0}")
+            best_p = None
+            min_diff = 1000000
+            # Search range: Only snap to a pulse if it is very close to the prediction (0.7 lines).
+            # A wider range (e.g. 10 lines) causes it to snap to the wrong pulse (e.g. adjacent HSYNC/EQ)
+            # when the correct VSYNC pulse is missing due to dropout.
+            # search_range = 10.0 * linelen # Original search range
+            search_range = 0.7 * linelen
+            for p in filtered_pulses:
+                diff = abs(p.start - expected_line0)
+                if diff < search_range:
+                    if diff < min_diff:
+                        min_diff = diff
+                        best_p = p
+            if best_p:
+                ldd.logger.info(f"Found pulse near prediction: {best_p.start} (diff {min_diff/linelen:.2f} lines)")
+                line_0 = best_p.start
+                if expected_first_field is not None:
+                    first_field = expected_first_field
+                    first_field_confidence = 50
+            elif relaxed and expected_line0 > 0:
+                ldd.logger.info(f"No pulse found near prediction, forcing expected location: {expected_line0}")
+                line_0 = expected_line0
+                if expected_first_field is not None:
+                    first_field = expected_first_field
+                    first_field_confidence = 40
+            else:
+                ldd.logger.info("Prediction available but no matching pulse found and relaxed mode disabled.")
+                if line_0 is not None and line_0 > (linelen * (frame_lines - 1) / 2):
+                    ldd.logger.info(
+                        "WARNING, line0 hsync not found for current field, probably skipping one field."
+                    )
+
 
     if line_0 is not None:
         if DEBUG_PLOT:
@@ -1109,6 +1156,20 @@ class FieldShared:
         return dsout, dsaudio, dsefm
 
     def _get_line0_fallback(self, valid_pulses):
+        expected_line0 = None
+        expected_first_field = None
+
+        if hasattr(self.rf, "prev_first_hsync_readloc") and self.rf.prev_first_hsync_readloc != -1:
+            prev_abs = self.rf.prev_first_hsync_readloc + self.rf.prev_first_hsync_loc
+            lines_per_field = self.rf.SysParams["frame_lines"] / 2.0
+            target_abs = prev_abs + (lines_per_field * self.meanlinelen)
+            # Target VSYNC area approx 8 lines before active video (Start of VSYNC block)
+            expected_line0_abs = target_abs - (8.0 * self.meanlinelen)
+            expected_line0 = expected_line0_abs - self.readloc
+
+            if hasattr(self.rf, "prev_first_field") and self.rf.prev_first_field != -1:
+                expected_first_field = 1 - self.rf.prev_first_field
+
         res = get_line0_fallback(
             valid_pulses,
             self.rawpulses,
@@ -1118,6 +1179,8 @@ class FieldShared:
             self.rf.SysParams["numPulses"],
             self.rf.SysParams["frame_lines"],
             relaxed=self.rf.options.relaxed_line0,
+            expected_line0=expected_line0,
+            expected_first_field=expected_first_field,
         )
         # Not needed after this.
         del self.lt_vsync
