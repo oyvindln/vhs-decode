@@ -1,15 +1,18 @@
+pub mod ringbuffer;
 mod filters;
 mod levels;
 mod ported;
+mod inputfile;
 
 use numpy::ndarray::{Array1, ArrayView1, ArrayViewMut1, Zip};
 use numpy::{Complex64, IntoPyArray, PyArray1, PyReadonlyArray1, PyReadwriteArray1};
 use pyo3::prelude::*;
-use pyo3::types::PyList;
+use pyo3::types::{PyList, PyString};
 
 use filters::{sos_filtfilt, sos_filtfilt_f32};
 use levels::fallback_vsync_loc_means_impl;
 use ported::unwrap_angles_impl;
+use inputfile::{InputFile, InputFileType};
 
 // https://mazzo.li/posts/vectorized-atan2.html
 #[inline(always)]
@@ -197,6 +200,80 @@ fn sosfiltfilt_f32<'py>(
     output_array.into_pyarray(py)
 }
 
+#[pyclass(module = "vhsd_rust")]
+pub struct PyInputFile {
+    inner: InputFile,
+}
+
+#[pyfunction]
+pub fn inputfile_open<'py>(
+    py: Python<'py>,
+    filename: &Bound<'py, PyString>,
+    sample_rate: u64,
+    resample: bool,
+    inputtype: &Bound<'py, PyString>,
+) -> PyResult<Bound<'py, PyInputFile>> {
+    let filename: std::path::PathBuf = filename.to_str()?.into();
+
+    let input_type = match inputtype.to_str()? {
+        "s16" | "S16" => InputFileType::S16,
+        "u8" | "U8" => InputFileType::U8,
+        "flac" | "FLAC" => InputFileType::FLAC,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "invalid inputtype '{other}', expected 's16', 'u8', or 'flac'"
+            )));
+        }
+    };
+
+    let inner = InputFile::new(filename, sample_rate, resample, input_type)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+
+    Py::new(py, PyInputFile { inner }).map(|obj| obj.into_bound(py))
+}
+
+#[pyfunction]
+pub fn inputfile_read<'py>(
+    _py: Python<'py>,
+    f: &Bound<'py, PyInputFile>,
+    mut buffer: PyReadwriteArray1<'py, f32>,
+    pos: u64,
+    len: u64,
+) -> PyResult<u64> {
+    let mut f = f.borrow_mut();
+    let ctx: &mut InputFile = &mut f.inner;
+    let mut view = buffer.as_array_mut();
+
+    // Convert to &mut [f32] only if contiguous
+    let slice: &mut [f32] = view
+        .as_slice_mut()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("read input file error: array must be contiguous"))?;
+    let r = ctx.read(slice, pos, len as usize) as u64;
+    Ok(r)
+}
+
+#[pyfunction]
+pub fn inputfile_getsamplerate<'py>(
+    _py: Python<'py>,
+    f: &Bound<'py, PyInputFile>,
+) -> PyResult<i64> {
+    let mut f = f.borrow_mut();
+    let ctx: &mut InputFile = &mut f.inner;
+    let r = ctx.get_samplerate();
+    Ok(r)
+}
+
+#[pyfunction]
+pub fn inputfile_close<'py>(
+    _py: Python<'py>,
+    f: &Bound<'py, PyInputFile>,
+) -> PyResult<bool> {
+    let mut f = f.borrow_mut();
+    let ctx: &mut InputFile = &mut f.inner;
+    let r = ctx.close();
+    Ok(r)
+}
+
 #[pyfunction]
 fn check_debug<'py>(
     _py: Python<'py>,
@@ -220,6 +297,10 @@ fn vhsd_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fallback_vsync_loc_means, m)?)?;
     m.add_function(wrap_pyfunction!(sosfiltfilt, m)?)?;
     m.add_function(wrap_pyfunction!(sosfiltfilt_f32, m)?)?;
+    m.add_function(wrap_pyfunction!(inputfile_open, m)?)?;
+    m.add_function(wrap_pyfunction!(inputfile_read, m)?)?;
+    m.add_function(wrap_pyfunction!(inputfile_getsamplerate, m)?)?;
+    m.add_function(wrap_pyfunction!(inputfile_close, m)?)?;
     m.add_function(wrap_pyfunction!(check_debug, m)?)?;
     Ok(())
 }

@@ -453,7 +453,7 @@ def main(args=None, use_gui=False):
         sample_freq = 40
 
     try:
-        loader = lddu.make_loader(filename, loader_input_freq)
+        loader = lddu.make_loader(filename, loader_input_freq, args.no_resample)
     except ValueError as e:
         print(e)
         sys.exit(1)

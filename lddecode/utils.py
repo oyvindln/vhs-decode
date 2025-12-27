@@ -151,7 +151,7 @@ Returns data if successful, or None or an upstream exception if not (including i
 """
 
 
-def make_loader(filename, inputfreq=None):
+def make_loader(filename, inputfreq=None, no_resample=False):
     """Return an appropriate loader function object for filename.
 
     If inputfreq is specified, it gives the sample rate in MHz of the source
@@ -159,6 +159,17 @@ def make_loader(filename, inputfreq=None):
     rate specified by the source file's metadata will be ignored, as some
     formats can't represent typical RF sample rates accurately."""
 
+    if no_resample or inputfreq is None or inputfreq == 40:
+        ftype = None
+        if filename.endswith(".s16") or filename.endswith(".raw"):
+            ftype = "S16"
+        elif filename.endswith(".r8") or filename.endswith(".u8"):
+            ftype = "U8"
+        elif filename.endswith(".flac") or filename.endswith(".oga") or filename.endswith(".vhs"):
+            ftype = "FLAC"
+        if ftype is not None:
+            return LoadRustInputfile(filename, inputfreq, not no_resample, ftype)
+        
     if inputfreq is not None:
         # We're resampling, so we have to use ffmpeg.
 
@@ -553,6 +564,29 @@ class LoadLDF:
     def __call__(self, infile, sample, readlen):
         return self.read(infile, sample, readlen)
 
+class LoadRustInputfile:
+    from vhsd_rust import inputfile_open, inputfile_read, inputfile_getsamplerate, inputfile_close
+    def __init__(self, filename, samplerate, resample, filetype):
+        self._inst = self.inputfile_open(filename, samplerate, resample, filetype)
+
+    def __del__(self):
+        self._close()
+
+    def _close(self):
+        self.inputfile_close(self._inst)
+
+    def read(self, infile, sample, readlen):
+        data = np.empty(shape=readlen, dtype=np.float32)
+        #print("request ", sample, readlen)
+        retlen = self.inputfile_read(self._inst, data, sample, readlen)
+        #print("got this ", retlen)
+        if retlen != readlen:
+            data = data[:retlen]
+        #    print("end of file: ",readlen, retlen)
+        return data
+
+    def __call__(self, infile, sample, readlen):
+        return self.read(infile, sample, readlen)
 
 def ffmpeg_pipe(outname: str, opts: str):
     cmd = f"ffmpeg -y -hide_banner -loglevel quiet -f s16le -ar 40k -ac 1 -i -"
