@@ -567,13 +567,16 @@ class LoadLDF:
 class LoadRustInputfile:
     from vhsd_rust import inputfile_open, inputfile_read, inputfile_getsamplerate, inputfile_close
     def __init__(self, filename, samplerate, resample, filetype):
+        if samplerate is None:
+            samplerate = 0
         self._inst = self.inputfile_open(filename, samplerate, resample, filetype)
 
     def __del__(self):
         self._close()
 
     def _close(self):
-        self.inputfile_close(self._inst)
+        if self._inst is not None:
+            self.inputfile_close(self._inst)
 
     def read(self, infile, sample, readlen):
         data = np.empty(shape=readlen, dtype=np.float32)
