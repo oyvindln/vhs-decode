@@ -71,7 +71,7 @@ def scale(buf, begin, end, tgtlen, mult=1):
 
 # Scales and compensates for wow-induced playback-speed variations
 @njit(nogil=True, cache=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, level_adjust_threshold = 15):
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, level_smoothing_lines=0, level_adjust_threshold = 15):
     # Constants preserved as float32
     point_5 = np.float32(0.5)
     two = np.float32(2)
@@ -94,6 +94,15 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         median,
         wowfactors
     )
+
+    if level_smoothing_lines > 0:
+        # removes oscillating brightness variations for video with lots of noise around the hsync pulses, i.e. noisy line locations result in noisy wow calculations
+        # applies a low pass filter that smooths any sudden brightness variations while still being reactive enough to compensate for low frequency wow
+        alpha = 1 / (level_smoothing_lines * outwidth)
+        one_minus_alpha = 1 - alpha
+
+        for i in range(1, len(level_adjusts)):
+            level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]       
 
     for i in range(lineoffset_out_samples, len(dsout) + lineoffset_out_samples):
         # compensates for the amplitude/frequency shift caused by FM demodulation under varying playback speed.

@@ -128,6 +128,16 @@ def main(args=None, use_gui=False):
         ),
     )
     luma_group.add_argument(
+        "--wow_adjust_smoothing_lines",
+        type=float,
+        default=6,
+        help=(
+            "Adjusts the amount of smoothing in lines that is performed when compensating for brightness variations caused by wow. "
+            "\nWow calculation is based on position of hsync pulses which is affected by the accuracy of the TBC. "
+            "\nSet to `0` to disable smoothing (only recommended for low noise video)",
+        )
+    )
+    luma_group.add_argument(
         "--nodd",
         "--no_diff_demod",
         dest="disable_diff_demod",
@@ -533,7 +543,8 @@ def main(args=None, use_gui=False):
         rf_options=rf_options,
         extra_options=extra_options,
         debug_plot=debug_plot,
-        field_order_action=args.field_order_action
+        field_order_action=args.field_order_action,
+        level_smoothing_lines=args.wow_adjust_smoothing_lines
     )
 
     if check_debug():
