@@ -526,6 +526,7 @@ class CVBSDecode(ldd.LDdecode):
         level_adjust=0.2,
         rf_options={},
         extra_options={},
+        level_smoothing_lines=0,
     ):
         # monkey patch init with a dummy to prevent calling set_start_method twice on macos
         # and not create extra threads.
@@ -572,6 +573,8 @@ class CVBSDecode(ldd.LDdecode):
         self.demodcache = ldd.DemodCache(
             self.rf, self.infile, self.freader, None, num_worker_threads=self.numthreads
         )
+
+        self.level_smoothing_lines = level_smoothing_lines
 
     # Override to avoid NaN in JSON.
     def calcsnr(self, f, snrslice):
