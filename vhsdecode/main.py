@@ -130,7 +130,7 @@ def main(args=None, use_gui=False):
     luma_group.add_argument(
         "--wow_adjust_smoothing_lines",
         type=float,
-        default=6,
+        default=30,
         help=(
             "Adjusts the amount of smoothing in lines that is performed when compensating for brightness variations caused by wow. "
             "\nWow calculation is based on position of hsync pulses which is affected by the accuracy of the TBC. "
