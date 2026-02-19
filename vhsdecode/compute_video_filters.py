@@ -163,7 +163,7 @@ def gen_nonlinear_bandpass_params(rf_params, nyquist_hz, block_len):
 
 
 def gen_nonlinear_amplitude_lpf(corner_freq, nyquist_hz, order=1):
-    return sps.butter(1, [corner_freq / nyquist_hz], btype="lowpass", output="sos")
+    return sps.butter(1, corner_freq / nyquist_hz, btype="lowpass", output="sos")
 
 
 def gen_nonlinear_bandpass(upper_freq, lower_freq, order, nyquist_hz, block_len):
@@ -187,7 +187,7 @@ def gen_nonlinear_bandpass(upper_freq, lower_freq, order, nyquist_hz, block_len)
         nl_highpass_filter = filtfft(
             sps.butter(
                 order,
-                [lower_freq / nyquist_hz],
+                lower_freq / nyquist_hz,
                 btype="highpass",
             ),
             block_len,

@@ -999,7 +999,7 @@ class VHSRFDecode(ldd.RFDecode):
             y_fm_lowpass = sosfiltfft(
                 sps.butter(
                     DP["video_lpf_extra_order"],
-                    [DP["video_lpf_extra"] / self.freq_hz_half],
+                    DP["video_lpf_extra"] / self.freq_hz_half,
                     btype="lowpass",
                     output="sos",
                 ),
@@ -1009,7 +1009,7 @@ class VHSRFDecode(ldd.RFDecode):
             y_fm_highpass = sosfiltfft(
                 sps.butter(
                     DP["video_hpf_extra_order"],
-                    [DP["video_hpf_extra"] / self.freq_hz_half],
+                    DP["video_hpf_extra"] / self.freq_hz_half,
                     btype="highpass",
                     output="sos",
                 ),
@@ -1122,7 +1122,7 @@ class VHSRFDecode(ldd.RFDecode):
         # sections and thus do the filtering in sngle precision.
         # On higher order filters this is not viable as it tends to alter the filter too much.
         self.Filters["FEnvPost"] = sps.butter(
-            1, [700000 / self.freq_hz_half], btype="lowpass", output="sos"
+            1, 700000 / self.freq_hz_half, btype="lowpass", output="sos"
         )
 
         self.Filters["NLAmplitudeLPF"] = gen_nonlinear_amplitude_lpf(
@@ -1145,9 +1145,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # SF["YNRHighPass"] = sps.butter(
         #     1,
-        #     [
-        #         (0.5e6) / self.freq_hz_half,
-        #     ],
+        #     (0.5e6) / self.freq_hz_half,
         #     btype="highpass",
         #     output="sos",
         # )
