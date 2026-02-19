@@ -276,7 +276,7 @@ def process_chroma(
     disable_tracking_cafc=False,
     chroma_rotation=None,
     do_chroma_deemphasis=False,
-    detect_chroma_track_phase=True,
+    detect_chroma_track_phase=False,
 ):
     # Run TBC/downscale on chroma (if new field, else uses cache)
     # Cached if chroma process is run multiple times on one field due to track detection.
@@ -359,7 +359,7 @@ def process_chroma(
     if detect_chroma_track_phase:
         transition_line = get_track_transition(
             chroma,
-            0, # TODO: start after the vsync?
+            16, # TODO: start after the vbi (system dependent)
             lineoffset,
             linesout,
             outwidth,
@@ -468,7 +468,7 @@ def decode_chroma_simple(field):
     return chroma_to_u16(uphet)
 
 
-def decode_chroma(field, chroma_rotation=None, do_chroma_deemphasis=False):
+def decode_chroma(field, chroma_rotation=None, do_chroma_deemphasis=False, detect_chroma_track_phase=False):
     """Do track detection if needed and upconvert the chroma signal"""
     rf = field.rf
     field.chroma_tbc_buffer = None
@@ -503,6 +503,7 @@ def decode_chroma(field, chroma_rotation=None, do_chroma_deemphasis=False):
         disable_tracking_cafc=False,
         chroma_rotation=chroma_rotation,
         do_chroma_deemphasis=do_chroma_deemphasis,
+        detect_chroma_track_phase=detect_chroma_track_phase
     )
     field.uphet_temp = uphet
     # Release to avoid keeping this im memory - should do this in a cleaner manner.

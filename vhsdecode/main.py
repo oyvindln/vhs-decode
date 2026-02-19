@@ -230,6 +230,14 @@ def main(args=None, use_gui=False):
         help="If set to 0 or 1, force use of video track phase. (No effect on U-matic)",
     )
     chroma_group.add_argument(
+        "-dctp",
+        "--detect_chroma_track_phase",
+        dest="detect_chroma_track_phase",
+        action="store_true",
+        default=False,
+        help="Detect and correct chroma phase consistency for each track / field. Corrects chroma artifacts around head-switching area for VHS. (Experimental feature)",
+    )
+    chroma_group.add_argument(
         "--recheck_phase",
         dest="recheck_phase",
         action="store_true",
@@ -506,6 +514,7 @@ def main(args=None, use_gui=False):
     rf_options["export_raw_tbc"] = args.export_raw_tbc
     rf_options["tape_speed"] = args.tape_speed
     rf_options["ire0_adjust"] = args.ire0_adjust
+    rf_options["detect_chroma_track_phase"] = args.detect_chroma_track_phase
     rf_options["gnrc_afe"] = args.gnrc_afe
 
     extra_options = get_extra_options(args, not use_gui)

@@ -697,6 +697,7 @@ class VHSRFDecode(ldd.RFDecode):
                 "ire0_adjust",
                 "gnrc_afe",
                 "relaxed_line0",
+                "detect_chroma_track_phase"
             ],
         )(
             self.iretohz(100) * 2,
@@ -732,6 +733,7 @@ class VHSRFDecode(ldd.RFDecode):
             ire0_adjust,
             rf_options.get("gnrc_afe", False),
             rf_options.get("relaxed_line0", False),
+            rf_options.get("detect_chroma_track_phase", False)
         )
 
         # As agc can alter these sysParams values, store a copy to then
