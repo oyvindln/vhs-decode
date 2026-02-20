@@ -110,13 +110,33 @@ def comb_c_ntsc(data, line_len):
         ) / 4
     return data
 
-def get_track_transition(
+def get_upconverted_burst(
     chroma,
-    first_visible_line,
+    phase,
+    linenumber,
+    lineoffset,
+    outwidth,
+    burstarea,
+    chroma_heterodyne,
+    chroma_filter,
+):
+    burst_start = (linenumber - lineoffset) * outwidth + burstarea[0]
+    burst_end = burst_start + burstarea[1]
+
+    heterodyne = chroma_heterodyne[phase][burst_start:burst_end]
+    burst = heterodyne * chroma[burst_start:burst_end]
+
+    # filter out noise so only the color burst is present
+    return sosfiltfilt_rust(chroma_filter, burst)
+
+def get_phase_rotation_sequence(
+    chroma,
+    rotation_check_start_line,
     lineoffset,
     linesout,
     outwidth,
     phase_rotation_offset,
+    chroma_rotation,
     chroma_heterodyne,
     starting_phase,
     burstarea,
@@ -124,57 +144,36 @@ def get_track_transition(
 ):
     # *****************************************************
     # Gather the phase differences between each color burst
+    # Color burst alternates phase between lines in a field
     # *****************************************************
     phase = starting_phase
-    previous_burst = None
-    current_burst = None
-    phase_differences = []
+    phase_correlation_threshold = 0.5
+    phase_rotations = []
+    phase_rotations.append(phase)
 
-    for linenumber in range(lineoffset + first_visible_line, linesout + lineoffset):
-        burst_start = (linenumber - lineoffset) * outwidth + burstarea[0]
-        burst_end = burst_start + burstarea[1]
+    for linenumber in range(lineoffset, linesout + lineoffset - 1):
+        next_phase = (phase + phase_rotation_offset) % 4
 
-        heterodyne = chroma_heterodyne[phase][burst_start:burst_end]
-        current_burst = heterodyne * chroma[burst_start:burst_end]
+        if linenumber >= rotation_check_start_line:
+            current_burst = get_upconverted_burst(chroma, phase, linenumber, lineoffset, outwidth, burstarea, chroma_heterodyne, chroma_filter)
+            current_burst_norm = np.linalg.norm(current_burst)
 
-        # filter out noise so only the color burst is present
-        current_burst = sosfiltfilt_rust(chroma_filter, current_burst)
-        current_burst_norm = np.linalg.norm(current_burst)
+            next_burst = get_upconverted_burst(chroma, next_phase, linenumber + 1, lineoffset, outwidth, burstarea, chroma_heterodyne, chroma_filter)
+            next_burst_norm = np.linalg.norm(current_burst)
 
-        if previous_burst is not None:
-            phase_difference = np.dot(previous_burst, current_burst) / (previous_burst_norm * current_burst_norm)
-            phase_differences.append((linenumber - 1, phase_difference))
+            phase_correlation = np.dot(current_burst, next_burst) / (current_burst_norm * next_burst_norm)
 
-        previous_burst = current_burst
-        previous_burst_norm = current_burst_norm
+            if phase_correlation > phase_correlation_threshold:
+                # positive correlation -> in phase
+                # negative correlation -> out of phase
+                # burst is more in phase than out of phase, flip rotation so it remains out of phase
+                phase_rotation_offset = chroma_rotation[1] if phase_rotation_offset == chroma_rotation[0] else chroma_rotation[0]
+                next_phase = (phase + phase_rotation_offset) % 4
 
-        phase = (phase + phase_rotation_offset) % 4
+        phase_rotations.append(next_phase)
+        phase = next_phase
 
-    # *******************************************
-    # Find the transition point where color burst
-    # phase transition pattern changes
-    # *******************************************
-    threshold = 0.8 # +- difference
-    track_transition_candidates = []
-    
-    prev_diff = phase_differences[0][1]
-    for (linenumber, cur_diff) in phase_differences:
-        if (
-            (prev_diff < -threshold and cur_diff > threshold) or
-            (cur_diff < -threshold and prev_diff > threshold)
-        ):
-            track_transition_candidates.append(
-                (linenumber, abs(prev_diff-cur_diff))
-            )
-        prev_diff = cur_diff
-
-    if len(track_transition_candidates) == 0:
-        return None
-
-    best_candidate = max(track_transition_candidates, key=lambda x: x[1])
-    transition_line, transition_diff = best_candidate
-    
-    return transition_line
+    return phase_rotations
     
 @njit(cache=True, nogil=True, fastmath=True)
 def upconvert_chroma(
@@ -185,8 +184,7 @@ def upconvert_chroma(
     chroma_heterodyne,
     phase_rotation,
     starting_phase,
-    track_transition_line=None,
-    chroma_rotation=None,
+    phase_rotation_sequence=None
 ):
     uphet = np.zeros(len(chroma), dtype=np.float32)
     if phase_rotation == 0:
@@ -204,9 +202,15 @@ def upconvert_chroma(
         #        rotation = [(0,0),(90,-270),(180,-180),(270,-90)]
         # Track 2 - needs phase rotation or the chroma will be inverted.
         phase = starting_phase
+        phase_index = 0
         for linenumber in range(lineoffset, linesout + lineoffset):
             linestart = (linenumber - lineoffset) * outwidth
             lineend = linestart + outwidth
+            
+            if phase_rotation_sequence is not None:
+                # override calculated phase rotation with the passed in rotation
+                phase = phase_rotation_sequence[phase_index]
+                phase_index += 1
 
             heterodyne = chroma_heterodyne[phase][linestart:lineend]
 
@@ -215,11 +219,6 @@ def upconvert_chroma(
             line = heterodyne * c
 
             uphet[linestart:lineend] = line
-
-            if linenumber == track_transition_line and chroma_rotation is not None:
-                # switch the track for the next line
-                phase_rotation = chroma_rotation[1] if phase_rotation == chroma_rotation[0] else chroma_rotation[0]
-
             phase = (phase + phase_rotation) % 4
 
     return uphet
@@ -356,21 +355,22 @@ def process_chroma(
 
     starting_phase = 0 # should this persist on the field so phase order doesn't need to be re-detected?
 
-    if detect_chroma_track_phase:
-        transition_line = get_track_transition(
+    if detect_chroma_track_phase and chroma_rotation is not None:
+        phase_rotation_sequence = get_phase_rotation_sequence(
             chroma,
             16, # TODO: start after the vbi (system dependent)
             lineoffset,
             linesout,
             outwidth,
             phase_rotation,
+            chroma_rotation,
             chroma_heterodyne,
             starting_phase, 
             burstarea,
             field.rf.Filters["FChromaFinal"],
         )
     else:
-        transition_line = None
+        phase_rotation_sequence = None
 
     uphet = upconvert_chroma(
         chroma,
@@ -380,8 +380,7 @@ def process_chroma(
         chroma_heterodyne,
         phase_rotation,
         starting_phase,
-        transition_line,
-        chroma_rotation,
+        phase_rotation_sequence,
     )
 
     # Filter out unwanted frequencies from the final chroma signal.
