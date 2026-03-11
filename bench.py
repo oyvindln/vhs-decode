@@ -161,18 +161,23 @@ def bench_dsp_primitives():
 
     # Envelope: old (sps.hilbert) vs new (_envelope_from_rfft)
     import scipy.signal as sps
-    from vhsdecode.nonlinear_filter import _envelope_from_rfft
 
     def _envelope_old():
         hf_part = np.fft.irfft(rfft_data)
         np.abs(sps.hilbert(hf_part))
 
-    def _envelope_new():
-        hf_part = np.fft.irfft(rfft_data)
-        _envelope_from_rfft(rfft_data, n)
-
     benchmarks["envelope: sps.hilbert (old)"] = _envelope_old
-    benchmarks["envelope: rfft direct  (new)"] = _envelope_new
+
+    try:
+        from vhsdecode.nonlinear_filter import _envelope_from_rfft
+
+        def _envelope_new():
+            hf_part = np.fft.irfft(rfft_data)
+            _envelope_from_rfft(rfft_data, n)
+
+        benchmarks["envelope: rfft direct  (new)"] = _envelope_new
+    except ImportError:
+        pass
 
     # Run all benchmarks
     for name, fn in benchmarks.items():
