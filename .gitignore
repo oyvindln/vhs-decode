@@ -72,7 +72,6 @@ CMakeFiles/
 CMakeLists.txt.user
 CTestTestfile.cmake
 DartConfiguration.tcl
-Makefile
 Testing/
 build-*/
 build/
