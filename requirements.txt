@@ -1,11 +1,11 @@
 Cython
 matplotlib
-numba>=0.58.1
-numpy>=1.22
-soxr
-scipy >=1.10
-soundfile>=0.13.1
-sounddevice
 noisereduce>=2.0.0
-pyzmq
+numba>=0.59
+numpy>=1.24
+scipy>=1.11
 setproctitle
+sounddevice
+soundfile>=0.13.1
+soxr
+static-ffmpeg

@@ -11,6 +11,11 @@ sci-rs = "0.4.1"
 itertools = "0.14.0"
 #ndarray = { version = "0.15.6", features = ["rayon"]}
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
 [lib]
 name = "vhsd_rust"
 # "cdylib" is necessary to produce a shared library for Python to import from.
