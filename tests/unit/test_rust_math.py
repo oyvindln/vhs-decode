@@ -1,12 +1,10 @@
 import numpy as np
 import pytest
 
-from tests.conftest import DATA_DIR
-
 
 @pytest.fixture
-def hilbert_data():
-    return np.load(DATA_DIR / "hilbert_data.npz")["data"]
+def hilbert_data(data_dir):
+    return np.load(data_dir / "hilbert_data.npz")["data"]
 
 
 class TestRustAngle:
