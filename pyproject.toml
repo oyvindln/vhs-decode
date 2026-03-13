@@ -60,12 +60,12 @@ vhs_decode = ["*.txt"]
 # Private Rust extension module to be nested into the Python package
 target = "vhsd_rust"
 
-# Needed to prevent building for older macos versions not supported by rust - see https://cibuildwheel.pypa.io/en/stable/faq/#building-rust-wheels
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "integration: end-to-end decode tests requiring real RF data",
 ]
 
+# Needed to prevent building for older macos versions not supported by rust - see https://cibuildwheel.pypa.io/en/stable/faq/#building-rust-wheels
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.12"
