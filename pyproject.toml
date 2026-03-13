@@ -27,6 +27,7 @@ hifi_gui_qt6 = [ "PyQt6>=6.4.2" ]
 # Can probably be depcretaded now since it's also an option in vhs-decode to use it.
 hifi_gnuradio = [ "pyzmq" ]
 gnuradio = [ "pyzmq" ]
+test = [ "pytest>=7.0" ]
 
 [project.scripts]
 ld-decode = "lddecode.main:main"
@@ -60,5 +61,11 @@ vhs_decode = ["*.txt"]
 target = "vhsd_rust"
 
 # Needed to prevent building for older macos versions not supported by rust - see https://cibuildwheel.pypa.io/en/stable/faq/#building-rust-wheels
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end decode tests requiring real RF data",
+]
+
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.12"

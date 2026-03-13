@@ -5,6 +5,7 @@ recursive-include rust *.rs
 exclude CMake*
 exclude PAL_*
 exclude tests.py
+exclude hilbert_data.npz
 exclude gen_*
 exclude compile.bat*
 exclude README_*
@@ -22,3 +23,4 @@ prune cmake_modules
 prune docs
 prune assets
 prune resources
+prune tests

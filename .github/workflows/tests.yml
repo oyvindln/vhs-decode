@@ -6,6 +6,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  test_python_unit:
+    name: test_python_unit
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - uses: dtolnay/rust-toolchain@stable
+
+    - name: Install package with test dependencies
+      timeout-minutes: 10
+      run: pip install ".[test]"
+
+    - name: Run unit tests
+      timeout-minutes: 5
+      run: python -m pytest tests/unit -v
+
   test_core_build:
     name: test_core_build (Qt${{ matrix.qt }})
     runs-on: ubuntu-22.04
