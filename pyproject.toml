@@ -62,6 +62,7 @@ target = "vhsd_rust"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]
 markers = [
     "integration: end-to-end decode tests requiring real RF data",
 ]

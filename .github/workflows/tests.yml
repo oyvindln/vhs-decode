@@ -29,7 +29,7 @@ jobs:
       run: pip install ".[test]"
 
     - name: Verify Cython extensions compiled
-      run: python -c "import vhsdecode.linear_filter; import vhsdecode.sync; import vhsdecode.hilbert; print('Cython OK')"
+      run: cd /tmp && python -c "import vhsdecode.linear_filter; import vhsdecode.sync; import vhsdecode.hilbert; print('Cython OK')"
 
     - name: Run unit tests
       timeout-minutes: 5
