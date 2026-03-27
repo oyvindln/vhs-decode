@@ -34,9 +34,11 @@ elseif(UNIX)
 endif()
 
 
-target_include_directories(ld-analyse PRIVATE
-    ${QWT_INCLUDE_DIR}  ${FFTW_INCLUDE_DIR}
-)
+if(QWT_FOUND)
+    target_include_directories(ld-analyse PRIVATE
+        ${QWT_INCLUDE_DIR}  ${FFTW_INCLUDE_DIR}
+    )
+endif()
 
 
 # Include Homebrew folders manually for qwt on macOS.
@@ -64,7 +66,7 @@ endif()
 
 target_link_libraries(ld-analyse PRIVATE
     Qt::Core Qt::Gui Qt::Widgets
-    ${QWT_LIBRARY}
+    $<$<BOOL:${QWT_FOUND}>:${QWT_LIBRARY}>
     lddecode-library lddecode-chroma
 )
 
