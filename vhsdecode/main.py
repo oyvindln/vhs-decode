@@ -272,6 +272,14 @@ def main(args=None, use_gui=False):
         help="Disables using the color burst phase to refine hsync. (currently only applicable to NTSC)",
     )
     chroma_group.add_argument(
+        "--ck",
+        "--enable_color_killer",
+        dest="enable_color_killer",
+        action="store_true",
+        default=False,
+        help="Enables color killer, i.e. burst detection to enable/disable chroma decoding and hsync refinement. (currently only applicable to NTSC)"
+    )
+    chroma_group.add_argument(
         "--no_comb",
         dest="disable_comb",
         action="store_true",
@@ -543,6 +551,7 @@ def main(args=None, use_gui=False):
     rf_options["tape_speed"] = args.tape_speed
     rf_options["ire0_adjust"] = args.ire0_adjust
     rf_options["detect_chroma_track_phase"] = args.detect_chroma_track_phase
+    rf_options["enable_color_killer"] = args.enable_color_killer
     rf_options["disable_burst_hsync"] = args.disable_burst_hsync
     rf_options["disable_phase_correction"] = args.disable_phase_correction
     rf_options["gnrc_afe"] = args.gnrc_afe

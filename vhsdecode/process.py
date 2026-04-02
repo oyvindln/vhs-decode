@@ -710,6 +710,7 @@ class VHSRFDecode(ldd.RFDecode):
                 "gnrc_afe",
                 "relaxed_line0",
                 "detect_chroma_track_phase",
+                "enable_color_killer",
                 "disable_burst_hsync",
                 "disable_phase_correction",
             ],
@@ -751,6 +752,7 @@ class VHSRFDecode(ldd.RFDecode):
             rf_options.get("gnrc_afe", False),
             rf_options.get("relaxed_line0", False),
             rf_options.get("detect_chroma_track_phase", False),
+            rf_options.get("enable_color_killer", False),
             rf_options.get("disable_burst_hsync", False),
             rf_options.get("disable_phase_correction", False),
         )
