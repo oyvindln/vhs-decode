@@ -530,10 +530,10 @@ class ChromaAFC:
             self.samp_rate, self.color_under, trans_hi, order_limit=200
         )
 
-        return {
+        return [
             FiltersClass(iir_narrow_lo[0], iir_narrow_lo[1], self.samp_rate),
             FiltersClass(iir_narrow_hi[0], iir_narrow_hi[1], self.samp_rate),
-        }
+        ]
 
     def get_band_tolerance(self):
         return (100 - self.max_f_dev_percents[0]) / 100, (

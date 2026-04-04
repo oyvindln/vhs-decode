@@ -91,14 +91,14 @@ class VsyncSerration:
         # cannot design it as a bandpass with the given constraints
         iir_serration_base_lo = firdes_highpass(self.samp_rate, fh, fh)
         iir_serration_base_hi = firdes_lowpass(self.samp_rate, fh, fh)
-        self.serrationFilter_base = {
+        self.serrationFilter_base = [
             FiltersClass(
                 iir_serration_base_lo[0], iir_serration_base_lo[1], self.samp_rate
             ),
             FiltersClass(
                 iir_serration_base_hi[0], iir_serration_base_hi[1], self.samp_rate
             ),
-        }
+        ]
 
         iir_serration_envelope_lo = firdes_lowpass(
             self.samp_rate, fh / serration_limit, fh / 2

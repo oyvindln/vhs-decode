@@ -27,7 +27,7 @@ cdef class FiltersClass:
 
 
 # Filter the input with each provided filter iteratively.
-cpdef np.ndarray chainfiltfilt_b(np.ndarray data, set filters):
+cpdef np.ndarray chainfiltfilt_b(np.ndarray data, list filters):
     # Need to see if we can pass the filter list with correct type so we can call cdef but doing
     # this for now.
     for filt in filters:
