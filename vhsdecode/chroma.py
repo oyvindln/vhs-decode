@@ -20,9 +20,9 @@ def chroma_to_u16(chroma):
 
 
 @njit(cache=True, nogil=True)
-def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
+def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines, burst_detected_line):
     """Scale chroma according to the level of the color burst on each line."""
-    STARTING_LINE = int(16)
+    STARTING_LINE = int(16) 
     assert lines > STARTING_LINE
 
     output = np.zeros(chroma.size, dtype=np.double)
@@ -30,10 +30,15 @@ def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines):
     for linenumber in range(16, lines):
         linestart = linelength * linenumber
         lineend = linestart + linelength
-        line = chroma[linestart:lineend]
-        acced, rms = acc_line(line, burst_abs_ref, burststart, burstend)
-        output[linestart:lineend] = acced
-        mean_burst_accumulator += rms
+
+        if linenumber < burst_detected_line:
+            # color killer active for this line
+            output[linestart:lineend] = 0
+        else:
+            line = chroma[linestart:lineend]
+            acced, rms = acc_line(line, burst_abs_ref, burststart, burstend)
+            output[linestart:lineend] = acced
+            mean_burst_accumulator += rms
 
     return output, mean_burst_accumulator / (lines - STARTING_LINE)
 
@@ -673,10 +678,6 @@ def process_chroma(
         else:
             uphet = comb_c_pal(uphet, outwidth)
 
-    if field.burst_detected_line > 0:
-        # remove any stray color if the color killer was deactivated during this field
-        uphet[0:(field.burst_detected_line - lineoffset) * outwidth] = 0
-
     # Final automatic chroma gain.
     uphet, mean_rms = acc(
         uphet,
@@ -685,6 +686,7 @@ def process_chroma(
         burstarea[1],
         outwidth,
         linesout,
+        field.burst_detected_line
     )
 
     field.rf.field_averages.chroma_level.push(mean_rms)

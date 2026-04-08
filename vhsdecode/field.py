@@ -1849,21 +1849,19 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         phase_sequence,
         burst_detected_line
     ):
-        for line_number, _, burst_phase, _, _, _ in phase_sequence[9:]:
-            if (
-                line_number >= burst_detected_line
-                and burst_detected_line != -1
-            ):
-                phase_delta = (burst_avg_phase - burst_phase + 180) % 360 - 180
+        burst_tbc_start = max(9, burst_detected_line)
 
-                # scale up burst fsc for each line
-                line_start = linelocs[line_number]
-                line_end = linelocs[line_number + 1]
-                line_length = line_end - line_start
-                scale = line_length / outlinelen
+        for line_number, _, burst_phase, _, _, _ in phase_sequence[burst_tbc_start:]:
+            phase_delta = (burst_avg_phase - burst_phase + 180) % 360 - 180
 
-                line_adjust = (phase_delta / 360.0 * 4)
-                linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
+            # scale up burst fsc for each line
+            line_start = linelocs[line_number]
+            line_end = linelocs[line_number + 1]
+            line_length = line_end - line_start
+            scale = line_length / outlinelen
+
+            line_adjust = (phase_delta / 360.0 * 4)
+            linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_burst(self, linelocs=None):
         if linelocs is None:
@@ -1876,9 +1874,10 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             self.lock_to_burst()
 
             if (
-                not self.rf.options.disable_burst_hsync and
-                self.phase_sequence is not None and
-                self.rf.color_system == "NTSC" # only enable for normal NTSC (disabled for NLINHA, etc.)
+                not self.rf.options.disable_burst_hsync
+                and self.phase_sequence is not None
+                and self.rf.color_system == "NTSC" # only enable for normal NTSC (disabled for NLINHA, etc.)
+                and self.burst_detected_line != -1 # color killer not active for entire field
             ):
                 FieldNTSCShared._sync_to_burst(
                     linelocs,
