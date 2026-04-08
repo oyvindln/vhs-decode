@@ -22,7 +22,7 @@ def chroma_to_u16(chroma):
 @njit(cache=True, nogil=True)
 def acc(chroma, burst_abs_ref, burststart, burstend, linelength, lines, burst_detected_line):
     """Scale chroma according to the level of the color burst on each line."""
-    STARTING_LINE = int(16) 
+    STARTING_LINE = int(16)
     assert lines > STARTING_LINE
 
     output = np.zeros(chroma.size, dtype=np.double)
