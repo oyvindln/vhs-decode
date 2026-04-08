@@ -1140,7 +1140,7 @@ class FieldShared:
 
     def lock_to_burst(self):
         self.chroma_tbc_buffer = None
-        self.rf.track_phase, self.phase_sequence, self.burst_phase_avg, self.burst_detected = decode_chroma_phase_rotation(
+        self.rf.track_phase, self.phase_sequence, self.burst_phase_avg, self.burst_detected_line = decode_chroma_phase_rotation(
             self,
             chroma_rotation=self.rf.DecoderParams.get("chroma_rotation", None),
             detect_chroma_track_phase=self.rf.options.detect_chroma_track_phase
@@ -1846,19 +1846,24 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         linelocs,
         outlinelen,
         burst_avg_phase,
-        phase_sequence
+        phase_sequence,
+        burst_detected_line
     ):
         for line_number, _, burst_phase, _, _, _ in phase_sequence[9:]:
-            phase_delta = (burst_avg_phase - burst_phase + 180) % 360 - 180
+            if (
+                line_number >= burst_detected_line
+                and burst_detected_line != -1
+            ):
+                phase_delta = (burst_avg_phase - burst_phase + 180) % 360 - 180
 
-            # scale up burst fsc for each line
-            line_start = linelocs[line_number]
-            line_end = linelocs[line_number + 1]
-            line_length = line_end - line_start
-            scale = line_length / outlinelen
+                # scale up burst fsc for each line
+                line_start = linelocs[line_number]
+                line_end = linelocs[line_number + 1]
+                line_length = line_end - line_start
+                scale = line_length / outlinelen
 
-            line_adjust = (phase_delta / 360.0 * 4)
-            linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
+                line_adjust = (phase_delta / 360.0 * 4)
+                linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_burst(self, linelocs=None):
         if linelocs is None:
@@ -1873,14 +1878,14 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             if (
                 not self.rf.options.disable_burst_hsync and
                 self.phase_sequence is not None and
-                self.rf.color_system == "NTSC" and # only enable for normal NTSC (disabled for NLINHA, etc.)
-                self.burst_detected # skip hsync when burst is not detected
+                self.rf.color_system == "NTSC" # only enable for normal NTSC (disabled for NLINHA, etc.)
             ):
                 FieldNTSCShared._sync_to_burst(
                     linelocs,
                     self.outlinelen,
                     self.burst_phase_avg,
                     self.phase_sequence,
+                    self.burst_detected_line
                 )
 
         return linelocs

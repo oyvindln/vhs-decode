@@ -301,6 +301,7 @@ def get_phase_rotation_sequence(
     detect_chroma_track_phase,
     rotation_check_start_line,
     enable_color_killer,
+    prev_burst_detected_line,
     color_system,
 ):
     # Detects the correct color-under heterodyne starting phase and rotation direction
@@ -332,7 +333,7 @@ def get_phase_rotation_sequence(
 
     burst_check_start = burst_check_skip_lines
     burst_check_end = end - burst_check_skip_lines
-    burst_detected = True
+    burst_detected_line = 0 # color enabled by default
 
     if chroma_rotation:
         # detect relative phase difference between lines
@@ -405,17 +406,32 @@ def get_phase_rotation_sequence(
                     avg_count += 1
                     magnitude_avg += magnitude
 
+                    if enable_color_killer:
+                        # find the first line that might have a valid burst if the previous field had the burst disabled
+                        # broadcasters would sometime turn on the burst mid-field, so attempt to detect that transition here
+                        if (
+                            prev_burst_detected_line == -1 # previous field had color killer activated
+                            and burst_detected_line == 0 and magnitude > burst_magnitude_threshold # first burst that exceeds threshold
+                        ):
+                            # first burst that exceeds threshold
+                            # color killer will be active until this line, then it deactivates
+                            # it is only reactivated after an entire field is without color (below)
+                            burst_detected_line = line_number
+
         magnitude_avg /= avg_count
         burst_phase_avg = np.degrees(np.arctan2(Q_total, I_total)) % 360
 
         if enable_color_killer:
-            burst_detected = magnitude_avg >= burst_magnitude_threshold
+            if magnitude_avg < burst_magnitude_threshold:
+                # (re)activate color killer for the entire field
+                burst_detected_line = -1
+
     elif color_system in ("MPAL", "NLINHA"):
         burst_phase_avg = None
     else:
         burst_phase_avg = None
 
-    return chroma_rotation_index, phase_sequence, burst_phase_avg, burst_detected
+    return chroma_rotation_index, phase_sequence, burst_phase_avg, burst_detected_line
 
 
 @njit(cache=True, nogil=True, fastmath=True)
@@ -531,7 +547,11 @@ def decode_chroma_phase_rotation(
         else field.rf.chroma_heterodyne
     )
 
-    track_phase, phase_sequence, burst_phase_avg, burst_detected = get_phase_rotation_sequence(
+    prev_burst_detected_line = 0
+    if field.prevfield is not None:
+        prev_burst_detected_line = field.prevfield.burst_detected_line
+
+    track_phase, phase_sequence, burst_phase_avg, burst_detected_line = get_phase_rotation_sequence(
         chroma,
         chroma_heterodyne,
         field.rf.Filters["FChromaFinal"],
@@ -546,10 +566,11 @@ def decode_chroma_phase_rotation(
         detect_chroma_track_phase,
         rotation_check_start_line, # check for track phase rotation around the headswitching area (bottom of field)
         field.rf.options.enable_color_killer,
+        prev_burst_detected_line,
         field.rf.color_system,
     )
 
-    return track_phase, phase_sequence, burst_phase_avg, burst_detected
+    return track_phase, phase_sequence, burst_phase_avg, burst_detected_line
 
 
 def process_chroma(
@@ -564,7 +585,8 @@ def process_chroma(
     outwidth = field.outlinelen
 
     uphet = np.zeros((linesout * outwidth), dtype=np.float32)
-    if not field.burst_detected:
+    if field.burst_detected_line == -1:
+        # skip chroma if the color killer is active for the whole field
         return uphet
 
     # Run TBC/downscale on chroma (if new field, else uses cache)
@@ -650,6 +672,10 @@ def process_chroma(
             uphet = comb_c_ntsc(uphet, outwidth)
         else:
             uphet = comb_c_pal(uphet, outwidth)
+
+    if field.burst_detected_line > 0:
+        # remove any stray color if the color killer was deactivated during this field
+        uphet[0:(field.burst_detected_line - lineoffset) * outwidth] = 0
 
     # Final automatic chroma gain.
     uphet, mean_rms = acc(
