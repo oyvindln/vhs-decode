@@ -445,8 +445,8 @@ def upconvert_chroma(
     uphet,
     lineoffset,
     outwidth,
+    phase_rotation_sequence,
     chroma_heterodyne,
-    phase_rotation_sequence
 ):
     for linenumber, current_phase, _, _, _, _ in phase_rotation_sequence:
         linestart = (linenumber - lineoffset) * outwidth
@@ -456,25 +456,41 @@ def upconvert_chroma(
         c = chroma[linestart:lineend]
         uphet[linestart:lineend] = c * heterodyne
 
+
 @njit(cache=True, nogil=True, fastmath=True)
-def adjust_phase(input_data, output_data, input_phase, target_phase):
-    # rotates the phase of the chroma signal
-    phase_adjustment = np.deg2rad(target_phase) - np.deg2rad(input_phase)
-    rotation = np.exp(1j * phase_adjustment)
+def upconvert_chroma_phase_comp(
+    chroma,
+    uphet,
+    lineoffset,
+    outwidth,
+    phase_rotation_sequence,
+    color_under_carrier_fs,
+    fsc,
+    target_phase
+):
+    deg2rad_scale = np.pi / 180.0
+    pi_over_two = np.pi / 2.0
 
-    for i in range(len(input_data)):
-        # Apply phase adjustment in baseband
-        # Convert back to real and store
-        output_data[i] = (input_data[i] * rotation).real
+    het_mhz = color_under_carrier_fs / 1e6
+    het_coefficient = pi_over_two * (1.0 + het_mhz / fsc)
 
+    target_phase_rad = target_phase * deg2rad_scale
 
-def ntsc_phase_comp(uphet, burst_phase_avg, target_phase=0):
-    # TODO: Can we use the Rust version here?
-    uphet_hilbert = sps.hilbert(uphet)
+    # check if there are other adjustments needed after this phase adjust
+    # chroma decoder seems to be correcting an amplitude problem
 
-    adjust_phase(uphet_hilbert, uphet, burst_phase_avg, target_phase)
+    for linenumber, phase_rotation, burst_phase, _, _, _ in phase_rotation_sequence:
+        linestart = (linenumber - lineoffset) * outwidth
+        lineend = linestart + outwidth
 
-    return uphet
+        theta = het_coefficient * linestart + (
+            phase_rotation * pi_over_two # heterodyne rotation
+            + target_phase_rad + burst_phase * deg2rad_scale # phase offset relative to line
+        )
+
+        for i in range(linestart, lineend):
+            uphet[i] = chroma[i] * -math.cos(theta)
+            theta += het_coefficient
 
 
 @njit(cache=True, nogil=True)
@@ -577,6 +593,13 @@ def decode_chroma_phase_rotation(
 
     return track_phase, phase_sequence, burst_phase_avg, burst_detected_line
 
+ntsc_color_framing_phase_shift = 33
+ntsc_color_framing_map = {
+    (1, 0): (1, 0 - ntsc_color_framing_phase_shift),
+    (0, 1): (2, 180 - ntsc_color_framing_phase_shift),
+    (1, 1): (3, 180 - ntsc_color_framing_phase_shift),
+    (0, 0): (4, 0 - ntsc_color_framing_phase_shift),
+}
 
 def process_chroma(
     field,
@@ -632,28 +655,40 @@ def process_chroma(
         if not disable_deemph:
             chroma = burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea)
 
-    chroma_heterodyne = (
-        field.rf.chroma_afc.getChromaHet()
-        if (field.rf.do_cafc and not disable_tracking_cafc)
-        else field.rf.chroma_heterodyne
-    )
-
-    upconvert_chroma(
-        chroma,
-        uphet,
-        lineoffset,
-        outwidth,
-        chroma_heterodyne,
-        field.phase_sequence,
-    )
-
     if (
         field.rf.color_system == "NTSC"
         and not field.rf.options.disable_phase_correction
     ):
-        # it's not possible to know the color framing, due to the color under heterodyne starting at an unknown rotation
-        # instead shift the color phase consistently to 0 degrees and let the chroma decoder fine tune it
-        uphet = ntsc_phase_comp(uphet, field.burst_phase_avg)
+        # regenerates the color framing
+        field.fieldPhaseID, target_phase = ntsc_color_framing_map[
+            (field.isFirstField, (field.field_number // 2) % 2)
+        ]
+
+        upconvert_chroma_phase_comp(
+            chroma,
+            uphet,
+            lineoffset,
+            outwidth,
+            field.phase_sequence,
+            field.rf.chroma_afc.color_under,
+            field.rf.chroma_afc.fsc_mhz,
+            target_phase
+        )
+    else:
+        chroma_heterodyne = (
+            field.rf.chroma_afc.getChromaHet()
+            if (field.rf.do_cafc and not disable_tracking_cafc)
+            else field.rf.chroma_heterodyne
+        )
+    
+        upconvert_chroma(
+            chroma,
+            uphet,
+            lineoffset,
+            outwidth,
+            field.phase_sequence,
+            chroma_heterodyne
+        )
 
     # Filter out unwanted frequencies from the final chroma signal.
     # Mixing the signals will produce waves at the difference and sum of the
