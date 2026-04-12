@@ -169,6 +169,7 @@ def _get_phase_sequence(
     detect_chroma_track_phase,
     rotation_check_start_line,
     track_change_threshold,
+    color_system
 ):
     do_phase_rotation_check = (
         detect_chroma_track_phase
@@ -263,8 +264,15 @@ def _get_phase_sequence(
                 )
             )
 
+            if color_system == "NTSC":
+                # check one line back
+                comparison_burst = current_burst_phase
+            elif color_system == "PAL":
+                # check two lines back
+                comparison_burst = phase_sequence[-1][2]
+
             phase_delta_quadrant = abs(
-                (next_burst_phase - current_burst_phase + 180) % 360 - 180
+                (next_burst_phase - comparison_burst + 180) % 360 - 180
             )
             if phase_delta_quadrant > track_change_threshold:
                 # burst is more in phase than out of phase, flip rotation so it remains out of phase
@@ -334,6 +342,7 @@ def get_phase_rotation_sequence(
         detect_chroma_track_phase,
         rotation_check_start_line,
         track_change_threshold,
+        color_system
     )
 
     burst_check_start = burst_check_skip_lines
@@ -395,6 +404,7 @@ def get_phase_rotation_sequence(
             detect_chroma_track_phase,
             rotation_check_start_line,
             track_change_threshold,
+            color_system
         )
 
     if color_system == "NTSC":
