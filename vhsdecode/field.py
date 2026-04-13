@@ -1140,7 +1140,7 @@ class FieldShared:
 
     def lock_to_burst(self):
         self.chroma_tbc_buffer = None
-        self.rf.track_phase, self.phase_sequence, self.burst_phase_avg, self.burst_detected_line = decode_chroma_phase_rotation(
+        self.rf.track_phase, self.phase_sequence, self.burst_detected_line, self.burst_magnitude_avg, self.burst_phase_avg, self.even_burst_phase_avg, self.odd_burst_phase_avg = decode_chroma_phase_rotation(
             self,
             chroma_rotation=self.rf.DecoderParams.get("chroma_rotation", None),
             detect_chroma_track_phase=self.rf.options.detect_chroma_track_phase
@@ -1814,9 +1814,34 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         super(FieldPALShared, self).__init__(*args, **kwargs)
         self.track_phase_set = False
         self.ire0_backporch = (96, 160)
+        self.burst_detected_line = 0
+    
+    @staticmethod
+    def _sync_to_burst(
+        linelocs,
+        outlinelen,
+        even_burst_avg_phase,
+        odd_burst_avg_phase,
+        phase_sequence,
+        burst_detected_line
+    ):
+        burst_tbc_start = max(9, burst_detected_line)
+
+        for line_number, _, burst_phase, _, _, _ in phase_sequence[burst_tbc_start:]:
+            target_phase = odd_burst_avg_phase if line_number % 2 else even_burst_avg_phase
+
+            phase_delta = (target_phase - burst_phase + 180) % 360 - 180
+
+            # scale up burst fsc for each line
+            line_start = linelocs[line_number]
+            line_end = linelocs[line_number + 1]
+            line_length = line_end - line_start
+            scale = line_length / outlinelen
+
+            line_adjust = (phase_delta / 360.0 * 4)
+            linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_pilot(self, linelocs=None):
-        # Currently only supported with NTSC
         if linelocs is None:
             linelocs = self.linelocs2.copy()
         else:
@@ -1825,6 +1850,20 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         if not self.track_phase_set and self.rf.options.write_chroma:
             # only do this once, since this does not affect hsync currently
             self.lock_to_burst()
+
+            if (
+                not self.rf.options.disable_burst_hsync
+                and self.phase_sequence is not None
+                and self.burst_detected_line != -1 # color killer not active for entire field
+            ):
+                FieldPALShared._sync_to_burst(
+                    linelocs,
+                    self.outlinelen,
+                    self.even_burst_phase_avg,
+                    self.odd_burst_phase_avg,
+                    self.phase_sequence,
+                    self.burst_detected_line
+                )
 
         return linelocs
 
@@ -1840,6 +1879,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         self.track_phase_set = False
         self.fieldPhaseID = None
         self.ire0_backporch = (74, 124)
+        self.burst_detected_line = 0
 
     @staticmethod
     def _sync_to_burst(
@@ -1876,16 +1916,26 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             if (
                 not self.rf.options.disable_burst_hsync
                 and self.phase_sequence is not None
-                and self.rf.color_system == "NTSC" # only enable for normal NTSC (disabled for NLINHA, etc.)
                 and self.burst_detected_line != -1 # color killer not active for entire field
             ):
-                FieldNTSCShared._sync_to_burst(
-                    linelocs,
-                    self.outlinelen,
-                    self.burst_phase_avg,
-                    self.phase_sequence,
-                    self.burst_detected_line
-                )
+                if self.rf.color_system == "NTSC":
+                    FieldNTSCShared._sync_to_burst(
+                        linelocs,
+                        self.outlinelen,
+                        self.burst_phase_avg,
+                        self.phase_sequence,
+                        self.burst_detected_line
+                    )
+                elif self.rf.color_system == "NLINHA":
+                    # NLINHA uses pal
+                    FieldPALShared._sync_to_burst(
+                        linelocs,
+                        self.outlinelen,
+                        self.even_burst_phase_avg,
+                        self.odd_burst_phase_avg,
+                        self.phase_sequence,
+                        self.burst_detected_line
+                    )
 
         return linelocs
 

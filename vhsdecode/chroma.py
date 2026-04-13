@@ -267,7 +267,7 @@ def _get_phase_sequence(
             if color_system == "NTSC":
                 # check one line back
                 comparison_burst = current_burst_phase
-            elif color_system == "PAL":
+            else: # color_system in ("PAL", "PAL_M", "NLINHA", "MESECAM")
                 # check two lines back
                 comparison_burst = phase_sequence[-1][2]
 
@@ -407,46 +407,55 @@ def get_phase_rotation_sequence(
             color_system
         )
 
-    if color_system == "NTSC":
-        # find the phase of the color burst for the entire field
-        I_total = 0
-        Q_total = 0
-        avg_count = 0
-        magnitude_avg = 0
-        for line_number, _, _, magnitude, I, Q in phase_sequence:
-            if line_number > burst_check_start and line_number < burst_check_end:
-                if magnitude != 0:
-                    I_total += I / magnitude
-                    Q_total += Q / magnitude
-                    avg_count += 1
-                    magnitude_avg += magnitude
+    # calculate the average color phase for even and odd lines
+    even_I_total = 0
+    even_Q_total = 0
+    odd_I_total = 0
+    odd_Q_total = 0
 
-                    if enable_color_killer:
-                        # find the first line that might have a valid burst if the previous field had the burst disabled
-                        # broadcasters would sometime turn on the burst mid-field, so attempt to detect that transition here
-                        if (
-                            prev_burst_detected_line == -1 # previous field had color killer activated
-                            and burst_detected_line == 0 and magnitude > burst_magnitude_threshold # first burst that exceeds threshold
-                        ):
-                            # first burst that exceeds threshold
-                            # color killer will be active until this line, then it deactivates
-                            # it is only reactivated after an entire field is without color (below)
-                            burst_detected_line = line_number
+    avg_count = 0
+    burst_magnitude_avg = 0
 
-        magnitude_avg /= avg_count
-        burst_phase_avg = np.degrees(np.arctan2(Q_total, I_total)) % 360
+    for line_number, _, _, magnitude, I, Q in phase_sequence:
+        if line_number > burst_check_start and line_number < burst_check_end:
+            if magnitude != 0:
+                I /= magnitude
+                Q /= magnitude
 
-        if enable_color_killer:
-            if magnitude_avg < burst_magnitude_threshold:
-                # (re)activate color killer for the entire field
-                burst_detected_line = -1
+                avg_count += 1
+                burst_magnitude_avg += magnitude
 
-    elif color_system in ("MPAL", "NLINHA"):
-        burst_phase_avg = None
-    else:
-        burst_phase_avg = None
+                if enable_color_killer:
+                    # find the first line that might have a valid burst if the previous field had the burst disabled
+                    # broadcasters would sometime turn on the burst mid-field, so attempt to detect that transition here
+                    if (
+                        prev_burst_detected_line == -1 # previous field had color killer activated
+                        and burst_detected_line == 0 and magnitude > burst_magnitude_threshold # first burst that exceeds threshold
+                    ):
+                        # first burst that exceeds threshold
+                        # color killer will be active until this line, then it deactivates
+                        # it is only reactivated after an entire field is without color (below)
+                        burst_detected_line = line_number
+            
+                if line_number % 2:
+                    odd_I_total += I
+                    odd_Q_total += Q
+                else:
+                    even_I_total += I
+                    even_Q_total += Q
+    
+    burst_magnitude_avg /= avg_count
 
-    return chroma_rotation_index, phase_sequence, burst_phase_avg, burst_detected_line
+    if enable_color_killer:
+        if burst_magnitude_avg < burst_magnitude_threshold:
+            # (re)activate color killer for the entire field
+            burst_detected_line = -1
+
+    burst_phase_avg = np.degrees(np.arctan2(even_Q_total + odd_Q_total, even_I_total + odd_I_total)) % 360
+    even_burst_phase_avg = np.degrees(np.arctan2(even_Q_total, even_I_total)) % 360
+    odd_burst_phase_avg = np.degrees(np.arctan2(odd_Q_total, odd_I_total)) % 360
+
+    return chroma_rotation_index, phase_sequence, burst_detected_line, burst_magnitude_avg, burst_phase_avg, even_burst_phase_avg, odd_burst_phase_avg
 
 
 @njit(cache=True, nogil=True, fastmath=True)
@@ -476,7 +485,8 @@ def upconvert_chroma_phase_comp(
     phase_rotation_sequence,
     color_under_carrier_fs,
     fsc,
-    target_phase
+    target_phase_even,
+    target_phase_odd
 ):
     deg2rad_scale = np.pi / 180.0
     pi_over_two = np.pi / 2.0
@@ -484,14 +494,13 @@ def upconvert_chroma_phase_comp(
     het_mhz = color_under_carrier_fs / 1e6
     het_coefficient = pi_over_two * (1.0 + het_mhz / fsc)
 
-    target_phase_rad = target_phase * deg2rad_scale
-
-    # check if there are other adjustments needed after this phase adjust
-    # chroma decoder seems to be correcting an amplitude problem
+    target_phase_even_rad = target_phase_even * deg2rad_scale
+    target_phase_odd_rad = target_phase_odd * deg2rad_scale
 
     for linenumber, phase_rotation, burst_phase, _, _, _ in phase_rotation_sequence:
         linestart = (linenumber - lineoffset) * outwidth
         lineend = linestart + outwidth
+        target_phase_rad = target_phase_odd_rad if linenumber % 2 else target_phase_even_rad
 
         theta = het_coefficient * linestart + (
             phase_rotation * pi_over_two # heterodyne rotation
@@ -582,7 +591,7 @@ def decode_chroma_phase_rotation(
     if field.prevfield is not None:
         prev_burst_detected_line = field.prevfield.burst_detected_line
 
-    track_phase, phase_sequence, burst_phase_avg, burst_detected_line = get_phase_rotation_sequence(
+    track_phase, phase_sequence, burst_detected_line, burst_magnitude_avg, burst_phase_avg, even_burst_phase_avg, odd_burst_phase_avg = get_phase_rotation_sequence(
         chroma,
         chroma_heterodyne,
         field.rf.Filters["FChromaFinal"],
@@ -601,14 +610,41 @@ def decode_chroma_phase_rotation(
         field.rf.color_system,
     )
 
-    return track_phase, phase_sequence, burst_phase_avg, burst_detected_line
+    return track_phase, phase_sequence, burst_detected_line, burst_magnitude_avg, burst_phase_avg, even_burst_phase_avg, odd_burst_phase_avg
 
 ntsc_color_framing_phase_shift = 33
 ntsc_color_framing_map = {
+    # Color Frame I
     (1, 0): (1, 0 - ntsc_color_framing_phase_shift),
     (0, 1): (2, 180 - ntsc_color_framing_phase_shift),
+    # Color Frame II
     (1, 1): (3, 180 - ntsc_color_framing_phase_shift),
     (0, 0): (4, 0 - ntsc_color_framing_phase_shift),
+}
+
+# fieldPhaseID, even_burst_phase, odd_burst_phase
+pal_offset_I   = -90*1
+pal_offset_II  = -90*2
+pal_offset_III = -90*3
+pal_offset_IV  = -90*4
+pal_phase_swing = 135
+
+# Rec. ITU-R BT.1700, pp.6 (phase poliarity 525 and 625 PAL)
+# Field         |   1 |   2 |   3 |   4 |   5 |   6 |   7 |   8 |
+# Color frame   |   I |  II | III |  IV |   I |  II | III |  IV |
+# Even polarity |   - |   - |   + |   + |   - |   - |   + |   + |
+# Odd  polarity |   + |   + |   - |   - |   + |   + |   - |   - |
+
+# first_field, has_line_6_burst, frame_number 0-3 or 4-7
+pal_color_framing_map = {
+    (1, 0, 0): (1, -pal_phase_swing + pal_offset_I,    pal_phase_swing + pal_offset_I), #   field 1, Color Frame I
+    (0, 1, 0): (2, -pal_phase_swing + pal_offset_II,   pal_phase_swing + pal_offset_II), #  field 2, Color Frame II
+    (1, 1, 0): (3,  pal_phase_swing + pal_offset_III, -pal_phase_swing + pal_offset_III), # field 3, Color Frame III
+    (0, 0, 0): (4,  pal_phase_swing + pal_offset_IV,  -pal_phase_swing + pal_offset_IV), #  field 4, Color Frame IV
+    (1, 0, 1): (5, 180 + -pal_phase_swing + pal_offset_I,   180 +  pal_phase_swing + pal_offset_I), #   field 5, Color Frame I
+    (0, 1, 1): (6, 180 + -pal_phase_swing + pal_offset_II,  180 +  pal_phase_swing + pal_offset_II), #  field 6, Color Frame II
+    (1, 1, 1): (7, 180 +  pal_phase_swing + pal_offset_III, 180 + -pal_phase_swing + pal_offset_III), # field 7, Color Frame III
+    (0, 0, 1): (8, 180 +  pal_phase_swing + pal_offset_IV,  180 + -pal_phase_swing + pal_offset_IV), #  field 8, Color Frame IV
 }
 
 def process_chroma(
@@ -666,14 +702,24 @@ def process_chroma(
             chroma = burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea)
 
     if (
-        field.rf.color_system == "NTSC"
-        and not field.rf.options.disable_phase_correction
+        not field.rf.options.disable_phase_correction
+        and field.rf.color_system == "NTSC"
     ):
-        # regenerates the color framing
         field.fieldPhaseID, target_phase = ntsc_color_framing_map[
             (field.isFirstField, (field.field_number // 2) % 2)
         ]
+        target_phase_even = target_phase
+        target_phase_odd = target_phase
 
+        # TODO: PAL color framing is disabled for now.
+        #       need to find a reliable way to detect if this is field 1,2 vs 3,4
+        # if field.rf.color_system == "PAL":
+        #     line_6_burst_present = field.phase_sequence[4 + lineoffset][3] > field.burst_magnitude_avg / 3
+        #     field.fieldPhaseID, target_phase_even, target_phase_odd = pal_color_framing_map[
+        #         (field.isFirstField, line_6_burst_present, (field.field_number // 4) % 2)
+        #     ]
+
+        # offset heterodyne for each line to correct color phase
         upconvert_chroma_phase_comp(
             chroma,
             uphet,
@@ -682,7 +728,8 @@ def process_chroma(
             field.phase_sequence,
             field.rf.chroma_afc.color_under,
             field.rf.chroma_afc.fsc_mhz,
-            target_phase
+            target_phase_even,
+            target_phase_odd
         )
     else:
         chroma_heterodyne = (

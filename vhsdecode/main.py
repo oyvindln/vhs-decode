@@ -269,7 +269,7 @@ def main(args=None, use_gui=False):
         dest="disable_burst_hsync",
         action="store_true",
         default=False,
-        help="Disables using the color burst phase to refine hsync. (currently only applicable to NTSC)",
+        help="Disables using the color burst phase to refine hsync.",
     )
     chroma_group.add_argument(
         "--ck",
@@ -277,7 +277,7 @@ def main(args=None, use_gui=False):
         dest="enable_color_killer",
         action="store_true",
         default=False,
-        help="Enables color killer, i.e. burst detection to enable/disable chroma decoding and hsync refinement. (currently only applicable to NTSC)"
+        help="Enables color killer, i.e. burst detection to enable/disable chroma decoding and hsync refinement."
     )
     chroma_group.add_argument(
         "--no_comb",
