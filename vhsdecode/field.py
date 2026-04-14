@@ -1138,10 +1138,11 @@ class FieldShared:
             + 0.5
         )
 
-    def lock_to_burst(self):
+    def lock_to_burst(self, linelocs):
         self.chroma_tbc_buffer = None
         self.rf.track_phase, self.phase_sequence, self.burst_detected_line, self.burst_magnitude_avg, self.burst_phase_avg, self.even_burst_phase_avg, self.odd_burst_phase_avg = decode_chroma_phase_rotation(
             self,
+            linelocs,
             chroma_rotation=self.rf.DecoderParams.get("chroma_rotation", None),
             detect_chroma_track_phase=self.rf.options.detect_chroma_track_phase
         )
@@ -1849,7 +1850,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
 
         if not self.track_phase_set and self.rf.options.write_chroma:
             # only do this once, since this does not affect hsync currently
-            self.lock_to_burst()
+            self.lock_to_burst(linelocs)
 
             if (
                 not self.rf.options.disable_burst_hsync
@@ -1900,7 +1901,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             line_length = line_end - line_start
             scale = line_length / outlinelen
 
-            line_adjust = (phase_delta / 360.0 * 4)
+            line_adjust = phase_delta / 360.0 * 4
             linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_burst(self, linelocs=None):
@@ -1911,7 +1912,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
 
         # populates color burst info for hsync refinement the step below
         if self.rf.options.write_chroma:
-            self.lock_to_burst()
+            self.lock_to_burst(linelocs)
 
             if (
                 not self.rf.options.disable_burst_hsync

@@ -105,20 +105,32 @@ def comb_c_ntsc(data, line_len):
 
 
 @njit(cache=True, nogil=True, fastmath=True)
-def _demod_burst(burst, burst_start, burst_len, burst_sin, burst_cos):
-    I = 0
-    Q = 0
+def _demod_burst(
+    burst,
+    line_scale,
+    line_start,
+    burst_start,
+    burst_len,
+    burst_sin,
+    burst_cos
+):
+    I = 0.0
+    Q = 0.0
 
     for i in range(burst_len):
-        I += burst[i] * burst_cos[i + burst_start]
-        Q += burst[i] * burst_sin[i + burst_start]
+        burst_sample = burst[i]
+        carrier_idx = i + burst_start
+        I += burst_sample * burst_cos[carrier_idx]
+        Q += burst_sample * burst_sin[carrier_idx]
 
+    phase = np.arctan2(Q, I)
+
+    # correct phase measurement error due to line scaling
+    phase -= (burst_start - line_start) * (1.0 - line_scale) * (np.pi / 2.0)
+    burst_phase_deg = np.mod(np.degrees(phase), 360.0)
     burst_magnitude = np.hypot(I, Q)
-    burst_phase = np.arctan2(Q, I)
-    burst_phase_deg = np.degrees(burst_phase) % 360
 
     return burst_phase_deg, burst_magnitude, I, Q
-
 
 def _get_upconverted_burst(
     chroma,
@@ -128,13 +140,15 @@ def _get_upconverted_burst(
     burstarea,
     burst_sin,
     burst_cos,
+    line_scale,
     linenumber,
     lineoffset,
     outwidth,
 ):
     burst_padding = burstarea[1] - burstarea[0]  # pad the area being filtered
+    line_start = (linenumber - lineoffset) * outwidth
     burst_start = max(
-        0, (linenumber - lineoffset) * outwidth + burstarea[0] - burst_padding
+        0, line_start + burstarea[0] - burst_padding
     )
     burst_end = min(len(chroma), burst_start + burstarea[1] + burst_padding)
 
@@ -150,7 +164,7 @@ def _get_upconverted_burst(
     burst_len = len(filtered)
 
     return _demod_burst(
-        filtered, burst_start + burst_padding, burst_len, burst_sin, burst_cos
+        filtered, line_scale, line_start, burst_start + burst_padding, burst_len, burst_sin, burst_cos
     )
 
 
@@ -163,7 +177,9 @@ def _get_phase_sequence(
     burstarea,
     burst_sin,
     burst_cos,
+    linelocs,
     lineoffset,
+    inwidth,
     outwidth,
     last_line,
     detect_chroma_track_phase,
@@ -223,6 +239,8 @@ def _get_phase_sequence(
             use_next_phase = False
         else:
             current_phase = (current_phase + track_rotation) % 4
+            line_scale = (linelocs[linenumber + 1] - linelocs[linenumber]) / inwidth if linenumber < last_line - 1 else 1
+
             (
                 current_burst_phase,
                 current_burst_magnitude,
@@ -236,6 +254,7 @@ def _get_phase_sequence(
                 burstarea,
                 burst_sin,
                 burst_cos,
+                line_scale,
                 linenumber,
                 lineoffset,
                 outwidth,
@@ -249,6 +268,8 @@ def _get_phase_sequence(
         ):
             # get the next burst using the phase rotation for the current track
             next_phase = (current_phase + track_rotation) % 4
+            line_scale = (linelocs[linenumber + 2] - linelocs[linenumber + 1]) / inwidth if linenumber < last_line - 2 else 1
+
             next_burst_phase, next_burst_magnitude, next_burst_I, next_burst_Q = (
                 _get_upconverted_burst(
                     chroma,
@@ -258,6 +279,7 @@ def _get_phase_sequence(
                     burstarea,
                     burst_sin,
                     burst_cos,
+                    line_scale,
                     linenumber + 1,
                     lineoffset,
                     outwidth,
@@ -305,8 +327,10 @@ def get_phase_rotation_sequence(
     chroma_filter,
     chroma_rotation,
     chroma_rotation_index,
+    linelocs,
     lineoffset,
     linesout,
+    inwidth,
     outwidth,
     burstarea,
     burst_sin,
@@ -336,7 +360,9 @@ def get_phase_rotation_sequence(
         burstarea,
         burst_sin,
         burst_cos,
+        linelocs,
         lineoffset,
+        inwidth,
         outwidth,
         end,
         detect_chroma_track_phase,
@@ -398,7 +424,9 @@ def get_phase_rotation_sequence(
             burstarea,
             burst_sin,
             burst_cos,
+            linelocs,
             lineoffset,
+            inwidth,
             outwidth,
             end,
             detect_chroma_track_phase,
@@ -558,6 +586,7 @@ def demod_chroma_filt(
 
 def decode_chroma_phase_rotation(
     field,
+    linelocs,
     disable_tracking_cafc=False,
     chroma_rotation=None,
     detect_chroma_track_phase=False,
@@ -566,6 +595,7 @@ def decode_chroma_phase_rotation(
 
     lineoffset = field.lineoffset + 1
     linesout = field.outlinecount
+    inwidth = field.inlinelen
     outwidth = field.outlinelen
 
     burst_area_init = get_burst_area(field)
@@ -597,8 +627,10 @@ def decode_chroma_phase_rotation(
         field.rf.Filters["FChromaFinal"],
         chroma_rotation,
         field.rf.track_phase, # index for chroma rotation, and static if there is no chroma rotation
+        linelocs,
         lineoffset,
         linesout,
+        inwidth,
         outwidth,
         burstarea,
         field.rf.fsc_wave,
