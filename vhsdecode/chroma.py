@@ -123,14 +123,21 @@ def _demod_burst(
         I += burst_sample * burst_cos[carrier_idx]
         Q += burst_sample * burst_sin[carrier_idx]
 
-    phase = np.arctan2(Q, I)
-
-    # correct phase measurement error due to line scaling
-    phase -= (burst_start - line_start) * (1.0 - line_scale) * (np.pi / 2.0)
-    burst_phase_deg = np.mod(np.degrees(phase), 360.0)
     burst_magnitude = np.hypot(I, Q)
 
-    return burst_phase_deg, burst_magnitude, I, Q
+    # correct phase measurement error due to line scaling
+    phase_error = (burst_start - line_start) * (1.0 - line_scale) * (np.pi / 2.0)
+    c = np.cos(phase_error)
+    s = np.sin(phase_error)
+
+    # subtract phase error
+    I_rot = I * c + Q * s
+    Q_rot = Q * c - I * s
+
+    measured_phase = np.arctan2(Q_rot, I_rot)
+    burst_phase_deg = np.mod(np.degrees(measured_phase), 360.0)
+
+    return burst_phase_deg, burst_magnitude, I_rot, Q_rot
 
 def _get_upconverted_burst(
     chroma,

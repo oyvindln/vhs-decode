@@ -1816,11 +1816,13 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         self.track_phase_set = False
         self.ire0_backporch = (96, 160)
         self.burst_detected_line = 0
+        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
     
     @staticmethod
     def _sync_to_burst(
         linelocs,
         outlinelen,
+        fsc_ratio,
         even_burst_avg_phase,
         odd_burst_avg_phase,
         phase_sequence,
@@ -1839,7 +1841,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
             line_length = line_end - line_start
             scale = line_length / outlinelen
 
-            line_adjust = (phase_delta / 360.0 * 4)
+            line_adjust = phase_delta / 360.0 * fsc_ratio
             linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_pilot(self, linelocs=None):
@@ -1860,6 +1862,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
                 FieldPALShared._sync_to_burst(
                     linelocs,
                     self.outlinelen,
+                    self.fsc_ratio,
                     self.even_burst_phase_avg,
                     self.odd_burst_phase_avg,
                     self.phase_sequence,
@@ -1881,11 +1884,13 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         self.fieldPhaseID = None
         self.ire0_backporch = (74, 124)
         self.burst_detected_line = 0
+        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
 
     @staticmethod
     def _sync_to_burst(
         linelocs,
         outlinelen,
+        fsc_ratio,
         burst_avg_phase,
         phase_sequence,
         burst_detected_line
@@ -1901,7 +1906,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             line_length = line_end - line_start
             scale = line_length / outlinelen
 
-            line_adjust = phase_delta / 360.0 * 4
+            line_adjust = phase_delta / 360.0 * fsc_ratio
             linelocs[line_number] += line_adjust * scale # 4fsc, then scaled up to the input line length
 
     def refine_linelocs_burst(self, linelocs=None):
@@ -1923,6 +1928,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
                     FieldNTSCShared._sync_to_burst(
                         linelocs,
                         self.outlinelen,
+                        self.fsc_ratio,
                         self.burst_phase_avg,
                         self.phase_sequence,
                         self.burst_detected_line
@@ -1932,6 +1938,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
                     FieldPALShared._sync_to_burst(
                         linelocs,
                         self.outlinelen,
+                        self.fsc_ratio,
                         self.even_burst_phase_avg,
                         self.odd_burst_phase_avg,
                         self.phase_sequence,
