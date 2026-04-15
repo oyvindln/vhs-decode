@@ -1830,10 +1830,10 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
     ):
         burst_tbc_start = max(9, burst_detected_line)
 
-        for line_number, _, burst_phase, _, _, _ in phase_sequence[burst_tbc_start:]:
+        for line_number, _, burst_phase, burst_phase_offset, _, _, _ in phase_sequence[burst_tbc_start:]:
             target_phase = odd_burst_avg_phase if line_number % 2 else even_burst_avg_phase
 
-            phase_delta = (target_phase - burst_phase + 180) % 360 - 180
+            phase_delta = (target_phase - burst_phase + burst_phase_offset + 180) % 360 - 180
 
             # scale up burst fsc for each line
             line_start = linelocs[line_number]
@@ -1897,8 +1897,8 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
     ):
         burst_tbc_start = max(9, burst_detected_line)
 
-        for line_number, _, burst_phase, _, _, _ in phase_sequence[burst_tbc_start:]:
-            phase_delta = (burst_avg_phase - burst_phase + 180) % 360 - 180
+        for line_number, _, burst_phase, burst_phase_offset, _, _, _ in phase_sequence[burst_tbc_start:]:
+            phase_delta = (burst_avg_phase - burst_phase + burst_phase_offset + 180) % 360 - 180
 
             # scale up burst fsc for each line
             line_start = linelocs[line_number]

@@ -124,20 +124,13 @@ def _demod_burst(
         Q += burst_sample * burst_sin[carrier_idx]
 
     burst_magnitude = np.hypot(I, Q)
+    burst_phase_deg = np.mod(np.degrees(np.arctan2(Q, I)), 360.0)
 
-    # correct phase measurement error due to line scaling
+    # represents the amount of offset detected from hsync start to burst start in degrees
     phase_error = (burst_start - line_start) * (1.0 - line_scale) * (np.pi / 2.0)
-    c = np.cos(phase_error)
-    s = np.sin(phase_error)
+    burst_phase_offset_deg = np.mod(np.degrees(phase_error), 360.0)
 
-    # subtract phase error
-    I_rot = I * c + Q * s
-    Q_rot = Q * c - I * s
-
-    measured_phase = np.arctan2(Q_rot, I_rot)
-    burst_phase_deg = np.mod(np.degrees(measured_phase), 360.0)
-
-    return burst_phase_deg, burst_magnitude, I_rot, Q_rot
+    return burst_phase_deg, burst_phase_offset_deg, burst_magnitude, I, Q
 
 def _get_upconverted_burst(
     chroma,
@@ -239,6 +232,7 @@ def _get_phase_sequence(
             # reuse the calculated phase from the previous iteration
             current_phase = next_phase
             current_burst_phase = next_burst_phase
+            current_burst_phase_offset = next_burst_phase_offset
             current_burst_I = next_burst_I
             current_burst_Q = next_burst_Q
             current_burst_magnitude = next_burst_magnitude
@@ -250,6 +244,7 @@ def _get_phase_sequence(
 
             (
                 current_burst_phase,
+                current_burst_phase_offset,
                 current_burst_magnitude,
                 current_burst_I,
                 current_burst_Q,
@@ -277,7 +272,7 @@ def _get_phase_sequence(
             next_phase = (current_phase + track_rotation) % 4
             line_scale = (linelocs[linenumber + 2] - linelocs[linenumber + 1]) / inwidth if linenumber < last_line - 2 else 1
 
-            next_burst_phase, next_burst_magnitude, next_burst_I, next_burst_Q = (
+            next_burst_phase, next_burst_phase_offset, next_burst_magnitude, next_burst_I, next_burst_Q = (
                 _get_upconverted_burst(
                     chroma,
                     chroma_heterodyne,
@@ -315,6 +310,7 @@ def _get_phase_sequence(
                 linenumber,
                 current_phase,
                 current_burst_phase,
+                current_burst_phase_offset,
                 current_burst_magnitude,
                 current_burst_I,
                 current_burst_Q,
@@ -390,8 +386,8 @@ def get_phase_rotation_sequence(
         delta_270 = 0
 
         for i in range(1, len(phase_sequence)):
-            _, _, previous_burst_phase, _, _, _ = phase_sequence[i - 1]
-            line_number, _, current_burst_phase, _, _, _ = phase_sequence[i]
+            _, _, previous_burst_phase, _, _, _, _ = phase_sequence[i - 1]
+            line_number, _, current_burst_phase, _, _, _, _ = phase_sequence[i]
 
             if line_number > burst_check_start and line_number < burst_check_end:
                 delta = (current_burst_phase - previous_burst_phase) % 360
@@ -451,7 +447,7 @@ def get_phase_rotation_sequence(
     avg_count = 0
     burst_magnitude_avg = 0
 
-    for line_number, _, _, magnitude, I, Q in phase_sequence:
+    for line_number, _, _, _, magnitude, I, Q in phase_sequence:
         if line_number > burst_check_start and line_number < burst_check_end:
             if magnitude != 0:
                 I /= magnitude
@@ -502,7 +498,7 @@ def upconvert_chroma(
     phase_rotation_sequence,
     chroma_heterodyne,
 ):
-    for linenumber, current_phase, _, _, _, _ in phase_rotation_sequence:
+    for linenumber, current_phase, _, _, _, _, _ in phase_rotation_sequence:
         linestart = (linenumber - lineoffset) * outwidth
         lineend = linestart + outwidth
 
@@ -532,7 +528,7 @@ def upconvert_chroma_phase_comp(
     target_phase_even_rad = target_phase_even * deg2rad_scale
     target_phase_odd_rad = target_phase_odd * deg2rad_scale
 
-    for linenumber, phase_rotation, burst_phase, _, _, _ in phase_rotation_sequence:
+    for linenumber, phase_rotation, burst_phase, _, _, _, _ in phase_rotation_sequence:
         linestart = (linenumber - lineoffset) * outwidth
         lineend = linestart + outwidth
         target_phase_rad = target_phase_odd_rad if linenumber % 2 else target_phase_even_rad
