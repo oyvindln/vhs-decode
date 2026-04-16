@@ -34,14 +34,14 @@
           ps.mkdocs-awesome-nav
         ]);
 
-        cargoDeps = pkgs.rust.rustPlatform.fetchCargoVendor {
-          name = "${pname}-${version}";
-          hash = "sha256-miW//pnOmww2i6SOGbkrAIdc/JMDT4FJLqdMFojZeoY=";
+        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+          inherit pname version;
+          src = ./.;
+          hash = "sha256-yryE7R0A95Uok6Pv6/UBsIG8p9pvaP3Nv8AGQugrEOc=";
         };
 
         vhs-decode = pythonPackages.buildPythonPackage {
-          inherit pname;
-          inherit version;
+          inherit pname version cargoDeps;
           
           src = ./.;
           
@@ -62,6 +62,7 @@
           propagatedBuildInputs = with pythonPackages; [
             av
             matplotlib
+            noisereduce
             numba
             numpy
             scipy
@@ -71,6 +72,12 @@
             soxr
           ];
           
+          # static-ffmpeg is not in nixpkgs; ffmpeg is provided via pkgs.ffmpeg
+          postPatch = ''
+            substituteInPlace pyproject.toml \
+              --replace-fail '    "static-ffmpeg",' ""
+          '';
+
           # Write PEP-440 compliant version file with git info
           preBuild = ''
             echo "${fullVersion}" > lddecode/version

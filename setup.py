@@ -60,7 +60,6 @@ setup(
         "ld-cut",
         "scripts/cx-expander",
         "decode.py",
-        "decode-launcher",
     ],
     # scripts=[
     #    'cx-expander',
