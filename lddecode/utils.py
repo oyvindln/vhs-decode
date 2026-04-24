@@ -23,6 +23,7 @@ import numba
 import numpy as np
 import scipy.signal as sps
 from scipy import interpolate
+from scipy.special import i0
 
 def _ensure_ffmpeg_on_path():
     try:
@@ -90,17 +91,72 @@ def scale(buf, begin, end, tgtlen, mult=1):
 
     return output
 
+def sinc(x):
+    if x == 0.0:
+        return 1.0
+    x_pi = np.pi * x
+    return np.sin(x_pi) / x_pi
 
-# Scales and compensates for wow-induced playback-speed variations
-@njit(nogil=True, cache=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15):
-    # Constants preserved as float32
-    point_5 = np.float32(0.5)
-    two = np.float32(2)
-    three = np.float32(3)
-    four = np.float32(4)
-    five = np.float32(5)
+def kaiser_window(x, a, beta):
+    r = x / a
+    if r < -1.0 or r > 1.0:
+        return 0.0
 
+    t = np.sqrt(1.0 - r * r)
+    return i0(beta * t) / i0(beta)
+
+def kaiser_sinc(x, a, beta):
+    return sinc(x) * kaiser_window(x, a, beta)
+
+# https://ccrma.stanford.edu/~jos/sasp/Kaiser_Windows_Transforms.html
+# https://ccrma.stanford.edu/~jos/sasp/Hood_kaiserord.html
+def kaiser_window_beta(side_lobe_attenuation_db):
+    if side_lobe_attenuation_db < 13.26:
+        return 0
+    if side_lobe_attenuation_db < 60:
+        return 0.76609 * (side_lobe_attenuation_db - 13.26) ** 0.4 + 0.09834 * (side_lobe_attenuation_db - 13.26)
+    if side_lobe_attenuation_db < 120:
+        return 0.12438 * (side_lobe_attenuation_db + 6.3)
+
+def build_kaiser_lut(beta):
+    phases = 65536
+    taps = 6
+    a = 3.0
+
+    table = np.zeros((phases, taps), dtype=np.float32)
+
+    for i in range(phases):
+        x = i / phases
+
+        w0 = kaiser_sinc(x + 2.0, a, beta)
+        w1 = kaiser_sinc(x + 1.0, a, beta)
+        w2 = kaiser_sinc(x + 0.0, a, beta)
+        w3 = kaiser_sinc(x - 1.0, a, beta)
+        w4 = kaiser_sinc(x - 2.0, a, beta)
+        w5 = kaiser_sinc(x - 3.0, a, beta)
+
+        s = w0 + w1 + w2 + w3 + w4 + w5
+
+        if s != 0.0:
+            inv = 1.0 / s
+            table[i, 0] = w0 * inv
+            table[i, 1] = w1 * inv
+            table[i, 2] = w2 * inv
+            table[i, 3] = w3 * inv
+            table[i, 4] = w4 * inv
+            table[i, 5] = w5 * inv
+
+    return table
+
+# Kaiser Beta parameter controls trade-off between sharpness and ringing
+# Small Beta = more sharpness / more ringing (narrow main lobe (more sharp), less side lobe cutoff (more ringing))
+# Large Beta = less sharpness / less ringing (wide main lobe (less sharp), more side lobe cutoff (less ringing))
+kaiser_beta = kaiser_window_beta(80) # db cutoff of side-lobes
+# pre-compute sinc
+kaiser_table = build_kaiser_lut(kaiser_beta)
+
+@njit(nogil=True, fastmath=True)
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, sinc_lut=kaiser_table):
     lineoffset += 1
     lineoffset_out_samples = outwidth * lineoffset
 
@@ -124,7 +180,7 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         one_minus_alpha = 1 - alpha
 
         for i in range(1, len(level_adjusts)):
-            level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]       
+            level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]
 
     for i in range(lineoffset_out_samples, len(dsout) + lineoffset_out_samples):
         # compensates for the amplitude/frequency shift caused by FM demodulation under varying playback speed.
@@ -134,19 +190,29 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         coord = np.float32(interpolated_pixel_locs[i])
         coord_int = int(coord)
 
-        # get the data from the buffer that aligns to the wow factor index
-        p0 = buf[coord_int - 1]
-        p1 = buf[coord_int]
-        p2 = buf[coord_int + 1]
-        p3 = buf[coord_int + 2]
-        x = np.float32(coord - coord_int)
+        # fractional phase
+        frac = coord - coord_int
+        phase = int(frac * 65536.0)
 
-        # perform cubic scaling
-        a = p2 - p0
-        b = two * p0 - five * p1 + four * p2 - p3
-        c = three * (p1 - p2) + p3 - p0
-        dsout[i-lineoffset_out_samples] = level_adjust * (p1 + point_5 * x * (a + x * (b + x * c)))
+        w = sinc_lut[phase]
 
+        i0 = coord_int - 2
+        i1 = coord_int - 1
+        i2 = coord_int
+        i3 = coord_int + 1
+        i4 = coord_int + 2
+        i5 = coord_int + 3
+
+        result = (
+            buf[i0] * w[0] +
+            buf[i1] * w[1] +
+            buf[i2] * w[2] +
+            buf[i3] * w[3] +
+            buf[i4] * w[4] +
+            buf[i5] * w[5]
+        )
+
+        dsout[i - lineoffset_out_samples] = level_adjust * result
 
 frequency_suffixes = [
     ("ghz", 1.0e9),
