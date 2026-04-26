@@ -109,15 +109,6 @@ def kaiser_sinc(x, a, beta):
     return sinc(x) * kaiser_window(x, a, beta)
 
 # https://ccrma.stanford.edu/~jos/sasp/Kaiser_Windows_Transforms.html
-# https://ccrma.stanford.edu/~jos/sasp/Hood_kaiserord.html
-def kaiser_window_beta(side_lobe_attenuation_db):
-    if side_lobe_attenuation_db < 13.26:
-        return 0
-    if side_lobe_attenuation_db < 60:
-        return 0.76609 * (side_lobe_attenuation_db - 13.26) ** 0.4 + 0.09834 * (side_lobe_attenuation_db - 13.26)
-    if side_lobe_attenuation_db < 120:
-        return 0.12438 * (side_lobe_attenuation_db + 6.3)
-
 def build_kaiser_lut(beta):
     phases = 65536
     taps = 6
@@ -151,7 +142,7 @@ def build_kaiser_lut(beta):
 # Kaiser Beta parameter controls trade-off between sharpness and ringing
 # Small Beta = more sharpness / more ringing (narrow main lobe (more sharp), less side lobe cutoff (more ringing))
 # Large Beta = less sharpness / less ringing (wide main lobe (less sharp), more side lobe cutoff (less ringing))
-kaiser_beta = kaiser_window_beta(80) # db cutoff of side-lobes
+kaiser_beta = 5
 # pre-compute sinc
 kaiser_table = build_kaiser_lut(kaiser_beta)
 
