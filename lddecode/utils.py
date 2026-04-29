@@ -15,6 +15,7 @@ import warnings
 
 import threading
 from queue import Queue
+from concurrent.futures import ProcessPoolExecutor
 
 from numba import jit, njit
 import numba
@@ -91,22 +92,20 @@ def scale(buf, begin, end, tgtlen, mult=1):
 
     return output
 
+@njit
 def sinc(x):
     if x == 0.0:
         return 1.0
     x_pi = np.pi * x
-    return np.sin(x_pi) / x_pi
+    return math.sin(x_pi) / x_pi
 
-def kaiser_window(x, a, beta):
+def kaiser_window(x, a, beta, i0_beta):
     r = x / a
     if r < -1.0 or r > 1.0:
         return 0.0
 
-    t = np.sqrt(1.0 - r * r)
-    return i0(beta * t) / i0(beta)
-
-def kaiser_sinc(x, a, beta):
-    return sinc(x) * kaiser_window(x, a, beta)
+    t = math.sqrt(1.0 - r * r)
+    return i0(beta * t) / i0_beta
 
 # https://ccrma.stanford.edu/~jos/sasp/Kaiser_Windows_Transforms.html
 def build_kaiser_lut(beta, taps, phases):
@@ -117,20 +116,20 @@ def build_kaiser_lut(beta, taps, phases):
 
     table = np.zeros((phases + 1, taps), dtype=np.float32)
     weights = np.empty(offsets_len, dtype=np.float32)
+    i0_beta = i0(beta)
 
     for i in range(phases):
-        x = i / phases
+        phase = i / phases
 
         s = 0.0
         for j in range(offsets_len):
-            offset = offsets[j]
-            weight = kaiser_sinc(x + offset, a, beta)
+            x = offsets[j] + phase
+            weight = sinc(x) * kaiser_window(x, a, beta, i0_beta)
 
             weights[j] = weight
             s += weight
 
-        if s != 0.0:
-            table[i, :] = weights / s
+        table[i, :] = weights / s
 
     # copy the last phase to avoid bounds checking later on when we do linear interpolation
     table[phases] = table[phases - 1]
@@ -143,11 +142,14 @@ def build_kaiser_lut(beta, taps, phases):
 kaiser_beta = 5
 sinc_tap_count = 16 # must be multiple of 2
 sinc_phase_count = 2**16
-# pre-compute sinc
-sinc_lut = build_kaiser_lut(kaiser_beta, sinc_tap_count, sinc_phase_count)
+
+# compute sinc table in a process to so it doesn't block other startup tasks
+sinc_lut_future = ProcessPoolExecutor().submit(
+    build_kaiser_lut, kaiser_beta, sinc_tap_count, sinc_phase_count
+)
 
 @njit(nogil=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15):
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15):
     # average out any unusual spikes in wow that happen on a per line basis
     # this indicates an hsync tbc error vs. being normal wow from playback speed variations
     # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
