@@ -109,33 +109,31 @@ def kaiser_sinc(x, a, beta):
     return sinc(x) * kaiser_window(x, a, beta)
 
 # https://ccrma.stanford.edu/~jos/sasp/Kaiser_Windows_Transforms.html
-def build_kaiser_lut(beta):
-    phases = 65536
-    taps = 6
-    a = 3.0
+def build_kaiser_lut(beta, taps, phases):
+    a = taps // 2
 
-    table = np.zeros((phases, taps), dtype=np.float32)
+    offsets = np.arange(a - 1, -a - 1, -1)
+    offsets_len = len(offsets)
+
+    table = np.zeros((phases + 1, taps), dtype=np.float32)
+    weights = np.empty(offsets_len, dtype=np.float32)
 
     for i in range(phases):
         x = i / phases
 
-        w0 = kaiser_sinc(x + 2.0, a, beta)
-        w1 = kaiser_sinc(x + 1.0, a, beta)
-        w2 = kaiser_sinc(x + 0.0, a, beta)
-        w3 = kaiser_sinc(x - 1.0, a, beta)
-        w4 = kaiser_sinc(x - 2.0, a, beta)
-        w5 = kaiser_sinc(x - 3.0, a, beta)
+        s = 0.0
+        for j in range(offsets_len):
+            offset = offsets[j]
+            weight = kaiser_sinc(x + offset, a, beta)
 
-        s = w0 + w1 + w2 + w3 + w4 + w5
+            weights[j] = weight
+            s += weight
 
         if s != 0.0:
-            inv = 1.0 / s
-            table[i, 0] = w0 * inv
-            table[i, 1] = w1 * inv
-            table[i, 2] = w2 * inv
-            table[i, 3] = w3 * inv
-            table[i, 4] = w4 * inv
-            table[i, 5] = w5 * inv
+            table[i, :] = weights / s
+
+    # copy the last phase to avoid bounds checking later on when we do linear interpolation
+    table[phases] = table[phases - 1]
 
     return table
 
@@ -143,14 +141,13 @@ def build_kaiser_lut(beta):
 # Small Beta = more sharpness / more ringing (narrow main lobe (more sharp), less side lobe cutoff (more ringing))
 # Large Beta = less sharpness / less ringing (wide main lobe (less sharp), more side lobe cutoff (less ringing))
 kaiser_beta = 5
+sinc_tap_count = 16 # must be multiple of 2
+sinc_phase_count = 2**16
 # pre-compute sinc
-kaiser_table = build_kaiser_lut(kaiser_beta)
+kaiser_table = build_kaiser_lut(kaiser_beta, sinc_tap_count, sinc_phase_count)
 
 @njit(nogil=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, sinc_lut=kaiser_table):
-    lineoffset += 1
-    lineoffset_out_samples = outwidth * lineoffset
-
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, sinc_lut=kaiser_table, sinc_taps=sinc_tap_count, sinc_phases=sinc_phase_count):
     # average out any unusual spikes in wow that happen on a per line basis
     # this indicates an hsync tbc error vs. being normal wow from playback speed variations
     # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
@@ -173,7 +170,11 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         for i in range(1, len(level_adjusts)):
             level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]
 
-    for i in range(lineoffset_out_samples, len(dsout) + lineoffset_out_samples):
+    half_taps_m1 = (sinc_taps // 2) - 1
+
+    dsout_start = outwidth * (lineoffset + 1)
+    dsout_end = len(dsout) + dsout_start
+    for i in range(dsout_start, dsout_end):
         # compensates for the amplitude/frequency shift caused by FM demodulation under varying playback speed.
         level_adjust = level_adjusts[i]
 
@@ -183,27 +184,26 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
 
         # fractional phase
         frac = coord - coord_int
-        phase = int(frac * 65536.0)
 
-        w = sinc_lut[phase]
+        phase_pos = frac * sinc_phases
+        phase_start = int(phase_pos)
+        phase_end = phase_start + 1
 
-        i0 = coord_int - 2
-        i1 = coord_int - 1
-        i2 = coord_int
-        i3 = coord_int + 1
-        i4 = coord_int + 2
-        i5 = coord_int + 3
+        alpha = phase_pos - phase_start
+        alpha_m1 = 1 - alpha
 
-        result = (
-            buf[i0] * w[0] +
-            buf[i1] * w[1] +
-            buf[i2] * w[2] +
-            buf[i3] * w[3] +
-            buf[i4] * w[4] +
-            buf[i5] * w[5]
-        )
+        w_start = sinc_lut[phase_start]
+        w_end = sinc_lut[phase_end]
 
-        dsout[i - lineoffset_out_samples] = level_adjust * result
+        start = coord_int - half_taps_m1
+
+        result = 0.0
+        for t in range(sinc_taps):
+            # do linear interpolation between pre-computed phases
+            w = alpha_m1 * w_start[t] + alpha * w_end[t]
+            result += buf[start + t] * w
+
+        dsout[i - dsout_start] = level_adjust * result
 
 frequency_suffixes = [
     ("ghz", 1.0e9),
