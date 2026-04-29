@@ -144,10 +144,10 @@ kaiser_beta = 5
 sinc_tap_count = 16 # must be multiple of 2
 sinc_phase_count = 2**16
 # pre-compute sinc
-kaiser_table = build_kaiser_lut(kaiser_beta, sinc_tap_count, sinc_phase_count)
+sinc_lut = build_kaiser_lut(kaiser_beta, sinc_tap_count, sinc_phase_count)
 
 @njit(nogil=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, sinc_lut=kaiser_table, sinc_taps=sinc_tap_count, sinc_phases=sinc_phase_count):
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15):
     # average out any unusual spikes in wow that happen on a per line basis
     # this indicates an hsync tbc error vs. being normal wow from playback speed variations
     # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
@@ -170,7 +170,7 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         for i in range(1, len(level_adjusts)):
             level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]
 
-    half_taps_m1 = (sinc_taps // 2) - 1
+    half_taps_m1 = (sinc_tap_count // 2) - 1
 
     dsout_start = outwidth * (lineoffset + 1)
     dsout_end = len(dsout) + dsout_start
@@ -185,12 +185,11 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         # fractional phase
         frac = coord - coord_int
 
-        phase_pos = frac * sinc_phases
+        phase_pos = frac * sinc_phase_count
         phase_start = int(phase_pos)
         phase_end = phase_start + 1
 
-        alpha = phase_pos - phase_start
-        alpha_m1 = 1 - alpha
+        alpha = np.float32(phase_pos - phase_start)
 
         w_start = sinc_lut[phase_start]
         w_end = sinc_lut[phase_end]
@@ -198,10 +197,10 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, lineoffset, out
         start = coord_int - half_taps_m1
 
         result = 0.0
-        for t in range(sinc_taps):
+        for t in range(sinc_tap_count):
             # do linear interpolation between pre-computed phases
-            w = alpha_m1 * w_start[t] + alpha * w_end[t]
-            result += buf[start + t] * w
+            ws = w_start[t]
+            result += buf[start + t] * (ws + alpha * (w_end[t] - ws))
 
         dsout[i - dsout_start] = level_adjust * result
 
