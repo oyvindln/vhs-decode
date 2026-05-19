@@ -8,6 +8,8 @@ import threading
 import time
 import types
 
+from concurrent.futures import ProcessPoolExecutor
+
 from queue import Queue
 from textwrap import dedent
 
@@ -26,12 +28,13 @@ from scipy import interpolate
 from . import efm_pll
 from .utils import ac3_pipe, ldf_pipe, traceback
 from .utils import nb_mean, nb_median, nb_round, nb_min, nb_max, nb_abs, nb_absmax, nb_diff, n_orgt, n_orlt
-from .utils import polar2z, sqsum, genwave, dsa_rescale_and_clip, scale, scale_field, rms, sinc_lut_future
+from .utils import polar2z, sqsum, genwave, dsa_rescale_and_clip, scale, scale_field, rms
 from .utils import findpeaks, findpulses, calczc, inrange, roundfloat
 from .utils import LRUupdate, clb_findbursts, angular_mean_helper, phase_distance
 from .utils import build_hilbert, unwrap_hilbert, emphasis_iir, filtfft
 from .utils import fft_do_slice, fft_determine_slices, StridedCollector, hz_to_output_array
 from .utils import Pulse, nb_std, nb_gt, n_ornotrange, nb_concatenate, gen_bpf_supergauss, FieldInfo
+from .utils import build_kaiser_lut, kaiser_beta, sinc_tap_count, sinc_phase_count
 
 try:
     # If Anaconda's numpy is installed, mkl will use all threads for fft etc
@@ -1458,6 +1461,7 @@ class Field:
         self,
         rf,
         decode,
+        downscale_sinc_lut_future,
         prevfield=None,
         initphase=False,
         fields_written=0,
@@ -1499,6 +1503,7 @@ class Field:
 
         self.use_threads = use_threads
 
+        self.downscale_sinc_lut_future = downscale_sinc_lut_future
         self.wow_level_adjust_smoothing = wow_level_adjust_smoothing
         self.wow_interpolation_method = wow_interpolation_method
 
@@ -2564,7 +2569,7 @@ class Field:
             dsout,
             interpolated_pixel_locs,
             wowfactors,
-            sinc_lut_future.result(),
+            self.downscale_sinc_lut_future.result(), # this blocks until the lut generation future is completed
             self.lineoffset,
             outwidth,
             wow_level_adjust_smoothing=self.wow_level_adjust_smoothing
@@ -3402,6 +3407,15 @@ class LDdecode:
         self.blackIRE = 0
 
         self.start_time = time.time()
+
+        # create sinc downscaling lookup table in concurrently in a process
+        # Note: threading will work, but will unnecessarily block the GIL
+        executor = ProcessPoolExecutor()
+        self.downscale_sinc_lut_future = executor.submit(
+            build_kaiser_lut, kaiser_beta, sinc_tap_count, sinc_phase_count
+        )
+        executor.shutdown(wait=False)
+
         self.second_decode = None
         self.use_profiler = extra_options.get("use_profiler", False)
         if self.use_profiler:
@@ -3897,6 +3911,7 @@ class LDdecode:
         f = self.FieldClass(
             self.rf,
             rawdecode,
+            self.downscale_sinc_lut_future,
             prevfield=prevfield,
             initphase=initphase,
             fields_written=self.fields_written,
