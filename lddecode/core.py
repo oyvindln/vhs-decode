@@ -291,6 +291,14 @@ class RFDecode:
 
         """
 
+        # create sinc downscaling lookup table in concurrently in a process
+        # Note: threading will work, but will unnecessarily block the GIL
+        executor = ProcessPoolExecutor()
+        self.downscale_sinc_lut_future = executor.submit(
+            build_kaiser_lut, kaiser_beta, sinc_tap_count, sinc_phase_count
+        )
+        executor.shutdown(wait=False)
+
         self.blocklen     = blocklen
         self.blockcut     = 1024
         self.blockcut_end = 0
@@ -1461,7 +1469,6 @@ class Field:
         self,
         rf,
         decode,
-        downscale_sinc_lut_future,
         prevfield=None,
         initphase=False,
         fields_written=0,
@@ -1503,7 +1510,6 @@ class Field:
 
         self.use_threads = use_threads
 
-        self.downscale_sinc_lut_future = downscale_sinc_lut_future
         self.wow_level_adjust_smoothing = wow_level_adjust_smoothing
         self.wow_interpolation_method = wow_interpolation_method
 
@@ -2569,7 +2575,7 @@ class Field:
             dsout,
             interpolated_pixel_locs,
             wowfactors,
-            self.downscale_sinc_lut_future.result(), # this blocks until the lut generation future is completed
+            self.rf.downscale_sinc_lut_future.result(), # this blocks until the lut generation future is completed
             self.lineoffset,
             outwidth,
             wow_level_adjust_smoothing=self.wow_level_adjust_smoothing
@@ -3408,14 +3414,6 @@ class LDdecode:
 
         self.start_time = time.time()
 
-        # create sinc downscaling lookup table in concurrently in a process
-        # Note: threading will work, but will unnecessarily block the GIL
-        executor = ProcessPoolExecutor()
-        self.downscale_sinc_lut_future = executor.submit(
-            build_kaiser_lut, kaiser_beta, sinc_tap_count, sinc_phase_count
-        )
-        executor.shutdown(wait=False)
-
         self.second_decode = None
         self.use_profiler = extra_options.get("use_profiler", False)
         if self.use_profiler:
@@ -3911,7 +3909,6 @@ class LDdecode:
         f = self.FieldClass(
             self.rf,
             rawdecode,
-            self.downscale_sinc_lut_future,
             prevfield=prevfield,
             initphase=initphase,
             fields_written=self.fields_written,
