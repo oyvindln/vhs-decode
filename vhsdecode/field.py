@@ -11,6 +11,7 @@ import vhsdecode.sync as sync
 import vhsdecode.formats as formats
 from vhsdecode.doc import detect_dropouts_rf
 from vhsdecode.chroma import decode_chroma, decode_chroma_phase_rotation
+from vhsdecode.addons.ringing_cancellation import apply_tbc_ringing_correction, plot_tbc_correction_debug
 
 from vhsdecode.debug_plot import plot_data_and_pulses
 
@@ -1140,6 +1141,40 @@ class FieldShared:
 
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldShared, self).downscale(final=False, *args, **kwargs)
+
+        front_porch_len = 15
+        sync_len = 67
+        back_porch_len = 67
+        gain_scale = 1
+        target_transition = 3.3
+
+        #plot_tbc_correction_debug(
+        #    dsout,
+        #    self.lineoffset,
+        #    self.linecount + self.lineoffset,
+        #    self.outlinelen,
+        #    self.blanking_level,
+        #    self.sync_tip_level,
+        #    front_porch_len=front_porch_len,
+        #    sync_len=sync_len,
+        #    back_porch_len=back_porch_len,
+        #    gain_scale=gain_scale,
+        #    target_transition=target_transition,
+        #)
+#
+        #dsout = apply_tbc_ringing_correction(
+        #    dsout,
+        #    self.lineoffset,
+        #    self.linecount + self.lineoffset,
+        #    self.outlinelen,
+        #    self.blanking_level,
+        #    self.sync_tip_level,
+        #    front_porch_len=front_porch_len,
+        #    sync_len=sync_len,
+        #    back_porch_len=back_porch_len,
+        #    gain_scale=gain_scale,
+        #    target_transition=target_transition,
+        #)
 
         # hpf = utils.filter_simple(dsout, self.rf.Filters["NLHighPass"])
         # dsout = ynr(dsout, hpf, self.outlinelen)
