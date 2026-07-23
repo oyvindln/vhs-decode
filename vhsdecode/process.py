@@ -7,6 +7,8 @@ import threading
 from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
+from vhsdecode.addons.ringing_cancellation import apply_tbc_vhs_deemphasis_correction
+
 import lddecode.core as ldd
 
 # from lddecode.core import npfft
@@ -375,6 +377,26 @@ class VHSDecode(ldd.LDdecode):
 
     def writeout(self, dataset):
         f, fi, (picturey, picturec), audio, efm = dataset
+
+        front_porch_len = 10
+        sync_len = 67
+        back_porch_len = 60
+        gain_scale = 1
+        target_transition = 3.3
+
+        picturey = apply_tbc_vhs_deemphasis_correction(
+            picturey.astype(np.float64),
+            f.lineoffset,
+            f.linecount + f.lineoffset,
+            f.outlinelen,
+            f.blanking_level,
+            f.sync_tip_level,
+            front_porch_len=front_porch_len,
+            sync_len=sync_len,
+            back_porch_len=back_porch_len,
+            target_transition=target_transition,
+            debug=False
+        ).astype(np.int16)
 
         # Remove fields that are currently not used to cut down on space usage.
         # the qt tools will load them as 0 with the current code
