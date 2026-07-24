@@ -980,7 +980,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # state for the group delay processing that happens in FielShared.downscale
         # TODO: parameterize
-        self.group_delay_state = deque(maxlen=round(self.SysParams["FPS"] * 10))
+        self.group_delay_state = deque(maxlen=8)#round(self.SysParams["FPS"]))
 
         # TODO: This should be managed elsewhere.
         self._compute_linelocs_issues = False

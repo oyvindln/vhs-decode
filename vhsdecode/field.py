@@ -1160,11 +1160,13 @@ class FieldShared:
                 self.lineoffset,
                 self.linecount + self.lineoffset,
                 self.outlinelen,
+                self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["vsync_ire"] * self.rf.DecoderParams["hz_ire"], # sync tip level
+                self.rf.DecoderParams["ire0"], # blanking level
                 front_porch_len=front_porch_len,
                 sync_len=sync_len,
                 back_porch_len=back_porch_len,
                 target_transition=target_transition,
-                # state_deque=self.rf.group_delay_state,
+                group_delay_state=self.rf.group_delay_state,
                 debug=False
             )
 

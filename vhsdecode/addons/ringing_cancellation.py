@@ -5,105 +5,270 @@ import scipy.fft
 # -----------------------------------------------------------------------------
 # 1. NUMBA KERNEL: STRICTLY CAUSAL PHASE EQUALIZATION FIR
 # -----------------------------------------------------------------------------
+
+fir_len = 129
+fir_len_half = fir_len // 2
+
 @nb.njit(cache=True, nogil=True, fastmath=True)
-def _apply_global_inverse_eq(
-    tbc_video,
-    n_samples,
-    fir_kernel,
-    scale
-):
-    out = np.empty_like(tbc_video)
-    k_len = len(fir_kernel)
-    half_k = k_len // 2
-    
-    for i in range(n_samples):
-        val = 0.0
-        for j in range(k_len):
-            idx = i + half_k - j
-            if 0 <= idx < n_samples:
-                val += tbc_video[idx] * fir_kernel[j]
-            else:
-                if idx < 0:
-                    val += tbc_video[0] * fir_kernel[j]
-                else:
-                    val += tbc_video[n_samples - 1] * fir_kernel[j]
-        out[i] = val * scale
-        
+def _apply_global_inverse_eq(picture, n_samples, fir_kernel):
+    out = np.empty(n_samples, np.float32)
+    picture = picture.astype(np.float32)
+    fir_kernel = fir_kernel.astype(np.float32)
+
+    last = n_samples - 1
+    center_end = n_samples - fir_len_half
+
+    # Left edge
+    for i in range(fir_len_half):
+        s = np.float32(0.0)
+        start = i + fir_len_half
+
+        for j in range(fir_len):
+            idx = start - j
+            if idx < 0:
+                idx = 0
+            s += picture[idx] * fir_kernel[j]
+
+        out[i] = s
+
+    # Center
+    for i in range(fir_len_half, center_end):
+        s = np.float32(0.0)
+        start = i + fir_len_half
+
+        for j in range(fir_len):
+            s += picture[start - j] * fir_kernel[j]
+
+        out[i] = s
+
+    # Right edge
+    for i in range(center_end, n_samples):
+        s = np.float32(0.0)
+        start = i + fir_len_half
+
+        for j in range(fir_len):
+            idx = start - j
+            if idx > last:
+                idx = last
+            s += picture[idx] * fir_kernel[j]
+
+        out[i] = s
+
     return out
 
 
 # -----------------------------------------------------------------------------
-# 2. DEBUG PLOT RENDERER
+# 2. HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
-def _render_debug_plot(
-    avg_pulse_shape,
-    corrected_pulse,
+def calculate_optimal_advance(S_xy, pad_len):
+    """
+    Calculates the exact group delay advance (in fractional samples) 
+    from the cross-spectral density phase slope across the signal passband.
+    """
+    phase = np.unwrap(np.angle(S_xy))
+    freqs = scipy.fft.fftfreq(pad_len)
+    
+    # Active passband for a video sync pulse is concentrated in lower frequencies.
+    # Use the lower 15% of the spectrum to find the linear phase slope.
+    limit = max(2, int(pad_len * 0.15))
+    
+    w = 2.0 * np.pi * freqs[1:limit]
+    p = phase[1:limit]
+    
+    # Fit line: p = slope * w + intercept
+    slope, _ = np.polyfit(w, p, 1)
+    
+    # Group delay is the negative derivative of phase with respect to angular frequency
+    return -slope
+
+
+def _render_debug_plot_interactive(
+    raw_pulses,
+    corrected_pulses,
     ideal,
     fir_kernel,
-    target_transition
+    calc_advance,
+    line_indices,
 ):
+    """
+    Renders an interactive debug UI with a Slider to scrub through individual video lines,
+    plus an aggregate overlay of all lines showing frame-wide variance.
+    """
     try:
         import matplotlib.pyplot as plt
+        from matplotlib.widgets import Slider
     except ImportError:
         print("Matplotlib is required to render the debug plot.")
         return
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=False)
+    n_lines = len(raw_pulses)
+    if n_lines == 0:
+        return
 
-    ax1.plot(avg_pulse_shape, label='Before (Raw Avg Pulse)', color='#d62728', linewidth=1.8)
-    ax1.plot(corrected_pulse, label='After (Causal Group Delay Equalization)', color='#1f77b4', linewidth=2.2)
-    ax1.plot(ideal, label=f'Target Spec Step (Trans: {target_transition})', color='#7f7f7f', linestyle=':', linewidth=2)
-    ax1.set_title("System Identification: Strictly Causal Group Delay Equalization")
-    ax1.legend()
-    ax1.grid(True, alpha=0.4)
+    fig = plt.figure(figsize=(15, 11))
+    
+    # Subplot grid layout
+    ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2) # Single Line View (Interactive)
+    ax2 = plt.subplot2grid((3, 2), (1, 0), colspan=1) # All Lines Overlay (Persistence)
+    ax3 = plt.subplot2grid((3, 2), (1, 1), colspan=1) # FIR Kernel Response
+    ax_slider = plt.subplot2grid((3, 2), (2, 0), colspan=2) # Slider Axis
 
+    # -------------------------------------------------------------------------
+    # Panel 1: Single Line Inspector (Interactive)
+    # -------------------------------------------------------------------------
+    initial_idx = 0
+    line_num = line_indices[initial_idx]
+    
+    raw_line, = ax1.plot(raw_pulses[initial_idx], label=f'Raw Line {line_num}', color='#d62728', linewidth=1.8, alpha=0.85)
+    corr_line, = ax1.plot(corrected_pulses[initial_idx], label=f'Equalized Line {line_num}', color='#1f77b4', linewidth=2.2)
+    ax1.plot(ideal, label='Target Reference (Phase-Aligned)', color='#7f7f7f', linestyle=':', linewidth=2)
+    
+    ax1.set_title(f"Line Inspection [Line {line_num}] | Sub-sample Advance: {calc_advance:.3f} samples", fontweight='bold')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.35)
+    ax1.set_ylabel("Normalized Amplitude")
+
+    # -------------------------------------------------------------------------
+    # Panel 2: Persistence Overlay (All Lines Overlaid)
+    # -------------------------------------------------------------------------
+    for p in raw_pulses:
+        ax2.plot(p, color='#d62728', alpha=min(0.25, max(0.02, 5.0 / n_lines)), linewidth=0.8)
+    
+    for p in corrected_pulses:
+        ax2.plot(p, color='#1f77b4', alpha=min(0.25, max(0.02, 5.0 / n_lines)), linewidth=0.8)
+
+    ax2.plot(ideal, color='black', linestyle='--', linewidth=1.5, label='Target (Phase-Aligned)')
+    ax2.set_title(f"All Lines Overlay ({n_lines} Lines)", fontweight='bold')
+    ax2.grid(True, alpha=0.35)
+    ax2.set_ylabel("Normalized Amplitude")
+
+    from matplotlib.lines import Line2D
+    custom_lines = [
+        Line2D([0], [0], color='#d62728', lw=1.5, label='Raw Set'),
+        Line2D([0], [0], color='#1f77b4', lw=1.5, label='Corrected Set'),
+        Line2D([0], [0], color='black', lw=1.5, linestyle='--', label='Target')
+    ]
+    ax2.legend(handles=custom_lines, loc='upper right')
+
+    # -------------------------------------------------------------------------
+    # Panel 3: Equalization Kernel
+    # -------------------------------------------------------------------------
     center = len(fir_kernel) // 2
     x_axis = np.arange(-center, center + 1)
     
-    ax2.plot(x_axis, fir_kernel, label='Causal FIR Taps (t >= 0)', color='purple', marker='.', linewidth=1.5)
-    ax2.set_title("Derived Causal Group-Delay Kernel (Zero Pre-Shoot)")
-    ax2.axhline(0, color='black', alpha=0.3)
-    ax2.set_xlim(-40, 40)
-    ax2.legend()
-    ax2.grid(True, alpha=0.4)
+    ax3.plot(x_axis, fir_kernel, label='Causal FIR Taps (t >= 0)', color='purple', marker='.', linewidth=1.2)
+    ax3.set_title("Derived Equalization Kernel", fontweight='bold')
+    ax3.axhline(0, color='black', alpha=0.3)
+    ax3.set_xlim(-40, 40)
+    ax3.legend(loc='upper right')
+    ax3.grid(True, alpha=0.35)
+
+    # -------------------------------------------------------------------------
+    # Slider Logic
+    # -------------------------------------------------------------------------
+    slider = Slider(
+        ax=ax_slider,
+        label='Line Index ',
+        valmin=0,
+        valmax=n_lines - 1,
+        valinit=0,
+        valstep=1,
+        color='#1f77b4'
+    )
+
+    def update(val):
+        idx = int(slider.val)
+        l_num = line_indices[idx]
+        raw_line.set_ydata(raw_pulses[idx])
+        raw_line.set_label(f'Raw Line {l_num}')
+        corr_line.set_ydata(corrected_pulses[idx])
+        corr_line.set_label(f'Equalized Line {l_num}')
+        ax1.set_title(f"Line Inspection [Line {l_num}] | Sub-sample Advance: {calc_advance:.3f} samples", fontweight='bold')
+        ax1.legend(loc='upper right')
+        fig.canvas.draw_idle()
+
+    slider.on_changed(update)
 
     plt.tight_layout()
     plt.show()
 
 
 def build_ideal_step(
-    measured_center_fall,
     measured_center_rise,
     target_transition,
-    local_blank_f,
     local_sync,
     local_blank_r,
     win_size,
 ):
-    mid_sync = int(measured_center_fall + (measured_center_rise - measured_center_fall) / 2.0)
     ideal = np.zeros(win_size, dtype=np.float64)
     for i in range(win_size):
-        t_fall = float(i) - measured_center_fall
         t_rise = float(i) - measured_center_rise
 
-        if i <= mid_sync:
-            if t_fall < -target_transition / 2.0:
-                ideal[i] = local_blank_f
-            elif t_fall <= target_transition / 2.0:
-                phase = (t_fall + target_transition / 2.0) / target_transition * np.pi
-                ideal[i] = local_blank_f + (local_sync - local_blank_f) * (1.0 - np.cos(phase)) / 2.0
-            else:
-                ideal[i] = local_sync
+        if t_rise < -target_transition / 2.0:
+            ideal[i] = local_sync
+        elif t_rise <= target_transition / 2.0:
+            phase = (t_rise + target_transition / 2.0) / target_transition * np.pi
+            ideal[i] = local_sync + (local_blank_r - local_sync) * (1.0 - np.cos(phase)) / 2.0
         else:
-            if t_rise < -target_transition / 2.0:
-                ideal[i] = local_sync
-            elif t_rise <= target_transition / 2.0:
-                phase = (t_rise + target_transition / 2.0) / target_transition * np.pi
-                ideal[i] = local_sync + (local_blank_r - local_sync) * (1.0 - np.cos(phase)) / 2.0
-            else:
-                ideal[i] = local_blank_r
+            ideal[i] = local_blank_r
     
     return ideal
+
+
+def build_ideal_hsync_pulse(
+    front_porch_len,
+    sync_len,
+    target_transition,
+    sync_level,
+    blanking_level,
+    win_size,
+    phase_delay=0.0,
+):
+    """Generates an ideal full H-Sync pulse aligned with the signal's phase delay."""
+    ideal = np.full(win_size, blanking_level, dtype=np.float64)
+    
+    center_fall = float(front_porch_len) + phase_delay
+    center_rise = float(front_porch_len + sync_len) + phase_delay
+    
+    for i in range(win_size):
+        t_fall = float(i) - center_fall
+        t_rise = float(i) - center_rise
+        
+        # Falling Edge (Front Porch -> Sync Tip)
+        if t_fall >= -target_transition / 2.0 and t_fall <= target_transition / 2.0:
+            phase = (t_fall + target_transition / 2.0) / target_transition * np.pi
+            ideal[i] = blanking_level - (blanking_level - sync_level) * (1.0 - np.cos(phase)) / 2.0
+        # Sync Tip Region
+        elif t_fall > target_transition / 2.0 and t_rise < -target_transition / 2.0:
+            ideal[i] = sync_level
+        # Rising Edge (Sync Tip -> Back Porch)
+        elif t_rise >= -target_transition / 2.0 and t_rise <= target_transition / 2.0:
+            phase = (t_rise + target_transition / 2.0) / target_transition * np.pi
+            ideal[i] = sync_level + (blanking_level - sync_level) * (1.0 - np.cos(phase)) / 2.0
+            
+    return ideal
+
+
+@nb.njit
+def normalize_inplace(video_buf, sync_tip_level, blanking_level):
+    scale = 2.0 / (blanking_level - sync_tip_level)
+    for i in range(video_buf.size):
+        video_buf[i] = (video_buf[i] - sync_tip_level) * scale - 1.0
+
+@nb.njit
+def denormalize_inplace(video_buf, sync_tip_level, blanking_level):
+    scale = 0.5 * (blanking_level - sync_tip_level)
+    for i in range(video_buf.size):
+        video_buf[i] = (video_buf[i] + 1.0) * scale + sync_tip_level
+
+@nb.njit
+def get_levels(data):
+    n = data.size
+    k = max(1, n // 4)
+    part = np.sort(data.copy())
+    sync_tip_average = np.median(part[:k])
+    blanking_average = np.median(part[-k:])
+    return sync_tip_average, blanking_average
 
 
 # -----------------------------------------------------------------------------
@@ -113,30 +278,25 @@ def correct_group_delay(
     video_buf, 
     line_start, 
     line_end, 
-    line_length, 
-    front_porch_len, 
+    line_length,
+    sync_tip_level,
+    blanking_level,
+    front_porch_len,
     sync_len,         
     back_porch_len,
     target_transition,
-    noise_threshold=0.01,
-    fir_length=129,
+    group_delay_state,
+    noise_threshold=0.15,
     debug=False
 ):
-    # normalize
-    scale = np.max(np.abs(video_buf))
-    video_buf /= scale
-
-    blanking_level = 0.0
-    sync_tip_level = -40.0
+    normalize_inplace(video_buf, sync_tip_level, blanking_level)
     
     n_samples = len(video_buf)
-    win_size = front_porch_len + sync_len + back_porch_len
-    offset_fall = front_porch_len
-    offset_rise = front_porch_len + sync_len
-    mid_val = (blanking_level + sync_tip_level) / 2.0
     
-    # Compute optimal fast FFT size using scipy.fft.next_fast_len
-    # We need enough space for linear convolution without circular aliasing: length >= 2 * win_size - 1
+    pre_rise_samples = int(np.round(0.25 * sync_len))
+    win_size = pre_rise_samples + back_porch_len
+    offset_rise = pre_rise_samples
+    
     min_required_len = 2 * win_size - 1
     pad_len = scipy.fft.next_fast_len(min_required_len, real=False)
     
@@ -146,30 +306,23 @@ def correct_group_delay(
     win = np.hanning(win_size)
     start_idx = (pad_len - win_size) // 2
     count = 0
-    
-    avg_pulse_shape = np.zeros(win_size, dtype=np.float64)
 
-    # --- Step 1: Accumulate Cross-Spectral Density ---
+    # =========================================================================
+    # PART 1: Calculate Pulse Shape & Spectra (Rising Edge Only)
+    # =========================================================================
     for line in range(line_start, line_end + 1):
         loc = line * line_length
-        if loc - offset_fall >= 0 and loc + sync_len + back_porch_len < n_samples:
+        start_loc = loc + sync_len - pre_rise_samples
+        if start_loc >= 0 and start_loc + win_size < n_samples:
             
-            pulse = video_buf[loc - offset_fall : loc + sync_len + back_porch_len]
-            avg_pulse_shape += pulse
+            pulse = video_buf[start_loc : start_loc + win_size]
+            measured_sync_tip_level, measured_blanking_level = get_levels(pulse)
+            mid_val = measured_sync_tip_level + (measured_blanking_level - measured_sync_tip_level) / 2.0
+
             count += 1
             
-            measured_center_fall = float(offset_fall)
-            for i in range(win_size - 1):
-                if pulse[i] >= mid_val >= pulse[i+1]:
-                    y0 = pulse[i] - mid_val
-                    y1 = pulse[i+1] - mid_val
-                    if (y0 - y1) != 0.0:
-                        measured_center_fall = float(i) + abs(y0) / abs(y0 - y1)
-                    break
-
             measured_center_rise = float(offset_rise)
-            search_start = int(measured_center_fall + (sync_len // 2))
-            for i in range(search_start, win_size - 1):
+            for i in range(win_size - 1):
                 if pulse[i] <= mid_val <= pulse[i+1]:
                     y0 = pulse[i] - mid_val
                     y1 = pulse[i+1] - mid_val
@@ -177,29 +330,23 @@ def correct_group_delay(
                         measured_center_rise = float(i) + abs(y0) / abs(y1 - y0)
                     break
                     
-            sum_fp, count_fp = 0.0, 0
-            for i in range(0, max(1, int(measured_center_fall - 4))):
-                sum_fp += pulse[i]
-                count_fp += 1
-            local_blank_f = sum_fp / count_fp if count_fp > 0 else blanking_level
-            
             sum_sync, count_sync = 0.0, 0
-            for i in range(int(measured_center_fall + 12), int(measured_center_rise - 12)):
+            end_sync_idx = max(1, int(measured_center_rise - 2))
+            for i in range(0, end_sync_idx):
                 sum_sync += pulse[i]
                 count_sync += 1
-            local_sync = sum_sync / count_sync if count_sync > 0 else sync_tip_level
+            local_sync = sum_sync / count_sync if count_sync > 0 else measured_sync_tip_level
             
             sum_bp, count_bp = 0.0, 0
-            for i in range(int(measured_center_rise + 4), win_size):
+            start_bp_idx = min(win_size - 1, int(measured_center_rise + 2))
+            for i in range(start_bp_idx, win_size):
                 sum_bp += pulse[i]
                 count_bp += 1
-            local_blank_r = sum_bp / count_bp if count_bp > 0 else blanking_level
+            local_blank_r = sum_bp / count_bp if count_bp > 0 else measured_blanking_level
 
-            shared_blank = (local_blank_f + local_blank_r) / 2.0
-            
             ideal_for_fir = build_ideal_step(
-                measured_center_fall, measured_center_rise, target_transition,
-                shared_blank, local_sync, shared_blank, win_size
+                measured_center_rise, target_transition,
+                local_sync, local_blank_r, win_size
             )
 
             d_ideal = np.gradient(ideal_for_fir) * win
@@ -210,82 +357,114 @@ def correct_group_delay(
             pad_ideal[start_idx : start_idx + win_size] = d_ideal
             pad_pulse[start_idx : start_idx + win_size] = d_pulse
             
-            # Utilize scipy.fft backend for maximum speed optimization
             X = scipy.fft.fft(pad_ideal)
             Y = scipy.fft.fft(pad_pulse)
             
             S_xy += X * np.conj(Y)
             S_yy += np.abs(Y)**2
 
-    if count == 0:
+    if count > 0:
+        current_measurement = {
+            's_xy': S_xy,
+            's_yy': S_yy,
+        }
+        group_delay_state.append(current_measurement)
+    else:
+        denormalize_inplace(video_buf, sync_tip_level, blanking_level)
         return video_buf
-        
-    avg_pulse_shape /= float(count)
+
+    rolling_S_xy = np.zeros(pad_len, dtype=np.complex128)
+    rolling_S_yy = np.zeros(pad_len, dtype=np.float64)
+
+    for measurement in group_delay_state:
+        rolling_S_xy += measurement['s_xy']
+        rolling_S_yy += measurement['s_yy']
+
+    # =========================================================================
+    # PART 2: Analytical Advance & Deconvolution
+    # =========================================================================
+    # Dynamically extract the optimal floating-point advance from phase slope
+    advance_float = calculate_optimal_advance(rolling_S_xy, pad_len)
     
-    # --- Step 2: Inverse Deconvolution Model ---
-    reg = np.max(S_yy) * noise_threshold 
-    denom = S_yy + reg
+    # Split into integer video shift and fractional kernel phase-shift
+    int_adv = int(np.round(advance_float))
+    frac_adv = advance_float - int_adv
+    
+    reg = np.max(rolling_S_yy) * noise_threshold 
+    denom = rolling_S_yy + reg
     denom[denom == 0] = 1e-12
-    
-    H_inv = S_xy / denom
+    H_inv = rolling_S_xy / denom
 
-    # --- Step 3: Extract Time-Domain Kernel and Enforce Strict Causality ---
+    # Apply ONLY the fractional sub-sample advance to the kernel in frequency domain.
+    # This securely modifies the filter shape without needing to FFT the whole video buffer.
+    w_full = 2.0 * np.pi * scipy.fft.fftfreq(pad_len)
+    H_inv = H_inv * np.exp(-1j * w_full * frac_adv)
+
+    # IFFT back to time domain
     h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
+    
+    # Do NOT roll the kernel here. Center extraction guarantees t=0 anchoring.
     center_full = pad_len // 2
-
-    if fir_length % 2 == 0:
-        fir_length += 1
-        
-    half_fir = fir_length // 2
+    fir_kernel = h_full[center_full - fir_len_half : center_full + fir_len_half + 1].copy()
     
-    # Align $t=0$ precisely to index `half_fir`
-    peak_idx = np.argmax(np.abs(h_full))
-    h_full = np.roll(h_full, center_full - peak_idx)
+    # 1. Enforce strict causality
+    fir_kernel[:fir_len_half] = 0.0
     
-    fir_kernel = h_full[center_full - half_fir : center_full + half_fir + 1].copy()
+    # 2. Base DC normalization
+    fir_kernel[fir_len_half] = 1.0 - np.sum(fir_kernel[fir_len_half + 1:])
 
-    # 1. Zero out negative time (t < 0) to strictly enforce causality.
-    # This completely eliminates pre-shoot and future-looking phase errors.
-    fir_kernel[:half_fir] = 0.0
-
-    # 2. Smooth the causal forward-time tail (t >= 0) to prevent truncation ripples.
-    causal_len = len(fir_kernel) - half_fir
-    causal_window = np.hanning(2 * causal_len - 1)[causal_len - 1:]
-    fir_kernel[half_fir:] *= causal_window
-
-    # 3. Enforce strict DC unity gain (DC = 1.0)
-    fir_sum = np.sum(fir_kernel)
-    if fir_sum != 0.0:
-        fir_kernel /= fir_sum
-
-    # --- Step 4: Apply Strictly Causal Equalization ---
-    video_buf = _apply_global_inverse_eq(
-        video_buf,
-        n_samples,
-        fir_kernel,
-        scale
-    )
-
+    # Collect individual line traces if debug mode is requested
     if debug:
-        corrected_pulse = _apply_global_inverse_eq(
-            avg_pulse_shape,
-            win_size,
-            fir_kernel,
-            1
+        full_win_size = front_porch_len + sync_len + back_porch_len
+        raw_pulses = []
+        corrected_pulses = []
+        line_indices = []
+
+        for line in range(line_start, line_end + 1):
+            start_loc = line * line_length - front_porch_len
+            if start_loc >= 0 and start_loc + full_win_size < n_samples:
+                raw_p = video_buf[start_loc : start_loc + full_win_size].copy()
+                
+                # Apply filter to individual line trace for inspection
+                delayed_p = np.roll(raw_p, int_adv)
+                filtered_p = _apply_global_inverse_eq(delayed_p, full_win_size, fir_kernel)
+                corr_p = np.roll(filtered_p, -int_adv)
+
+                raw_pulses.append(raw_p)
+                corrected_pulses.append(corr_p)
+                line_indices.append(line)
+
+    # =========================================================================
+    # PART 3: Apply Strictly Causal Equalization via Data Integer Shift
+    # =========================================================================
+    video_buf = np.roll(video_buf, int_adv)
+    video_buf = _apply_global_inverse_eq(video_buf, n_samples, fir_kernel)
+    video_buf = np.roll(video_buf, -int_adv)
+
+    if debug and len(raw_pulses) > 0:
+        # Determine average levels from corrected set to construct target overlay
+        all_corr_arr = np.array(corrected_pulses)
+        sync_tip_average, blanking_average = get_levels(all_corr_arr.flatten())
+
+        ideal_debug = build_ideal_hsync_pulse(
+            front_porch_len,
+            sync_len,
+            target_transition,
+            sync_tip_average,
+            blanking_average,
+            full_win_size,
+            phase_delay=-(advance_float+int_adv),
         )
         
-        shared_blank = (blanking_level + blanking_level) / 2.0
-        ideal_debug = build_ideal_step(
-            offset_fall, offset_rise, target_transition,
-            shared_blank, sync_tip_level, shared_blank, win_size
-        )
-        
-        _render_debug_plot(
-            avg_pulse_shape,
-            corrected_pulse,
+        _render_debug_plot_interactive(
+            raw_pulses,
+            corrected_pulses,
             ideal_debug,
             fir_kernel,
-            target_transition
+            advance_float,
+            line_indices,
         )
+
+    denormalize_inplace(video_buf, sync_tip_level, blanking_level)
 
     return video_buf
