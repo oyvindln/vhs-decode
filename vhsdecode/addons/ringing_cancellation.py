@@ -1,6 +1,6 @@
 import numpy as np
 import numba as nb
-import scipy.signal
+import scipy.fft
 
 # -----------------------------------------------------------------------------
 # 1. NUMBA KERNEL: STRICTLY CAUSAL PHASE EQUALIZATION FIR
@@ -9,7 +9,8 @@ import scipy.signal
 def _apply_global_inverse_eq(
     tbc_video,
     n_samples,
-    fir_kernel
+    fir_kernel,
+    scale
 ):
     out = np.empty_like(tbc_video)
     k_len = len(fir_kernel)
@@ -26,7 +27,7 @@ def _apply_global_inverse_eq(
                     val += tbc_video[0] * fir_kernel[j]
                 else:
                     val += tbc_video[n_samples - 1] * fir_kernel[j]
-        out[i] = val
+        out[i] = val * scale
         
     return out
 
@@ -108,21 +109,23 @@ def build_ideal_step(
 # -----------------------------------------------------------------------------
 # 3. MAIN CORRECTION FUNCTION
 # -----------------------------------------------------------------------------
-def apply_tbc_vhs_deemphasis_correction(
+def correct_group_delay(
     video_buf, 
     line_start, 
     line_end, 
     line_length, 
-    blanking_level_in, 
-    sync_tip_level_in, 
-    front_porch_len=15, 
-    sync_len=67,         
-    back_porch_len=67,   
-    target_transition=3.3,
+    front_porch_len, 
+    sync_len,         
+    back_porch_len,
+    target_transition,
     noise_threshold=0.01,
     fir_length=129,
     debug=False
 ):
+    # normalize
+    scale = np.max(np.abs(video_buf))
+    video_buf /= scale
+
     blanking_level = 0.0
     sync_tip_level = -40.0
     
@@ -132,7 +135,11 @@ def apply_tbc_vhs_deemphasis_correction(
     offset_rise = front_porch_len + sync_len
     mid_val = (blanking_level + sync_tip_level) / 2.0
     
-    pad_len = 2048 
+    # Compute optimal fast FFT size using scipy.fft.next_fast_len
+    # We need enough space for linear convolution without circular aliasing: length >= 2 * win_size - 1
+    min_required_len = 2 * win_size - 1
+    pad_len = scipy.fft.next_fast_len(min_required_len, real=False)
+    
     S_xy = np.zeros(pad_len, dtype=np.complex128)
     S_yy = np.zeros(pad_len, dtype=np.float64)
     
@@ -203,8 +210,9 @@ def apply_tbc_vhs_deemphasis_correction(
             pad_ideal[start_idx : start_idx + win_size] = d_ideal
             pad_pulse[start_idx : start_idx + win_size] = d_pulse
             
-            X = np.fft.fft(pad_ideal)
-            Y = np.fft.fft(pad_pulse)
+            # Utilize scipy.fft backend for maximum speed optimization
+            X = scipy.fft.fft(pad_ideal)
+            Y = scipy.fft.fft(pad_pulse)
             
             S_xy += X * np.conj(Y)
             S_yy += np.abs(Y)**2
@@ -222,7 +230,7 @@ def apply_tbc_vhs_deemphasis_correction(
     H_inv = S_xy / denom
 
     # --- Step 3: Extract Time-Domain Kernel and Enforce Strict Causality ---
-    h_full = np.fft.fftshift(np.fft.ifft(H_inv).real)
+    h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
     center_full = pad_len // 2
 
     if fir_length % 2 == 0:
@@ -254,14 +262,16 @@ def apply_tbc_vhs_deemphasis_correction(
     video_buf = _apply_global_inverse_eq(
         video_buf,
         n_samples,
-        fir_kernel
+        fir_kernel,
+        scale
     )
 
     if debug:
         corrected_pulse = _apply_global_inverse_eq(
             avg_pulse_shape,
             win_size,
-            fir_kernel
+            fir_kernel,
+            1
         )
         
         shared_blank = (blanking_level + blanking_level) / 2.0

@@ -4,10 +4,9 @@ import numpy as np
 import traceback
 import scipy.signal as sps
 import threading
-from collections import namedtuple
+from collections import namedtuple, deque
 from concurrent.futures import ThreadPoolExecutor
 
-from vhsdecode.addons.ringing_cancellation import apply_tbc_vhs_deemphasis_correction
 
 import lddecode.core as ldd
 
@@ -377,26 +376,6 @@ class VHSDecode(ldd.LDdecode):
 
     def writeout(self, dataset):
         f, fi, (picturey, picturec), audio, efm = dataset
-
-        front_porch_len = 10
-        sync_len = 67
-        back_porch_len = 60
-        gain_scale = 1
-        target_transition = 3.3
-
-        picturey = apply_tbc_vhs_deemphasis_correction(
-            picturey.astype(np.float64),
-            f.lineoffset,
-            f.linecount + f.lineoffset,
-            f.outlinelen,
-            f.blanking_level,
-            f.sync_tip_level,
-            front_porch_len=front_porch_len,
-            sync_len=sync_len,
-            back_porch_len=back_porch_len,
-            target_transition=target_transition,
-            debug=False
-        ).astype(np.int16)
 
         # Remove fields that are currently not used to cut down on space usage.
         # the qt tools will load them as 0 with the current code
@@ -998,6 +977,10 @@ class VHSRFDecode(ldd.RFDecode):
             ), StackableMA(window_average=self.SysParams["FPS"] / 2)
 
         self._field_averages = FieldAverage()
+
+        # state for the group delay processing that happens in FielShared.downscale
+        # TODO: parameterize
+        self.group_delay_state = deque(maxlen=round(self.SysParams["FPS"] * 10))
 
         # TODO: This should be managed elsewhere.
         self._compute_linelocs_issues = False
