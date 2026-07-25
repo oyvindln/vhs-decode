@@ -761,9 +761,12 @@ class VHSRFDecode(ldd.RFDecode):
                 "fm_audio_notch",
                 "chroma_audio_notch",
                 "chroma_offset",
+                "cagc_fields",
                 "cti_mix",
                 "cti_width",
                 "ire0_adjust",
+                "inverse_eq",
+                "lti_gain",
                 "gnrc_afe",
                 "relaxed_line0",
                 "detect_chroma_track_phase",
@@ -806,9 +809,12 @@ class VHSRFDecode(ldd.RFDecode):
             rf_options.get("fm_audio_notch", 0) or (tape_format == "HI8"),
             self.DecoderParams.get("chroma_audio_notch_freq", 0) > 0,
             int(self.DecoderParams.get("chroma_offset", 5) * (self.freq / 40.0)),
+            rf_options.get("cagc_fields", 0),
             rf_options.get("cti_mix", 1),
             rf_options.get("cti_width", 2),
             ire0_adjust,
+            rf_options.get("inverse_eq", 4),
+            rf_options.get("lti_gain", None),
             rf_options.get("gnrc_afe", False),
             rf_options.get("relaxed_line0", False),
             rf_options.get("detect_chroma_track_phase", False),
@@ -976,7 +982,10 @@ class VHSRFDecode(ldd.RFDecode):
                 window_average=self.SysParams["FPS"] / 2
             ), StackableMA(window_average=self.SysParams["FPS"] / 2)
 
-        self._field_averages = FieldAverage()
+        self._field_averages = FieldAverage(
+            self._options.cagc_fields,
+            self._options.inverse_eq
+        )
 
         # TODO: This should be managed elsewhere.
         self._compute_linelocs_issues = False

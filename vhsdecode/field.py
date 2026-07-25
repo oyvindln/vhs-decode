@@ -6,7 +6,7 @@ import lddecode.utils as lddu
 from lddecode.utils import inrange
 from lddecode.utils import hz_to_output_array
 import matplotlib.pyplot as plt
-from vhsdecode.addons.ringing_cancellation import correct_group_delay, apply_adaptive_lti
+from vhsdecode.addons.ringing_cancellation import correct_group_delay, apply_adaptive_luma_transient_improvement
 
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
@@ -1155,26 +1155,33 @@ class FieldShared:
             back_porch_len = 60
             target_transition = 3.3
 
-            dsout, lti_params = correct_group_delay(
-                dsout,
-                self.lineoffset,
-                self.linecount + self.lineoffset,
-                self.outlinelen,
-                self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["vsync_ire"] * self.rf.DecoderParams["hz_ire"], # sync tip level
-                self.rf.DecoderParams["ire0"], # blanking level
-                front_porch_len=front_porch_len,
-                sync_len=sync_len,
-                back_porch_len=back_porch_len,
-                target_transition=target_transition,
-                group_delay_state=self.rf.field_averages.group_delay,
-                debug=False
-            )
+            # Cancels ringing with an inverse equalization fir filter.
+            # The filter is created from the difference between measured and expected sync pulse shape.
+            if self.rf.options.inverse_eq > -1:
+                dsout, lti_params = correct_group_delay(
+                    dsout,
+                    self.lineoffset,
+                    self.linecount + self.lineoffset,
+                    self.outlinelen,
+                    self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["vsync_ire"] * self.rf.DecoderParams["hz_ire"], # sync tip level
+                    self.rf.DecoderParams["ire0"], # blanking level
+                    front_porch_len=front_porch_len,
+                    sync_len=sync_len,
+                    back_porch_len=back_porch_len,
+                    target_transition=target_transition,
+                    group_delay_state=self.rf.field_averages.group_delay,
+                    debug=self.rf.debug_plot and self.rf.debug_plot.is_plot_requested("inverse_eq")
+                )
 
-            dsout = apply_adaptive_lti(
-                dsout,
-                gain=lti_params['gain'], # TODO Parameterize
-                threshold=lti_params['threshold']  # TODO Parameterize
-            )
+            # run luma transient improvement that restores sharp edges
+            # measurements in group delay correction can inform parameters so no artificial sharpening happens, and only the original slope is restored
+            if self.rf.options.inverse_eq > -1 and self.rf.options.lti_gain != 0:
+                lti_gain = self.rf.options.lti_gain if self.rf.options.lti_gain is not None else lti_params['gain']
+                dsout = apply_adaptive_luma_transient_improvement(
+                    dsout,
+                    gain=lti_gain,
+                    threshold=lti_params['threshold']
+                )
 
             dsout = self.hz_to_output(dsout)
             self.dspicture = dsout

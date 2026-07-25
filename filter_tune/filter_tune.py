@@ -493,7 +493,6 @@ class DeemphasisFilters:
         bandpass = None
         if filter_params["nonlinear_bandpass_upper"]["value"] != 0:
             bandpass = filter_params["nonlinear_bandpass_upper"]["value"]
-        
         self.filters["NLHighPassF"] = compute_video_filters.gen_nonlinear_bandpass(
             bandpass,
             filter_params["nonlinear_highpass_freq"].get("value", 1000),
@@ -501,7 +500,6 @@ class DeemphasisFilters:
             fs / 2.0,
             block_len,
         )
-        
         self.filters["NLAmplitudeLPF"] = (
             compute_video_filters.gen_nonlinear_amplitude_lpf(
                 filter_params["nonlinear_amplitude_lpf"]["value"], fs / 2.0

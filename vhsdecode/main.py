@@ -188,6 +188,28 @@ def main(args=None, use_gui=False):
         ),
     )
     luma_group.add_argument(
+        "--inverse_eq",
+        type=int,
+        default=4,
+        help=(
+            "Number of fields to average when applying sync pulse inverse equalization (i.e. de-ringing based on the sync pulse)"
+            "\n  Default is 4. 0 disables averaging. Set to -1 to disable inverse equalization."
+        ),
+    )
+    luma_group.add_argument(
+        "--lti_gain",
+        type=float,
+        default=None,
+        help=(
+            "Sets the amount of Luma Transient Improvement to apply. `--inverse_eq` is required to be enabled for this to take effect."
+            "\n  This performs a subtle sharpening of the luma transients based on data gathered by the inverse eq process."
+            "\n  Default is determined automatically by inverse eq."
+            "\n  * 0   disabled"
+            "\n  * 0.5 half"
+            "\n  * 1   full"
+        ),
+    )
+    luma_group.add_argument(
         "--high_boost",
         metavar="High frequency boost multiplier",
         type=float,
@@ -291,6 +313,16 @@ def main(args=None, use_gui=False):
         help="Enable y comb filter, optionally specifying IRE limit.",
     )
     chroma_group = parser.add_argument_group("Chroma decoding options")
+    chroma_group.add_argument(
+        "--cagc",
+        dest="cagc_fields",
+        type=int,
+        default=0,
+        help=(
+            "Sets the number of fields to use for averaging chroma automatic gain control. Default is 0 (no averaging). "
+            "\nThis is useful for correcting chroma gain issues commonly present in camcorder recordings."
+        ),
+    )
     chroma_group.add_argument(
         "--cafc",
         "--chroma_AFC",
@@ -398,7 +430,7 @@ def main(args=None, use_gui=False):
             " some of the chroma processing."
         ),
     )
-    plot_options = "demodblock, deemphasis, raw_pulses, line_locs, rf_luma, vsync_levels"
+    plot_options = "demodblock, deemphasis, raw_pulses, line_locs, rf_luma, vsync_levels, inverse_eq"
     debug_group.add_argument(
         "--dp",
         "--debug_plot",
@@ -636,6 +668,7 @@ def main(args=None, use_gui=False):
     rf_options["cti_mix"] = args.cti_mix
     rf_options["cti_width"] = args.cti_width
     rf_options["cafc"] = args.cafc
+    rf_options["cagc_fields"] = args.cagc_fields
     rf_options["disable_right_hsync"] = args.disable_right_hsync
     rf_options["fallback_vsync"] = args.fallback_vsync
     rf_options["relaxed_line0"] = args.relaxed_line0
@@ -645,6 +678,8 @@ def main(args=None, use_gui=False):
     rf_options["export_raw_tbc"] = args.export_raw_tbc
     rf_options["tape_speed"] = args.tape_speed
     rf_options["ire0_adjust"] = args.ire0_adjust
+    rf_options["inverse_eq"] = args.inverse_eq
+    rf_options["lti_gain"] = args.lti_gain
     rf_options["detect_chroma_track_phase"] = args.detect_chroma_track_phase
     rf_options["enable_color_killer"] = args.enable_color_killer
     rf_options["disable_burst_hsync"] = args.disable_burst_hsync

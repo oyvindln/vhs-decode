@@ -3,17 +3,19 @@ from collections import deque
 
 
 class FieldAverage:
-    def __init__(self):
+    def __init__(self, chroma_agc_fields, group_delay_len):
         self._rf_level = StackableMA()
         
-        # TODO: parameterize
         # disabled by default, add docs indicating that this should be enable for noisy / home video
-        self.chroma_level_len = 0
+        self.chroma_level_len = chroma_agc_fields
         self._chroma_level_even = deque(maxlen=self.chroma_level_len)
         self._chroma_level_odd = deque(maxlen=self.chroma_level_len)
         
-        # TODO: parameterize
-        self.group_delay_len = 8
+        # -1 means this is disabled
+        if group_delay_len == -1:
+            group_delay_len = 0
+
+        self.group_delay_len = group_delay_len
         self._group_delay = deque(maxlen=self.group_delay_len)
         # self.line_length = StackableMA()
         # self.vsync_dist = StackableMA

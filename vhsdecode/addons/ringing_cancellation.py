@@ -517,7 +517,7 @@ def derive_lti_parameters(fir_kernel, noise_threshold, max_gain):
 # ADAPTIVE LTI PROCESSING KERNEL
 # -----------------------------------------------------------------------------
 @nb.njit(cache=True, fastmath=True)
-def apply_adaptive_lti(video_buf, gain, threshold):
+def apply_adaptive_luma_transient_improvement(video_buf, gain, threshold):
     """
     Applies non-linear LTI using parameters derived from the group delay kernel.
     """
