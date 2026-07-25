@@ -6,16 +6,18 @@ import scipy.fft
 # 1. NUMBA KERNEL: CAUSAL PHASE EQUALIZATION FIR
 # -----------------------------------------------------------------------------
 
+FIR_LEN = 63
+MIN_FFT_LEN = 2**9
+
 @nb.njit(cache=True, nogil=True, fastmath=True)
 def _apply_inverse_eq(picture, n_samples, causal_kernel):
     """
     Applies the causal FIR equalization filter to the video buffer.
     """
     out = np.zeros(n_samples, np.float32)
-    n_taps = len(causal_kernel)
 
     # Outer loop over causal filter taps ensures sequential, contiguous reads
-    for j in range(n_taps):
+    for j in range(FIR_LEN):
         coeff = causal_kernel[j]
             
         # Region 1: Left boundary clamping (i < j references indices < 0, clamped to picture[0])
@@ -31,24 +33,59 @@ def _apply_inverse_eq(picture, n_samples, causal_kernel):
 
 def _calc_phase_advance(S_xy, pad_len):
     """
-    Calculates the exact group delay advance (in fractional samples) 
-    from the cross-spectral density phase slope across the signal passband.
+    Calculates the required group-delay advance (in fractional samples).
+    
+    scans the Weighted R^2 to safely find the maximum coherent bandwidth 
+    and establish phase-aligned ringing cancellation.
     """
     phase = np.unwrap(np.angle(S_xy))
     freqs = scipy.fft.fftfreq(pad_len)
-    freq_percent = 0.05 # carefully tuned
+
+    # Skip the DC ledge to prevent early low-frequency lock
+    start_bin = max(2, int(pad_len * 0.02))
+    max_bins = max(start_bin + 5, int(pad_len * 0.35))
+
+    w_full = 2.0 * np.pi * freqs[start_bin:max_bins]
+    p_full = phase[start_bin:max_bins]
+    mag_full = np.abs(S_xy[start_bin:max_bins])
+
+    # High-Frequency Weighting: mag * w^2 targets the ringing resonance
+    weights_full = mag_full * (w_full ** 2)
+
+    best_end = len(w_full)
+    best_r2 = -np.inf
+    min_window = max(4, int(0.05 * len(w_full)))
     
-    # Active passband for a video sync pulse is concentrated in lower frequencies.
-    # Use the lower part of the spectrum to find the linear phase slope.
-    limit = max(2, int(pad_len * freq_percent))
+    # =========================================================================
+    # R^2 Boundary Detection & Bulk Slope
+    # =========================================================================
+    for end in range(min_window, len(w_full)):
+        w = w_full[:end]
+        p = p_full[:end]
+        wt = weights_full[:end]
+
+        wt_norm = wt / np.max(wt) if np.max(wt) > 0 else wt
+
+        slope, intercept = np.polyfit(w, p, 1, w=wt_norm)
+        fit = slope * w + intercept
+
+        p_mean = np.average(p, weights=wt_norm)
+        ss_res = np.sum(wt_norm * (p - fit) ** 2)
+        ss_tot = np.sum(wt_norm * (p - p_mean) ** 2)
+        
+        r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
+
+        if r2 > best_r2:
+            best_r2 = r2
+            best_end = end
+
+    # Isolate the optimal coherent bandwidth
+    w_opt = w_full[:best_end]
+    p_opt = p_full[:best_end]
+    wt_opt = weights_full[:best_end]
     
-    w = 2.0 * np.pi * freqs[1:limit]
-    p = phase[1:limit]
-    
-    # Fit line: p = slope * w + intercept
-    slope, _ = np.polyfit(w, p, 1)
-    
-    # Group delay is the negative derivative of phase with respect to angular frequency
+    # Calculate the rough bulk slope as our baseline
+    slope, _ = np.polyfit(w_opt, p_opt, 1, w=wt_opt)
     return -slope
 
 
@@ -239,7 +276,7 @@ def apply_inverse_equalization(
     back_porch_len,
     target_transition,
     group_delay_state,
-    noise_threshold=0.1,
+    noise_threshold=0.2,
     debug=False
 ):
     _normalize_inplace(video_buf, sync_tip_level, blanking_level)
@@ -250,7 +287,7 @@ def apply_inverse_equalization(
     win_size = pre_rise_samples + back_porch_len
     offset_rise = pre_rise_samples
     
-    min_required_len = 2 * win_size - 1
+    min_required_len = max(2 * win_size - 1, MIN_FFT_LEN)
     pad_len = scipy.fft.next_fast_len(min_required_len, real=False)
     
     S_xy = np.zeros(pad_len, dtype=np.complex128)
@@ -356,30 +393,33 @@ def apply_inverse_equalization(
     # IFFT back to time domain
     h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
     
-    # NATIVE PHASE FIX: 
+    # NATIVE PHASE FIX:
     # The Wiener deconvolution naturally places the main impulse offset by int_adv.
     # By shifting our extraction center to match this offset, we extract the causal tail 
-    # perfectly aligned
+    # perfectly aligned.
     true_center = pad_len // 2 - int_adv
     
     # Isolate causal tail taps for t >= 1
     fir_tail = h_full[true_center + 1:].copy()
-    causal_fir_len = len(fir_tail) + 1
 
-    # Assemble half-size causal kernel (65 taps)
-    fir_kernel = np.zeros(causal_fir_len, dtype=np.float32)
-    fir_kernel[1:] = fir_tail
+    # Assemble half-size causal kernel
+    fir_kernel = np.zeros(FIR_LEN, dtype=np.float32)
+    
+    # Safely insert the tail up to the maximum available filter length
+    insert_len = min(len(fir_tail), FIR_LEN - 1)
+    fir_kernel[1:1 + insert_len] = fir_tail[:insert_len]
  
     # Fade out the tail using a half-cosine window
-    fade_len = round(causal_fir_len * 0.15) # fade out last 15%
+    fade_len = round(FIR_LEN * 0.15) # fade out last 15%
     fade_axis = np.arange(fade_len, dtype=np.float64)
-    fir_kernel[causal_fir_len - fade_len:] *= 0.5 * (1.0 + np.cos(np.pi * fade_axis / fade_len))
+    fir_kernel[FIR_LEN - fade_len:] *= 0.5 * (1.0 + np.cos(np.pi * fade_axis / fade_len))
 
     # 3. Base DC Normalization: Enforce DC Unity strictly on the center tap (t=0)
-    fir_kernel[0] = 1.0 - np.sum(fir_tail)
+    # MUST sum the faded kernel itself, not the raw infinite tail
+    fir_kernel[0] = 1.0 - np.sum(fir_kernel[1:])
 
     if debug:
-        full_win_size = front_porch_len + sync_len + back_porch_len
+        full_win_size = max(front_porch_len + sync_len + back_porch_len, FIR_LEN)
         raw_pulses = []
         corrected_pulses = []
         line_indices = []
