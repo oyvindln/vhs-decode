@@ -57,10 +57,7 @@ def _apply_global_inverse_eq(picture, n_samples, fir_kernel):
     return out
 
 
-# -----------------------------------------------------------------------------
-# 2. HELPER FUNCTIONS
-# -----------------------------------------------------------------------------
-def calculate_optimal_advance(S_xy, pad_len):
+def _calc_phase_advance(S_xy, pad_len):
     """
     Calculates the exact group delay advance (in fractional samples) 
     from the cross-spectral density phase slope across the signal passband.
@@ -82,7 +79,7 @@ def calculate_optimal_advance(S_xy, pad_len):
     return -slope
 
 
-def _render_debug_plot_interactive(
+def _show_group_delay_debug(
     raw_pulses,
     corrected_pulses,
     ideal,
@@ -193,7 +190,7 @@ def _render_debug_plot_interactive(
     plt.show()
 
 
-def build_ideal_step(
+def _build_ideal_step(
     measured_center_rise,
     target_transition,
     local_sync,
@@ -215,7 +212,7 @@ def build_ideal_step(
     return ideal
 
 
-def build_ideal_hsync_pulse(
+def _build_ideal_hsync_pulse(
     front_porch_len,
     sync_len,
     target_transition,
@@ -250,19 +247,19 @@ def build_ideal_hsync_pulse(
 
 
 @nb.njit
-def normalize_inplace(video_buf, sync_tip_level, blanking_level):
+def _normalize_inplace(video_buf, sync_tip_level, blanking_level):
     scale = 2.0 / (blanking_level - sync_tip_level)
     for i in range(video_buf.size):
         video_buf[i] = (video_buf[i] - sync_tip_level) * scale - 1.0
 
 @nb.njit
-def denormalize_inplace(video_buf, sync_tip_level, blanking_level):
+def _denormalize_inplace(video_buf, sync_tip_level, blanking_level):
     scale = 0.5 * (blanking_level - sync_tip_level)
     for i in range(video_buf.size):
         video_buf[i] = (video_buf[i] + 1.0) * scale + sync_tip_level
 
 @nb.njit
-def get_levels(data):
+def _get_levels(data):
     n = data.size
     k = max(1, n // 4)
     part = np.sort(data.copy())
@@ -272,7 +269,7 @@ def get_levels(data):
 
 
 # -----------------------------------------------------------------------------
-# 3. MAIN CORRECTION FUNCTION
+# Group Delay Correction
 # -----------------------------------------------------------------------------
 def correct_group_delay(
     video_buf, 
@@ -289,7 +286,7 @@ def correct_group_delay(
     noise_threshold=0.15,
     debug=False
 ):
-    normalize_inplace(video_buf, sync_tip_level, blanking_level)
+    _normalize_inplace(video_buf, sync_tip_level, blanking_level)
     
     n_samples = len(video_buf)
     
@@ -316,7 +313,7 @@ def correct_group_delay(
         if start_loc >= 0 and start_loc + win_size < n_samples:
             
             pulse = video_buf[start_loc : start_loc + win_size]
-            measured_sync_tip_level, measured_blanking_level = get_levels(pulse)
+            measured_sync_tip_level, measured_blanking_level = _get_levels(pulse)
             mid_val = measured_sync_tip_level + (measured_blanking_level - measured_sync_tip_level) / 2.0
 
             count += 1
@@ -344,7 +341,7 @@ def correct_group_delay(
                 count_bp += 1
             local_blank_r = sum_bp / count_bp if count_bp > 0 else measured_blanking_level
 
-            ideal_for_fir = build_ideal_step(
+            ideal_for_fir = _build_ideal_step(
                 measured_center_rise, target_transition,
                 local_sync, local_blank_r, win_size
             )
@@ -370,7 +367,7 @@ def correct_group_delay(
         }
         group_delay_state.append(current_measurement)
     else:
-        denormalize_inplace(video_buf, sync_tip_level, blanking_level)
+        _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
         return video_buf
 
     rolling_S_xy = np.zeros(pad_len, dtype=np.complex128)
@@ -384,7 +381,7 @@ def correct_group_delay(
     # PART 2: Analytical Advance & Deconvolution
     # =========================================================================
     # Dynamically extract the optimal floating-point advance from phase slope
-    advance_float = calculate_optimal_advance(rolling_S_xy, pad_len)
+    advance_float = _calc_phase_advance(rolling_S_xy, pad_len)
     
     # Split into integer video shift and fractional kernel phase-shift
     int_adv = int(np.round(advance_float))
@@ -444,9 +441,9 @@ def correct_group_delay(
     if debug and len(raw_pulses) > 0:
         # Determine average levels from corrected set to construct target overlay
         all_corr_arr = np.array(corrected_pulses)
-        sync_tip_average, blanking_average = get_levels(all_corr_arr.flatten())
+        sync_tip_average, blanking_average = _get_levels(all_corr_arr.flatten())
 
-        ideal_debug = build_ideal_hsync_pulse(
+        ideal_debug = _build_ideal_hsync_pulse(
             front_porch_len,
             sync_len,
             target_transition,
@@ -456,7 +453,7 @@ def correct_group_delay(
             phase_delay=-(advance_float+int_adv),
         )
         
-        _render_debug_plot_interactive(
+        _show_group_delay_debug(
             raw_pulses,
             corrected_pulses,
             ideal_debug,
@@ -465,6 +462,82 @@ def correct_group_delay(
             line_indices,
         )
 
-    denormalize_inplace(video_buf, sync_tip_level, blanking_level)
+    _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
 
-    return video_buf
+    # Calculate optimal LTI settings from the derived FIR kernel
+    lti_params = derive_lti_parameters(
+        fir_kernel, 
+        noise_threshold=noise_threshold,
+        max_gain=1 # TODO parameterize
+    )
+
+    return video_buf, lti_params
+
+
+# -----------------------------------------------------------------------------
+# LTI PARAMETER DERIVATION FUNCTION
+# -----------------------------------------------------------------------------
+def derive_lti_parameters(fir_kernel, noise_threshold, max_gain):
+    """
+    Derives optimal Luminance Transient Improvement (LTI) parameters
+    analytically from the derived causal group-delay FIR kernel.
+    """
+    center = len(fir_kernel) // 2
+    causal_taps = fir_kernel[center:]
+    
+    # 1. Total energy vs. center tap energy
+    total_energy = np.sum(causal_taps**2)
+    if total_energy <= 1e-12:
+        return {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
+
+    center_energy = causal_taps[0]**2
+    energy_dispersion = 1.0 - (center_energy / total_energy)
+    
+    # 2. Compute second moment (spatial spread radius)
+    indices = np.arange(len(causal_taps))
+    weighted_spread = np.sum(indices * np.abs(causal_taps)) / np.sum(np.abs(causal_taps))
+    
+    # 3. Scale LTI Gain proportionally to dispersion and noise threshold
+    # High noise_threshold reduces max gain to prevent boosting noise floor
+    noise_suppression_factor = max(0.2, 1.0 - 2.0 * noise_threshold)
+    lti_gain = np.clip(energy_dispersion * 1.5 * noise_suppression_factor, 0.0, max_gain)
+    
+    # 4. Adaptive Threshold: Set above the residual high-frequency noise level
+    lti_threshold = np.clip(noise_threshold * 0.75, 0.02, 0.15)
+
+    return {
+        'gain': float(lti_gain),
+        'threshold': float(lti_threshold),
+        'blur_radius': float(weighted_spread),
+        'dispersion': float(energy_dispersion)
+    }
+
+
+# -----------------------------------------------------------------------------
+# ADAPTIVE LTI PROCESSING KERNEL
+# -----------------------------------------------------------------------------
+@nb.njit(cache=True, fastmath=True)
+def apply_adaptive_lti(video_buf, gain, threshold):
+    """
+    Applies non-linear LTI using parameters derived from the group delay kernel.
+    """
+    if gain <= 0.001:
+        return video_buf
+
+    n = len(video_buf)
+    out = video_buf.copy()
+    
+    for i in range(1, n - 1):
+        diff = video_buf[i + 1] - video_buf[i - 1]
+        abs_diff = abs(diff)
+        
+        # Only boost active step transitions exceeding noise threshold
+        if abs_diff > threshold:
+            # Local slope estimate
+            grad = video_buf[i] - video_buf[i - 1]
+            
+            # Non-linear gain scaling (tapers off near plateaus to prevent ringing)
+            edge_weight = min(1.0, abs_diff / (2.0 * threshold))
+            out[i] = video_buf[i] + (gain * edge_weight) * grad
+
+    return out

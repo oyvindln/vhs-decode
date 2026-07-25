@@ -6,7 +6,7 @@ import lddecode.utils as lddu
 from lddecode.utils import inrange
 from lddecode.utils import hz_to_output_array
 import matplotlib.pyplot as plt
-from vhsdecode.addons.ringing_cancellation import correct_group_delay
+from vhsdecode.addons.ringing_cancellation import correct_group_delay, apply_adaptive_lti
 
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
@@ -1155,7 +1155,7 @@ class FieldShared:
             back_porch_len = 60
             target_transition = 3.3
 
-            dsout = correct_group_delay(
+            dsout, lti_params = correct_group_delay(
                 dsout,
                 self.lineoffset,
                 self.linecount + self.lineoffset,
@@ -1168,6 +1168,12 @@ class FieldShared:
                 target_transition=target_transition,
                 group_delay_state=self.rf.group_delay_state,
                 debug=False
+            )
+
+            dsout = apply_adaptive_lti(
+                dsout,
+                gain=lti_params['gain'], # TODO Parameterize
+                threshold=lti_params['threshold']  # TODO Parameterize
             )
 
             dsout = self.hz_to_output(dsout)
