@@ -3,56 +3,28 @@ import numba as nb
 import scipy.fft
 
 # -----------------------------------------------------------------------------
-# 1. NUMBA KERNEL: STRICTLY CAUSAL PHASE EQUALIZATION FIR
+# 1. NUMBA KERNEL: CAUSAL PHASE EQUALIZATION FIR
 # -----------------------------------------------------------------------------
 
-fir_len = 129
-fir_len_half = fir_len // 2
-
 @nb.njit(cache=True, nogil=True, fastmath=True)
-def _apply_global_inverse_eq(picture, n_samples, fir_kernel):
-    out = np.empty(n_samples, np.float32)
-    picture = picture.astype(np.float32)
-    fir_kernel = fir_kernel.astype(np.float32)
+def _apply_inverse_eq(picture, n_samples, causal_kernel):
+    """
+    Applies the causal FIR equalization filter to the video buffer.
+    """
+    out = np.zeros(n_samples, np.float32)
+    n_taps = len(causal_kernel)
 
-    last = n_samples - 1
-    center_end = n_samples - fir_len_half
-
-    # Left edge
-    for i in range(fir_len_half):
-        s = np.float32(0.0)
-        start = i + fir_len_half
-
-        for j in range(fir_len):
-            idx = start - j
-            if idx < 0:
-                idx = 0
-            s += picture[idx] * fir_kernel[j]
-
-        out[i] = s
-
-    # Center
-    for i in range(fir_len_half, center_end):
-        s = np.float32(0.0)
-        start = i + fir_len_half
-
-        for j in range(fir_len):
-            s += picture[start - j] * fir_kernel[j]
-
-        out[i] = s
-
-    # Right edge
-    for i in range(center_end, n_samples):
-        s = np.float32(0.0)
-        start = i + fir_len_half
-
-        for j in range(fir_len):
-            idx = start - j
-            if idx > last:
-                idx = last
-            s += picture[idx] * fir_kernel[j]
-
-        out[i] = s
+    # Outer loop over causal filter taps ensures sequential, contiguous reads
+    for j in range(n_taps):
+        coeff = causal_kernel[j]
+            
+        # Region 1: Left boundary clamping (i < j references indices < 0, clamped to picture[0])
+        for i in range(0, j):
+            out[i] += picture[0] * coeff
+            
+        # Region 2: Inner core (Pure sequential memory access: picture[i - j])
+        for i in range(j, n_samples):
+            out[i] += picture[i - j] * coeff
 
     return out
 
@@ -64,10 +36,11 @@ def _calc_phase_advance(S_xy, pad_len):
     """
     phase = np.unwrap(np.angle(S_xy))
     freqs = scipy.fft.fftfreq(pad_len)
+    freq_percent = 0.05 # carefully tuned
     
     # Active passband for a video sync pulse is concentrated in lower frequencies.
-    # Use the lower 15% of the spectrum to find the linear phase slope.
-    limit = max(2, int(pad_len * 0.15))
+    # Use the lower part of the spectrum to find the linear phase slope.
+    limit = max(2, int(pad_len * freq_percent))
     
     w = 2.0 * np.pi * freqs[1:limit]
     p = phase[1:limit]
@@ -87,10 +60,6 @@ def _show_group_delay_debug(
     calc_advance,
     line_indices,
 ):
-    """
-    Renders an interactive debug UI with a Slider to scrub through individual video lines,
-    plus an aggregate overlay of all lines showing frame-wide variance.
-    """
     try:
         import matplotlib.pyplot as plt
         from matplotlib.widgets import Slider
@@ -104,15 +73,11 @@ def _show_group_delay_debug(
 
     fig = plt.figure(figsize=(15, 11))
     
-    # Subplot grid layout
-    ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2) # Single Line View (Interactive)
-    ax2 = plt.subplot2grid((3, 2), (1, 0), colspan=1) # All Lines Overlay (Persistence)
-    ax3 = plt.subplot2grid((3, 2), (1, 1), colspan=1) # FIR Kernel Response
-    ax_slider = plt.subplot2grid((3, 2), (2, 0), colspan=2) # Slider Axis
+    ax1 = plt.subplot2grid((3, 2), (0, 0), colspan=2) 
+    ax2 = plt.subplot2grid((3, 2), (1, 0), colspan=1) 
+    ax3 = plt.subplot2grid((3, 2), (1, 1), colspan=1) 
+    ax_slider = plt.subplot2grid((3, 2), (2, 0), colspan=2) 
 
-    # -------------------------------------------------------------------------
-    # Panel 1: Single Line Inspector (Interactive)
-    # -------------------------------------------------------------------------
     initial_idx = 0
     line_num = line_indices[initial_idx]
     
@@ -120,14 +85,11 @@ def _show_group_delay_debug(
     corr_line, = ax1.plot(corrected_pulses[initial_idx], label=f'Equalized Line {line_num}', color='#1f77b4', linewidth=2.2)
     ax1.plot(ideal, label='Target Reference (Phase-Aligned)', color='#7f7f7f', linestyle=':', linewidth=2)
     
-    ax1.set_title(f"Line Inspection [Line {line_num}] | Sub-sample Advance: {calc_advance:.3f} samples", fontweight='bold')
+    ax1.set_title(f"Line Inspection [Line {line_num}] | Group Delay Advance: {calc_advance:.3f} samples", fontweight='bold')
     ax1.legend(loc='upper right')
     ax1.grid(True, alpha=0.35)
     ax1.set_ylabel("Normalized Amplitude")
 
-    # -------------------------------------------------------------------------
-    # Panel 2: Persistence Overlay (All Lines Overlaid)
-    # -------------------------------------------------------------------------
     for p in raw_pulses:
         ax2.plot(p, color='#d62728', alpha=min(0.25, max(0.02, 5.0 / n_lines)), linewidth=0.8)
     
@@ -147,22 +109,14 @@ def _show_group_delay_debug(
     ]
     ax2.legend(handles=custom_lines, loc='upper right')
 
-    # -------------------------------------------------------------------------
-    # Panel 3: Equalization Kernel
-    # -------------------------------------------------------------------------
-    center = len(fir_kernel) // 2
-    x_axis = np.arange(-center, center + 1)
-    
-    ax3.plot(x_axis, fir_kernel, label='Causal FIR Taps (t >= 0)', color='purple', marker='.', linewidth=1.2)
-    ax3.set_title("Derived Equalization Kernel", fontweight='bold')
+    x_axis = np.arange(len(fir_kernel))
+    ax3.plot(x_axis, fir_kernel, label='Causal Taps (t >= 0)', color='purple', marker='.', linewidth=1.2)
+    ax3.set_title("Derived Causal Equalization Kernel", fontweight='bold')
     ax3.axhline(0, color='black', alpha=0.3)
-    ax3.set_xlim(-40, 40)
+    ax3.set_xlim(0, len(fir_kernel) - 1)
     ax3.legend(loc='upper right')
     ax3.grid(True, alpha=0.35)
 
-    # -------------------------------------------------------------------------
-    # Slider Logic
-    # -------------------------------------------------------------------------
     slider = Slider(
         ax=ax_slider,
         label='Line Index ',
@@ -180,7 +134,7 @@ def _show_group_delay_debug(
         raw_line.set_label(f'Raw Line {l_num}')
         corr_line.set_ydata(corrected_pulses[idx])
         corr_line.set_label(f'Equalized Line {l_num}')
-        ax1.set_title(f"Line Inspection [Line {l_num}] | Sub-sample Advance: {calc_advance:.3f} samples", fontweight='bold')
+        ax1.set_title(f"Line Inspection [Line {l_num}] | Group Delay Advance: {calc_advance:.3f} samples", fontweight='bold')
         ax1.legend(loc='upper right')
         fig.canvas.draw_idle()
 
@@ -246,19 +200,21 @@ def _build_ideal_hsync_pulse(
     return ideal
 
 
-@nb.njit
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _normalize_inplace(video_buf, sync_tip_level, blanking_level):
     scale = 2.0 / (blanking_level - sync_tip_level)
     for i in range(video_buf.size):
         video_buf[i] = (video_buf[i] - sync_tip_level) * scale - 1.0
 
-@nb.njit
+
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _denormalize_inplace(video_buf, sync_tip_level, blanking_level):
     scale = 0.5 * (blanking_level - sync_tip_level)
     for i in range(video_buf.size):
         video_buf[i] = (video_buf[i] + 1.0) * scale + sync_tip_level
 
-@nb.njit
+
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _get_levels(data):
     n = data.size
     k = max(1, n // 4)
@@ -271,7 +227,7 @@ def _get_levels(data):
 # -----------------------------------------------------------------------------
 # Group Delay Correction
 # -----------------------------------------------------------------------------
-def correct_group_delay(
+def apply_inverse_equalization(
     video_buf, 
     line_start, 
     line_end, 
@@ -283,7 +239,7 @@ def correct_group_delay(
     back_porch_len,
     target_transition,
     group_delay_state,
-    noise_threshold=0.15,
+    noise_threshold=0.1,
     debug=False
 ):
     _normalize_inplace(video_buf, sync_tip_level, blanking_level)
@@ -400,17 +356,28 @@ def correct_group_delay(
     # IFFT back to time domain
     h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
     
-    # Do NOT roll the kernel here. Center extraction guarantees t=0 anchoring.
-    center_full = pad_len // 2
-    fir_kernel = h_full[center_full - fir_len_half : center_full + fir_len_half + 1].copy()
+    # NATIVE PHASE FIX: 
+    # The Wiener deconvolution naturally places the main impulse offset by int_adv.
+    # By shifting our extraction center to match this offset, we extract the causal tail 
+    # perfectly aligned
+    true_center = pad_len // 2 - int_adv
     
-    # 1. Enforce strict causality
-    fir_kernel[:fir_len_half] = 0.0
-    
-    # 2. Base DC normalization
-    fir_kernel[fir_len_half] = 1.0 - np.sum(fir_kernel[fir_len_half + 1:])
+    # Isolate causal tail taps for t >= 1
+    fir_tail = h_full[true_center + 1:].copy()
+    causal_fir_len = len(fir_tail) + 1
 
-    # Collect individual line traces if debug mode is requested
+    # Assemble half-size causal kernel (65 taps)
+    fir_kernel = np.zeros(causal_fir_len, dtype=np.float32)
+    fir_kernel[1:] = fir_tail
+ 
+    # Fade out the tail using a half-cosine window
+    fade_len = round(causal_fir_len * 0.15) # fade out last 15%
+    fade_axis = np.arange(fade_len, dtype=np.float64)
+    fir_kernel[causal_fir_len - fade_len:] *= 0.5 * (1.0 + np.cos(np.pi * fade_axis / fade_len))
+
+    # 3. Base DC Normalization: Enforce DC Unity strictly on the center tap (t=0)
+    fir_kernel[0] = 1.0 - np.sum(fir_tail)
+
     if debug:
         full_win_size = front_porch_len + sync_len + back_porch_len
         raw_pulses = []
@@ -421,25 +388,18 @@ def correct_group_delay(
             start_loc = line * line_length - front_porch_len
             if start_loc >= 0 and start_loc + full_win_size < n_samples:
                 raw_p = video_buf[start_loc : start_loc + full_win_size].copy()
-                
-                # Apply filter to individual line trace for inspection
-                delayed_p = np.roll(raw_p, int_adv)
-                filtered_p = _apply_global_inverse_eq(delayed_p, full_win_size, fir_kernel)
-                corr_p = np.roll(filtered_p, -int_adv)
+                corr_p = _apply_inverse_eq(raw_p, full_win_size, fir_kernel)
 
                 raw_pulses.append(raw_p)
                 corrected_pulses.append(corr_p)
                 line_indices.append(line)
 
     # =========================================================================
-    # PART 3: Apply Strictly Causal Equalization via Data Integer Shift
+    # PART 3: Apply Strictly Causal Equalization
     # =========================================================================
-    video_buf = np.roll(video_buf, int_adv)
-    video_buf = _apply_global_inverse_eq(video_buf, n_samples, fir_kernel)
-    video_buf = np.roll(video_buf, -int_adv)
+    video_buf = _apply_inverse_eq(video_buf, n_samples, fir_kernel)
 
     if debug and len(raw_pulses) > 0:
-        # Determine average levels from corrected set to construct target overlay
         all_corr_arr = np.array(corrected_pulses)
         sync_tip_average, blanking_average = _get_levels(all_corr_arr.flatten())
 
@@ -464,11 +424,9 @@ def correct_group_delay(
 
     _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
 
-    # Calculate optimal LTI settings from the derived FIR kernel
     lti_params = derive_lti_parameters(
         fir_kernel, 
-        noise_threshold=noise_threshold,
-        max_gain=1 # TODO parameterize
+        noise_threshold=noise_threshold
     )
 
     return video_buf, lti_params
@@ -477,30 +435,28 @@ def correct_group_delay(
 # -----------------------------------------------------------------------------
 # LTI PARAMETER DERIVATION FUNCTION
 # -----------------------------------------------------------------------------
-def derive_lti_parameters(fir_kernel, noise_threshold, max_gain):
+def derive_lti_parameters(fir_kernel, noise_threshold):
     """
     Derives optimal Luminance Transient Improvement (LTI) parameters
     analytically from the derived causal group-delay FIR kernel.
     """
-    center = len(fir_kernel) // 2
-    causal_taps = fir_kernel[center:]
-    
+
     # 1. Total energy vs. center tap energy
-    total_energy = np.sum(causal_taps**2)
+    total_energy = np.sum(fir_kernel**2)
     if total_energy <= 1e-12:
         return {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
 
-    center_energy = causal_taps[0]**2
+    center_energy = fir_kernel[0]**2
     energy_dispersion = 1.0 - (center_energy / total_energy)
     
     # 2. Compute second moment (spatial spread radius)
-    indices = np.arange(len(causal_taps))
-    weighted_spread = np.sum(indices * np.abs(causal_taps)) / np.sum(np.abs(causal_taps))
+    indices = np.arange(len(fir_kernel))
+    weighted_spread = np.sum(indices * np.abs(fir_kernel)) / np.sum(np.abs(fir_kernel))
     
     # 3. Scale LTI Gain proportionally to dispersion and noise threshold
     # High noise_threshold reduces max gain to prevent boosting noise floor
     noise_suppression_factor = max(0.2, 1.0 - 2.0 * noise_threshold)
-    lti_gain = np.clip(energy_dispersion * 1.5 * noise_suppression_factor, 0.0, max_gain)
+    lti_gain = np.clip(energy_dispersion * 1.5 * noise_suppression_factor, 0.0, 1.0)
     
     # 4. Adaptive Threshold: Set above the residual high-frequency noise level
     lti_threshold = np.clip(noise_threshold * 0.75, 0.02, 0.15)
@@ -516,28 +472,32 @@ def derive_lti_parameters(fir_kernel, noise_threshold, max_gain):
 # -----------------------------------------------------------------------------
 # ADAPTIVE LTI PROCESSING KERNEL
 # -----------------------------------------------------------------------------
-@nb.njit(cache=True, fastmath=True)
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def apply_adaptive_luma_transient_improvement(video_buf, gain, threshold):
     """
     Applies non-linear LTI using parameters derived from the group delay kernel.
+    Modifies video_buf in place.
     """
-    if gain <= 0.001:
-        return video_buf
-
     n = len(video_buf)
-    out = video_buf.copy()
-    
+
+    # Preserve original samples needed for the stencil
+    prev = video_buf[0]
+
     for i in range(1, n - 1):
-        diff = video_buf[i + 1] - video_buf[i - 1]
+        curr = video_buf[i]
+        nxt = video_buf[i + 1]
+
+        diff = nxt - prev
         abs_diff = abs(diff)
-        
+
         # Only boost active step transitions exceeding noise threshold
         if abs_diff > threshold:
             # Local slope estimate
-            grad = video_buf[i] - video_buf[i - 1]
-            
+            grad = curr - prev
+
             # Non-linear gain scaling (tapers off near plateaus to prevent ringing)
             edge_weight = min(1.0, abs_diff / (2.0 * threshold))
-            out[i] = video_buf[i] + (gain * edge_weight) * grad
+            video_buf[i] = curr + (gain * edge_weight) * grad
 
-    return out
+        # Advance cached original sample
+        prev = curr

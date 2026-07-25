@@ -203,10 +203,10 @@ def main(args=None, use_gui=False):
         help=(
             "Sets the amount of Luma Transient Improvement to apply. `--inverse_eq` is required to be enabled for this to take effect."
             "\n  This performs a subtle sharpening of the luma transients based on data gathered by the inverse eq process."
-            "\n  Default is determined automatically by inverse eq."
-            "\n  * 0   disabled"
-            "\n  * 0.5 half"
-            "\n  * 1   full"
+            "\n  * (omitted) auto (default)"
+            "\n  * 0         disabled"
+            "\n  * 0.5       half"
+            "\n  * 1         full"
         ),
     )
     luma_group.add_argument(

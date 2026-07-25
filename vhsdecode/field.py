@@ -6,7 +6,7 @@ import lddecode.utils as lddu
 from lddecode.utils import inrange
 from lddecode.utils import hz_to_output_array
 import matplotlib.pyplot as plt
-from vhsdecode.addons.ringing_cancellation import correct_group_delay, apply_adaptive_luma_transient_improvement
+from vhsdecode.addons.ringing_cancellation import apply_inverse_equalization, apply_adaptive_luma_transient_improvement
 
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
@@ -1158,7 +1158,7 @@ class FieldShared:
             # Cancels ringing with an inverse equalization fir filter.
             # The filter is created from the difference between measured and expected sync pulse shape.
             if self.rf.options.inverse_eq > -1:
-                dsout, lti_params = correct_group_delay(
+                dsout, lti_params = apply_inverse_equalization(
                     dsout,
                     self.lineoffset,
                     self.linecount + self.lineoffset,
@@ -1177,7 +1177,7 @@ class FieldShared:
             # measurements in group delay correction can inform parameters so no artificial sharpening happens, and only the original slope is restored
             if self.rf.options.inverse_eq > -1 and self.rf.options.lti_gain != 0:
                 lti_gain = self.rf.options.lti_gain if self.rf.options.lti_gain is not None else lti_params['gain']
-                dsout = apply_adaptive_luma_transient_improvement(
+                apply_adaptive_luma_transient_improvement(
                     dsout,
                     gain=lti_gain,
                     threshold=lti_params['threshold']
