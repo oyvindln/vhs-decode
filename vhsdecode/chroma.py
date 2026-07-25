@@ -34,6 +34,8 @@ def chroma_automatic_gain(
     phase_sequence,
     burst_detected_line,
     sync_tip_len,
+    decode_average,
+    decode_average_count,
     smoothing_window=8,
     k=2.0
 ):
@@ -43,6 +45,18 @@ def chroma_automatic_gain(
     valid_gains = np.empty(burst_count, dtype=np.float64)
     valid_amps = np.empty(burst_count, dtype=np.float64)
     valid_count = 0
+
+    # scale the reference gain based on the average previous decodes
+    # decode average is the uncorrected average amplitude, burst abs ref is the target reference.
+    #   For example, with a decode average consisting of 8 fields, and this is current processing field 9, 
+    #   Scale the amount of gain applied to use 8/9 the ratio of these values and 1/9 the ratio of the actual measurement
+    if decode_average_count > 0:
+        decode_average_numerator = decode_average_count / (decode_average_count + 1)
+        decode_average_denominator = 1 / (decode_average_count + 1)
+        decode_average_gain = (burst_abs_ref / decode_average) * decode_average_numerator
+    else:
+        decode_average_gain = 0
+        decode_average_denominator = 1
 
     # extract gain values and track valid amplitudes
     for i in range(burst_count):
@@ -63,11 +77,16 @@ def chroma_automatic_gain(
         median_gain = np.median(active_gains)
         mad_gain = np.median(np.abs(active_gains - median_gain))
         max_allowable_gain = median_gain + (k * mad_gain)
+        min_allowable_gain = median_gain - k * mad_gain
     else:
-        max_allowable_gain = 1.0
+        max_allowable_gain = 1
+        min_allowable_gain = 0
 
     # clamp gains
-    clamped_gains = np.minimum(raw_gains, max_allowable_gain)
+    clamped_gains = np.clip(raw_gains, min_allowable_gain, max_allowable_gain)
+
+    # apply gain averaging across fields
+    clamped_gains = decode_average_gain + (clamped_gains * decode_average_denominator)
 
     # calculate smoothing
     smoothed_gains = np.empty(burst_count, dtype=np.float64)
@@ -1695,9 +1714,6 @@ def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
         porch_rms_total += lddu.rms(
             uphet[linestart + burstarea[0] : linestart + burstarea[1]]
         )
-    field.rf.field_averages.chroma_level.push(
-        porch_rms_total / (linesout - STARTING_LINE)
-    )
 
     return uphet
 
@@ -1970,15 +1986,31 @@ def process_chroma(
             uphet = comb_c_pal(uphet, outwidth)
 
     # Chroma AGC
-    mean_rms, chroma_noise_floor = chroma_automatic_gain(
+    # average ACG over each field
+    # save a separate gain per field
+    chroma_average_state = (
+        field.rf.field_averages.chroma_level_even
+        if field.field_number % 2 == 0 else
+        field.rf.field_averages.chroma_level_odd
+    )
+
+    decode_average_count = len(chroma_average_state)
+    if decode_average_count > 0:
+        decode_average = np.mean([c[0] for c in chroma_average_state])
+    else:
+        decode_average = 0
+
+    field_average, chroma_noise_floor = chroma_automatic_gain(
         uphet,
         field.rf.SysParams["burst_abs_ref"],
         field.phase_sequence,
         field.burst_detected_line,
-        math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"]))
+        math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"])),
+        decode_average,
+        decode_average_count
     )
 
-    field.rf.field_averages.chroma_level.push(mean_rms)
+    chroma_average_state.append((field_average, chroma_noise_floor))
 
     if field.rf.options.cti_mix != 0:
         chroma_transient_improvement(

@@ -4,7 +4,7 @@ import numpy as np
 import traceback
 import scipy.signal as sps
 import threading
-from collections import namedtuple, deque
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -977,10 +977,6 @@ class VHSRFDecode(ldd.RFDecode):
             ), StackableMA(window_average=self.SysParams["FPS"] / 2)
 
         self._field_averages = FieldAverage()
-
-        # state for the group delay processing that happens in FielShared.downscale
-        # TODO: parameterize
-        self.group_delay_state = deque(maxlen=8)#round(self.SysParams["FPS"]))
 
         # TODO: This should be managed elsewhere.
         self._compute_linelocs_issues = False
