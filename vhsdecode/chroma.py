@@ -1717,6 +1717,7 @@ def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
 
     return uphet
 
+FFT_LEN=512
 
 @cache
 def _gen_chroma_fft_filter(
@@ -1751,10 +1752,66 @@ def _gen_chroma_fft_filter(
     return mask
 
 
+def _chroma_phase_correction_from_sync(
+    fsc,
+    color_under_carrier_f,
+    group_delay_state,
+    fft_len
+) -> np.ndarray:
+    freqs_up = sps_fft.rfftfreq(fft_len, d=1.0 / (fsc * 4.0))
+    group_delay_state_fft_len = 512
+
+    phase_correction = np.zeros_like(freqs_up, dtype=np.float64)
+    rolling_S_xy = np.zeros(group_delay_state_fft_len, dtype=np.complex128)
+
+    scale_factor = group_delay_state_fft_len / fft_len
+    
+    for measurement in group_delay_state:
+        rolling_S_xy += measurement.get('s_xy')
+        phase_error_base = -np.unwrap(np.angle(rolling_S_xy))
+            
+        # Upscale the base 512 phase error vector to match the rfft bin count
+        old_x = np.linspace(0.0, 1.0, len(phase_error_base))
+        new_x = np.linspace(0.0, 1.0, len(freqs_up))
+        
+        base_complex = np.exp(-1j * phase_error_base)
+        upscaled_complex = (
+            np.interp(new_x, old_x, base_complex.real) + 
+            1j * np.interp(new_x, old_x, base_complex.imag)
+        )
+        phase_error = -np.unwrap(np.angle(upscaled_complex))
+
+        w_axis = 2.0 * np.pi * np.linspace(0.0, 0.5, len(freqs_up))
+        w_safe = np.where(np.abs(w_axis) < 1e-6, 1e-6, w_axis)
+        measured_group_delay = -np.gradient(phase_error, w_safe)
+
+        cu_norm_f = color_under_carrier_f / (fsc * 4.0)
+        chroma_band_mask = (freqs_up > (cu_norm_f - 0.08 * fsc)) & (freqs_up < (cu_norm_f + 0.08 * fsc))
+
+        delay_modulation = np.clip(
+            measured_group_delay / np.maximum(np.percentile(np.abs(measured_group_delay), 90), 1e-12), 
+            0.5, 2.5
+        )
+
+        # Weigh this scaling statistically based on how much theroetical reslution
+        # is in sync pulse based fft vs. the burst phase fft, burst phase is higher resolution
+        scaling_weight = np.clip(scale_factor, 0.0, 1.0)
+
+        # Apply weighted phase correction
+        phase_correction[chroma_band_mask] = (
+            phase_error[chroma_band_mask] * 
+            delay_modulation[chroma_band_mask] * 
+            scaling_weight
+        )
+
+    return np.exp(-1j * phase_correction)
+
+
 def filter_chroma_fft(
     uphet: np.ndarray, 
     fsc: float,
     color_under_carrier_f: float,
+    group_delay_state,
     bw_lower_hz: float,               # Lower chroma bandwidth (1.3 MHz below fsc)
     heterodyne_attenuation_db: float, # Rejection target at sum product (dB)
     order: int = 2,                   # filter order
@@ -1777,23 +1834,40 @@ def filter_chroma_fft(
 
     x_padded = np.pad(uphet, (pad_left, pad_right), mode='reflect')
 
-    mask = _gen_chroma_fft_filter(
+    # Generates the Super-Gaussian bandpass + luma group delay phase correction combined
+    chroma_filter_fft = _gen_chroma_fft_filter(
         N_up,
         fsc,
         color_under_carrier_f,
         bw_lower_hz,
         heterodyne_attenuation_db,
-        order
+        order,
     )
 
-    # apply filter against Forward Real FFT
+    # Also uses impulse response curves from the luma data for phase delay and amplitude
+    chroma_sync_group_delay_fft = _chroma_phase_correction_from_sync(
+        fsc,
+        color_under_carrier_f,
+        group_delay_state=group_delay_state,
+        fft_len=len(x_padded)
+    )
+
+
     F_filtered = sps_fft.rfft(x_padded)
-    F_filtered *= mask
+    F_filtered *= chroma_filter_fft  # Applies both attenuation and group delay pre-correction simultaneously
+    F_filtered *= chroma_sync_group_delay_fft  # Applies the phase group delay in terms of color under fs to use it to correct phase issues (blurry reds)
+    # this acts as a way to derive the original frequency information and exact timeings by using
+    # the differential of the signals to derive the luma and chroma filters
+    # optimized over aa known spec
 
-    # return to real signal
+    # this links the two TBCs together sync -> burst phase; and burst_phase -> sync
+    # Closed-Loop Time Based Correction
+    # uses FFT theories to influence the both TBC paths for feed forward correction
+
+    # TODO: incorporate downscaled RF data to get the real part of this feedfoward data
+    #       so we can get the real part of luma / chroma amplitude (luma has constant amplitude, no phase change)
+
     chroma_padded = sps_fft.irfft(F_filtered, n=N_up)
-
-    # remove padding
     return chroma_padded[pad_left : pad_left + N_raw]
 
 
@@ -1970,6 +2044,7 @@ def process_chroma(
         uphet,
         field.rf.SysParams["fsc_mhz"] * 1e6,
         field.rf.DecoderParams["color_under_carrier"],
+        field.rf.field_averages.group_delay,
         1.3e6, # lower chroma bandwidth (roughly this for PAL / NTSC)
         80.0   # heterodyne up-mixing attenuation
     )
