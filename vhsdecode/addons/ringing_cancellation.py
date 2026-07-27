@@ -14,7 +14,7 @@ import matplotlib.ticker as mticker
 FSC=3.579545 # TODO: parameterize (used only in debug)
 FSC_RATIO = 4 # sets ratio of FFT length to fsc
 
-FIR_LEN = 63
+FIR_LEN = 127
 FFT_LEN = 512
 
 def _make_inverse_eq(fir_len):
@@ -54,39 +54,6 @@ def _make_inverse_eq(fir_len):
     return _apply_inverse_eq
 
 _apply_inverse_eq = _make_inverse_eq(FIR_LEN)
-
-def _fit_smooth_phase(S_xy, smooth=1):
-    phase = -np.unwrap(np.angle(S_xy))
-    mag = np.abs(S_xy)
-
-    # frequency bins to mask for horizontal smearing
-    w = 2 * np.pi * np.fft.fftfreq(len(S_xy))
-    mask = (w > 0.01 * np.pi) & (w < 0.2 * np.pi)
-
-    w_fit = w[mask]
-    phase_fit = phase[mask]
-
-    weight = mag[mask]
-    weight /= np.max(weight)
-
-    slope, intercept = np.polyfit(
-        w_fit, phase_fit, 1, w=weight,
-    )
-
-    excess = phase_fit - (slope * w_fit + intercept)
-    spline = UnivariateSpline(
-        w_fit, excess, w=weight, s=smooth*len(w_fit)
-    )
-
-    phase_corr = np.zeros_like(phase)
-    phase_corr[mask] = slope * w_fit + intercept + spline(w_fit)
-
-    half = len(phase) // 2
-    phase_corr[half + 1:] = -phase_corr[1:half][::-1]
-    phase_corr[0] = 0.0
-    phase_corr[half] = 0.0
-
-    return phase_corr, -slope
 
 
 def _build_fsc_mask(n, width_bins=3):
@@ -324,6 +291,16 @@ def apply_inverse_equalization(
     S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
     S_yy = np.zeros(FFT_LEN, dtype=np.float64)
 
+    rolling_S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
+    rolling_S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
+    rolling_S_yy = np.zeros(FFT_LEN, dtype=np.float64)
+
+    # get previous iteration's rolling averages
+    for measurement in group_delay_state:
+        rolling_S_xy += measurement['s_xy']
+        rolling_S_xx += measurement['s_xx']
+        rolling_S_yy += measurement['s_yy']
+
     for line in range(line_start, line_end + 1):
         loc = line * line_length
         start_loc = loc + sync_len - pre_rise_samples
@@ -376,156 +353,64 @@ def apply_inverse_equalization(
             Y = scipy.fft.fft(pad_pulse)
             # measure the pulse's expected frequency response, given the sync pulse parameters
             X = scipy.fft.fft(pad_ideal)
-            
+
+            # ONLY accumulate here. No Wiener math inside this loop.
             S_xy += X * np.conj(Y)
             S_xx += np.abs(X)**2
+            S_yy += np.abs(Y)**2
 
+    # Save current chunk to state (Added missing 's_yy')
     if count > 0:
         current_measurement = {
             's_xy': S_xy,
             's_xx': S_xx,
+            's_yy': S_yy,  
         }
         group_delay_state.append(current_measurement)
     else:
         _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
-        return video_buf
+        return video_buf, {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
 
-    rolling_S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
-    rolling_S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
-
-    for measurement in group_delay_state:
-        rolling_S_xy += measurement['s_xy']
-        rolling_S_xx += measurement['s_xx']
+    # COMBINE historical rolling state with the current chunk's measurements
+    total_S_xy = rolling_S_xy + S_xy
+    total_S_yy = rolling_S_yy + S_yy
 
     # =========================================================================
-    # PART 2: Analyze Pulse Structure
-    #     2A: Group Delay (Horizontal Smear)
-    #     2B: Ringing
-    #     2C: Chroma carrier leakage
+    # PART 2: Iterative Feed-Forward Wiener Deconvolution
     # =========================================================================
+    num_passes = 5  # Optimize by dialing this between 2 and 5
+    
+    # Initialize the integrated frequency-domain filter
+    H_total = np.ones(FFT_LEN, dtype=np.complex128)
+    
+    freqs = np.abs(np.fft.fftfreq(FFT_LEN))
+    hf_mask = freqs > 0.35  
 
-    # rolling_S_xy = _suppress_color_carrier_fft(rolling_S_xy)
-    # rolling_S_xy = _taper_delta_fft(rolling_S_xy)
+    for pass_idx in range(num_passes):
+        # 1. Update spectra based on the current integrated correction
+        # Use total_S_xy and total_S_yy so the current frame is included!
+        current_S_xy = total_S_xy * np.conj(H_total)
+        current_S_yy = total_S_yy * (np.abs(H_total) ** 2)
 
-    phase_error, advance_float = _fit_smooth_phase(
-        rolling_S_xy
-    )
+        # 2. Extract noise floor dynamically using standard NumPy MAD
+        hf_power = current_S_yy[hf_mask]
+        hf_median = np.median(hf_power)
+        hf_mad = np.median(np.abs(hf_power - hf_median))
+        
+        noise_floor = hf_median + 3.0 * hf_mad
+        nsr_penalty = noise_floor * noise_threshold
 
-    H_measured = (rolling_S_xy / np.maximum(rolling_S_xx, 1e-12))
-    # Normalize DC
-    H_measured /= max(np.abs(H_measured[0]), 1e-12)
+        # 3. Calculate the residual Wiener correction step
+        denom = current_S_yy + nsr_penalty
+        denom[denom == 0] = 1e-12
+        
+        H_step = current_S_xy / denom
 
-    # ------------------------------------------------------------
-    # 2A Remove horizontal smear (phase only)
-    # ------------------------------------------------------------
-    smear_strength = 1
-    smear_gd_sigma = FFT_LEN / FIR_LEN # group delay measurement smoothing
-    smear_weight_sigma = FFT_LEN / (2 * FIR_LEN) # correction transition smoothing
+        # 4. Integrate the residual step into the total filter
+        H_total *= H_step
 
-    # Estimate group delay stability
-    phase = -np.unwrap(np.angle(H_measured))
-    w = 2.0 * np.pi * np.fft.fftfreq(len(H_measured))
-    group_delay = -np.gradient(phase, w)
-
-    # Smooth group delay to find broad delay behavior
-    gd_smooth = scipy.ndimage.gaussian_filter1d(
-        group_delay, smear_gd_sigma
-    )
-
-    # Difference from smooth delay = non-smear behavior
-    gd_error = np.abs(group_delay - gd_smooth)
-    gd_scale = np.percentile(gd_error, 95)
-
-    smear_weight = np.clip(
-        1.0 - gd_error / max(gd_scale, 1e-12), 0.0, 1.0
-    )
-    smear_weight = scipy.ndimage.gaussian_filter1d(
-        smear_weight, smear_weight_sigma
-    )
-
-    phase_error_weighted = phase_error * smear_weight
-
-    # Apply phase-only correction
-    H_smear = np.exp(
-        -1j *
-        smear_strength *
-        phase_error_weighted
-    )
-
-    # ------------------------------------------------------------
-    # 2B Remove ringing
-    # ------------------------------------------------------------
-    ring_strength = 1
-    ring_sigma = 1 # FFT_LEN / FIR_LEN
-
-    # remove color carrier leakage from this measurement
-    fsc_mask = _build_fsc_mask(FFT_LEN, width_bins=4)
-    H_after_smear = H_measured * H_smear * (1.0 - fsc_mask) + fsc_mask
-
-    H_target = np.abs(H_after_smear) * np.exp(
-        1j * scipy.ndimage.gaussian_filter1d(
-            np.unwrap(np.angle(H_after_smear)), ring_sigma
-        )
-    )
-
-    H_residual = H_after_smear - H_target
-
-    # Keep causal ringing tail only
-    h_residual=scipy.fft.ifft(H_residual).real
-
-    peak=np.argmax(np.abs(h_residual))
-    h_residual[:peak + 1] = 0
-
-    ring_window=scipy.signal.windows.tukey(
-        FIR_LEN, alpha=0.25
-    )
-
-    h_residual[peak + 1:peak + 1 + FIR_LEN] *= ring_window[:min(
-        FIR_LEN, len(h_residual) - peak - 1
-    )]
-
-    h_residual[peak+1+FIR_LEN:] = 0
-
-    H_ring_error = scipy.fft.fft(h_residual)
-
-    ring_gain = np.sqrt(
-        np.sum(np.abs(H_residual) ** 2) /
-        max(np.sum(np.abs(H_ring_error) ** 2), 1e-12)
-    )
-
-    H_ring = 1.0 - ring_strength * H_ring_error * ring_gain
-
-    # ------------------------------------------------------------
-    # 2C Remove chroma leakage following smear slope
-    # ------------------------------------------------------------
-    chroma_strength = 1
-
-    # Use same phase slope as smear correction
-    H_chroma_slope = np.exp(-1j * phase_error)
-    # Limit correction to carrier region
-    H_chroma_slope = H_chroma_slope * fsc_mask + (1.0 - fsc_mask)
-
-    # Measure remaining carrier error
-    H_after_chroma_slope = H_after_smear * H_chroma_slope
-    H_chroma_residual = (H_after_chroma_slope - 1.0) * fsc_mask
-
-    # Convert residual to causal correction
-    h_chroma = scipy.fft.ifft(H_chroma_residual).real
-    h_chroma[0] = 0
-    h_chroma[FIR_LEN:] = 0
-    h_chroma[1:FIR_LEN] *= scipy.signal.windows.tukey(
-        FIR_LEN-1, alpha=0.25
-    )
-    H_chroma_error = scipy.fft.fft(h_chroma)
-
-    H_chroma = 1.0 - chroma_strength * H_chroma_error
-
-    ### assemble the filters
-    H_inv = (
-        H_smear
-      * H_ring
-      * H_chroma
-    )
+    # Pass the final integrated filter into Part 3 for IFFT and causality windowing
+    H_inv = H_total
 
     ######################################################
     # TODO: Might be able to detect head switching pulses.
@@ -536,8 +421,16 @@ def apply_inverse_equalization(
     # =========================================================================
     # PART 3: Build Causal Inverse Equalization FIR Filter
     # =========================================================================
+    
+    # 1. Anti-Aliasing Frequency Taper (Roll-off near Nyquist)
+    # Smoothly attenuates H_inv between 0.35 and 0.45 normalized frequency
+    freqs_norm = np.abs(np.fft.fftfreq(FFT_LEN))
+    taper = np.clip((0.45 - freqs_norm) / 0.10, 0.0, 1.0)
+    # Cosine smoothing for the transition band
+    taper_smooth = 0.5 * (1.0 - np.cos(np.pi * taper)) 
+    H_inv *= taper_smooth
 
-    # IFFT back to time domain
+    # 2. IFFT back to time domain
     h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
     
     # Make FIR causal
@@ -550,6 +443,14 @@ def apply_inverse_equalization(
         true_center + 1:
         true_center + FIR_LEN
     ]
+    
+    # 3. Anti-Aliasing Time Window (Prevent Gibbs Truncation)
+    # Create a right-sided Tukey window: flat at the center tap, fading to 0 at the tail
+    # alpha=0.5 means the final 50% of the kernel gently tapers down
+    tail_window = scipy.signal.windows.tukey(FIR_LEN * 2, alpha=0.5)[FIR_LEN:]
+    fir_kernel *= tail_window
+
+    # Normalize to preserve DC gain
     fir_kernel /= np.sum(fir_kernel)
 
     # =========================================================================
