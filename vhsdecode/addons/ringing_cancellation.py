@@ -320,8 +320,9 @@ def apply_inverse_equalization(
     start_idx = (FFT_LEN - win_size) // 2
     count = 0
 
-    pulses_padded = []
-    pulses_ideal = []
+    S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
+    S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
+    S_yy = np.zeros(FFT_LEN, dtype=np.float64)
 
     for line in range(line_start, line_end + 1):
         loc = line * line_length
@@ -371,24 +372,18 @@ def apply_inverse_equalization(
             pad_ideal[start_idx : start_idx + win_size] = d_ideal
             pad_pulse[start_idx : start_idx + win_size] = d_pulse
 
-            pulses_padded.append(pad_pulse)
-            pulses_ideal.append(pad_pulse)
+            # measure pulse's actual frequency response
+            Y = scipy.fft.fft(pad_pulse)
+            # measure the pulse's expected frequency response, given the sync pulse parameters
+            X = scipy.fft.fft(pad_ideal)
+            
+            S_xy += X * np.conj(Y)
+            S_xx += np.abs(X)**2
 
     if count > 0:
-        F_batch = scipy.fft.fft(
-            np.asarray(pulses_padded + pulses_ideal),
-            axis=1,
-        )
-
-        # measure pulse's actual frequency response
-        Y = F_batch[:len(pulses_padded)]
-        # measure expected frequency response
-        X = F_batch[len(pulses_padded):]
-
         current_measurement = {
-            's_xy': np.sum(X * np.conj(Y), axis=0),
-            's_xx': np.sum(np.abs(X)**2, axis=0),
-            's_yy': np.sum(np.abs(Y)**2, axis=0),
+            's_xy': S_xy,
+            's_xx': S_xx,
         }
         group_delay_state.append(current_measurement)
     else:
@@ -397,12 +392,10 @@ def apply_inverse_equalization(
 
     rolling_S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
     rolling_S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
-    rolling_S_yy = np.zeros(FFT_LEN, dtype=np.float64)
 
     for measurement in group_delay_state:
         rolling_S_xy += measurement['s_xy']
         rolling_S_xx += measurement['s_xx']
-        rolling_S_yy += measurement['s_yy']
 
     # =========================================================================
     # PART 2: Analyze Pulse Structure
@@ -597,8 +590,6 @@ def apply_inverse_equalization(
                 corrected_ffts.append(corrected_fft)
                 delta_ffts.append(delta_fft)
 
-                pulse_ffts
-
         all_corr_arr = np.array(corrected_pulses)
         sync_tip_average, blanking_average = _get_levels(all_corr_arr.flatten())
 
@@ -762,7 +753,7 @@ def _show_group_delay_debug(
     # =========================================================================
     # SUBTRACTION SPECTROGRAM
     # =========================================================================
-    image = ax5.imshow(
+    ax5.imshow(
         delta_spec_data,
         aspect='auto',
         origin='lower',
@@ -777,7 +768,7 @@ def _show_group_delay_debug(
     # =========================================================================
     # CORRECTED SPECTROGRAM
     # =========================================================================
-    image = ax6.imshow(
+    ax6.imshow(
         corrected_spec_data,
         aspect='auto',
         origin='lower',
@@ -881,30 +872,24 @@ def derive_lti_parameters(fir_kernel, noise_threshold):
 # -----------------------------------------------------------------------------
 @nb.njit(cache=True, nogil=True, fastmath=True)
 def apply_adaptive_luma_transient_improvement(video_buf, gain, threshold):
-    """
-    Applies non-linear LTI using parameters derived from the group delay kernel.
-    Modifies video_buf in place.
-    """
     n = len(video_buf)
-
-    # Preserve original samples needed for the stencil
     prev = video_buf[0]
 
     for i in range(1, n - 1):
         curr = video_buf[i]
         nxt = video_buf[i + 1]
 
-        diff = nxt - prev
-        abs_diff = abs(diff)
+        # 1st derivative (span of 2 pixels) to check threshold
+        abs_diff = abs(nxt - prev)
 
-        # Only boost active step transitions exceeding noise threshold
         if abs_diff > threshold:
-            # Local slope estimate
-            grad = curr - prev
+            # 2nd derivative (Laplacian) isolates the high-frequency edge energy symmetrically
+            laplacian = prev - 2.0 * curr + nxt
 
-            # Non-linear gain scaling (tapers off near plateaus to prevent ringing)
+            # Non-linear gain taper
             edge_weight = min(1.0, abs_diff / (2.0 * threshold))
-            video_buf[i] = curr + (gain * edge_weight) * grad
+            
+            # Subtracting the Laplacian acts as a symmetric unsharp mask / peaking filter
+            video_buf[i] = curr - (gain * edge_weight * laplacian)
 
-        # Advance cached original sample
         prev = curr
