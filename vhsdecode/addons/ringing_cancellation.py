@@ -17,27 +17,43 @@ FSC_RATIO = 4 # sets ratio of FFT length to fsc
 FIR_LEN = 63
 FFT_LEN = 512
 
-@nb.njit(cache=True, nogil=True, fastmath=True)
-def _apply_inverse_eq(picture, n_samples, causal_kernel):
-    """
-    Applies the causal FIR equalization filter to the video buffer.
-    """
-    out = np.zeros(n_samples, np.float32)
+def _make_inverse_eq(fir_len):
+    @nb.njit(
+        "float32[:](float32[::1], int64, float32[::1])",
+        cache=True,
+        nogil=True,
+        fastmath=True
+    )
+    def _apply_inverse_eq(picture, n_samples, causal_kernel):
+        causal_kernel = causal_kernel[::-1].copy()
+        out = np.empty(n_samples, np.float32)
 
-    # Outer loop over causal filter taps ensures sequential, contiguous reads
-    for j in range(FIR_LEN):
-        coeff = causal_kernel[j]
-            
-        # Region 1: Left boundary clamping (i < j references indices < 0, clamped to picture[0])
-        for i in range(0, j):
-            out[i] += picture[0] * coeff
-            
-        # Region 2: Inner core (Pure sequential memory access: picture[i - j])
-        for i in range(j, n_samples):
-            out[i] += picture[i - j] * coeff
+        first = picture[0]
 
-    return out
+        for i in nb.prange(n_samples):
+            acc = 0.0
 
+            if i < fir_len - 1:
+                start = fir_len - 1 - i
+
+                for j in range(start, fir_len):
+                    acc += picture[i - fir_len + 1 + j] * causal_kernel[j]
+
+                for j in range(start):
+                    acc += first * causal_kernel[j]
+
+            else:
+                base = i - fir_len + 1
+
+                for j in range(fir_len):
+                    acc += picture[base + j] * causal_kernel[j]
+
+            out[i] = acc
+
+        return out
+    return _apply_inverse_eq
+
+_apply_inverse_eq = _make_inverse_eq(FIR_LEN)
 
 def _fit_smooth_phase(S_xy, smooth=1):
     phase = -np.unwrap(np.angle(S_xy))
@@ -72,6 +88,7 @@ def _fit_smooth_phase(S_xy, smooth=1):
 
     return phase_corr, -slope
 
+
 def _build_fsc_mask(n, width_bins=3):
     """
     Creates a soft mask around the color subcarrier.
@@ -92,6 +109,7 @@ def _build_fsc_mask(n, width_bins=3):
 
     return mask
 
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _build_ideal_step(
     measured_center_rise,
     target_transition,
@@ -114,6 +132,7 @@ def _build_ideal_step(
     return ideal
 
 
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _build_ideal_hsync_pulse(
     front_porch_len,
     sync_len,
@@ -289,26 +308,21 @@ def apply_inverse_equalization(
 
     n_samples = len(video_buf)
 
+    # =========================================================================
+    # PART 1: Calculate Pulse Shape & Spectra (Rising Edge Only)
+    # =========================================================================
     pre_rise_samples = int(np.round(0.25 * sync_len))
     win_size = pre_rise_samples + back_porch_len
     win_size -= win_size % 4 
     offset_rise = pre_rise_samples
 
-    S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
-    S_xx = np.zeros(FFT_LEN, dtype=np.complex128)
-    S_yy = np.zeros(FFT_LEN, dtype=np.float64)
-
-    pulse_ffts = []
-    delta_ffts = []
-    corrected_ffts = []
-
     win = scipy.signal.windows.tukey(win_size, alpha=0.05)
     start_idx = (FFT_LEN - win_size) // 2
     count = 0
 
-    # =========================================================================
-    # PART 1: Calculate Pulse Shape & Spectra (Rising Edge Only)
-    # =========================================================================
+    pulses_padded = []
+    pulses_ideal = []
+
     for line in range(line_start, line_end + 1):
         loc = line * line_length
         start_loc = loc + sync_len - pre_rise_samples
@@ -357,20 +371,24 @@ def apply_inverse_equalization(
             pad_ideal[start_idx : start_idx + win_size] = d_ideal
             pad_pulse[start_idx : start_idx + win_size] = d_pulse
 
-            # measure pulse's actual frequency response
-            Y = scipy.fft.fft(pad_pulse)
-            # measure the pulse's expected frequency response, given the sync pulse parameters
-            X = scipy.fft.fft(pad_ideal)
-            
-            S_xy += X * np.conj(Y)
-            S_xx += np.abs(X)**2
-            S_yy += np.abs(Y)**2
+            pulses_padded.append(pad_pulse)
+            pulses_ideal.append(pad_pulse)
 
     if count > 0:
+        F_batch = scipy.fft.fft(
+            np.asarray(pulses_padded + pulses_ideal),
+            axis=1,
+        )
+
+        # measure pulse's actual frequency response
+        Y = F_batch[:len(pulses_padded)]
+        # measure expected frequency response
+        X = F_batch[len(pulses_padded):]
+
         current_measurement = {
-            's_xy': S_xy,
-            's_xx': S_xx,
-            's_yy': S_yy,
+            's_xy': np.sum(X * np.conj(Y), axis=0),
+            's_xx': np.sum(np.abs(X)**2, axis=0),
+            's_yy': np.sum(np.abs(Y)**2, axis=0),
         }
         group_delay_state.append(current_measurement)
     else:
@@ -519,7 +537,7 @@ def apply_inverse_equalization(
     ######################################################
     # TODO: Might be able to detect head switching pulses.
     #       The ringing pattern clearly differs when the head switch occurs.
-    #       This could be used to detect the switching position, measure it, and correct it's slope
+    #       Detect the switching position, measure it, and correct it's slope
     ######################################################
 
     # =========================================================================
@@ -553,6 +571,9 @@ def apply_inverse_equalization(
 
     if debug:
         full_win_size = max(front_porch_len + sync_len + back_porch_len, FIR_LEN)
+        pulse_ffts = []
+        delta_ffts = []
+        corrected_ffts = []
         raw_pulses = []
         corrected_pulses = []
         line_indices = []
