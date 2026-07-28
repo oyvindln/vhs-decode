@@ -35,7 +35,6 @@ def _make_interpolated_inverse_eq(fir_len, delay_offset):
         h_interp = np.empty(fir_len, dtype=np.float32)
 
         for k in range(n_samples):
-            # 1. Calculate linear interpolation factor alpha along the line (0.0 to 1.0)
             alpha = np.float32(k) / np.float32(n_samples - 1) if n_samples > 1 else np.float32(0.0)
             one_minus_alpha = np.float32(1.0) - alpha
 
@@ -50,7 +49,6 @@ def _make_interpolated_inverse_eq(fir_len, delay_offset):
             for j in range(fir_len):
                 idx = read_head - j
                 
-                # Boundary clamping
                 if idx < 0:
                     val = first
                 elif idx >= n_samples:
@@ -303,7 +301,7 @@ def apply_inverse_equalization(
         noise_mag_profile = np.zeros(FFT_LEN, dtype=np.float64)
 
     # =========================================================================
-    # PARTS 1, 2, 3: Per-Line Wiener Deconvolution with 1000-Pulse Ring Buffer
+    # PARTS 1 & 2: Pass 1 - Line Measurement & 1000-Pulse Ring Buffer Validation
     # =========================================================================
     MAX_HISTORY_PULSES = 1000
 
@@ -332,23 +330,20 @@ def apply_inverse_equalization(
     freqs = np.abs(np.fft.fftfreq(FFT_LEN))
     hf_mask = freqs > 0.35  
 
-    count = 0
     raw_line_spectra = []
     raw_line_rises = []
     
-    default_kernel = np.zeros(FIR_LEN, dtype=np.float32)
-    default_kernel[DELAY_OFFSET] = 1.0
-    last_valid_kernel = default_kernel
     last_valid_h_inv = np.ones(FFT_LEN, dtype=np.complex128)
+    last_valid_rise = float(offset_rise)
 
     for line in range(line_start, line_end + 1):
         loc = line * line_length
         start_loc = loc + sync_len - pre_rise_samples
         
-        S_xy = np.zeros(FFT_LEN, dtype=np.complex128)
-        S_yy = np.zeros(FFT_LEN, dtype=np.float64)
         measured_center_rise = float(offset_rise)
         is_outlier = False
+        current_s_xy = np.zeros(FFT_LEN, dtype=np.complex128)
+        current_s_yy = np.zeros(FFT_LEN, dtype=np.float64)
 
         if start_loc >= 0 and start_loc + win_size < n_samples:
             pulse = video_buf[start_loc : start_loc + win_size]
@@ -409,8 +404,8 @@ def apply_inverse_equalization(
             current_s_xy = X * np.conj(Y)
             current_s_yy = np.abs(Y)**2
 
-            # --- 1000-PULSE RING BUFFER OUTLIER REJECTION ---
-            if state_dict['count'] > (525 / 2): # roughly a field's work of lines in order to honor the rolling average
+            # Ring buffer outlier check against the 1000-pulse history
+            if state_dict['count'] > 10:
                 historical_mean_s_yy = np.mean(state_dict['s_yy_history'][:state_dict['count']], axis=0)
                 spectral_distance = np.mean(np.abs(current_s_yy - historical_mean_s_yy))
                 avg_power_magnitude = np.mean(historical_mean_s_yy) + 1e-12
@@ -425,16 +420,15 @@ def apply_inverse_equalization(
                 state_dict['s_yy_history'][ptr] = current_s_yy
                 state_dict['ptr'] = (ptr + 1) % MAX_HISTORY_PULSES
                 state_dict['count'] = min(MAX_HISTORY_PULSES, state_dict['count'] + 1)
-                count += 1
         else:
             is_outlier = True
 
         if is_outlier:
             raw_line_spectra.append(last_valid_h_inv)
-            raw_line_rises.append(measured_center_rise)
+            raw_line_rises.append(last_valid_rise)
             continue
 
-        # Compute averaged spectra over the entire 1000-pulse training set history
+        # Compute Wiener Deconvolution using historical sample average
         valid_count = state_dict['count']
         accum_s_xy = np.mean(state_dict['s_xy_history'][:valid_count], axis=0)
         accum_s_yy = np.mean(state_dict['s_yy_history'][:valid_count], axis=0)
@@ -460,20 +454,23 @@ def apply_inverse_equalization(
 
         raw_line_spectra.append(H_total)
         raw_line_rises.append(measured_center_rise)
+        
         last_valid_h_inv = H_total
+        last_valid_rise = measured_center_rise
 
-    if count == 0 and state_dict['count'] == 0:
+    if state_dict['count'] == 0:
         _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
         return video_buf, {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
 
     # =========================================================================
-    # FIELD-WIDE STATISTICAL AVERAGING (For disabled interpolation toggles)
+    # PART 3: Field-Wide Statistical Averaging & Parameter Toggles
     # =========================================================================
     field_magnitudes = [np.abs(h) for h in raw_line_spectra]
     field_phases = [np.angle(h) for h in raw_line_spectra]
 
     avg_amplitude = np.mean(field_magnitudes, axis=0)
     avg_phase = np.angle(np.mean([np.exp(1j * p) for p in field_phases], axis=0))
+    avg_rise = np.mean(raw_line_rises)
 
     line_kernels = []
     line_H_invs = []
@@ -515,21 +512,17 @@ def apply_inverse_equalization(
         
         video_buf_filtered[loc : loc + line_length] = filtered_line
 
-    # =========================================================================
-    # PART 5: Exact Inverse Noise Floor Compensation (Frequency-Gated)
-    # =========================================================================
+    # ==============================================
+    # PART 5: Exact Inverse Noise Floor Compensation
+    # ==============================================
     avg_H_inv = np.mean(line_H_invs, axis=0) if len(line_H_invs) > 0 else np.ones(FFT_LEN, dtype=np.complex128)
 
     gd_mag = np.abs(avg_H_inv)
     gd_boost = np.maximum(1.0, gd_mag)
     inverse_multiplier = 1.0 / gd_boost
 
-    freqs_norm = np.abs(np.fft.fftfreq(FFT_LEN))
-    luma_protection = np.clip((freqs_norm - 0.10) / 0.10, 0.0, 1.0)
-
     mean_noise = np.mean(noise_mag_profile)
     noise_weight = np.clip((noise_mag_profile / (mean_noise + 1e-12)) * 2.0, 0.0, 1.0)
-    noise_weight *= luma_protection
 
     H_corrective = 1.0 - (noise_weight * (1.0 - inverse_multiplier))
     H_corrective[0] = 1.0
