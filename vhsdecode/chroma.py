@@ -1751,7 +1751,6 @@ def _gen_chroma_fft_filter(
 
     return mask
 
-
 def _chroma_phase_correction_from_sync(
     fsc,
     color_under_carrier_f,
@@ -1760,49 +1759,58 @@ def _chroma_phase_correction_from_sync(
 ) -> np.ndarray:
     freqs_up = sps_fft.rfftfreq(fft_len, d=1.0 / (fsc * 4.0))
     group_delay_state_fft_len = 512
+    
+    # Fast exit if no valid measurements have been accumulated
+    if len(group_delay_state) == 0 or group_delay_state[0].get('count', 0) == 0:
+        return np.ones_like(freqs_up, dtype=np.complex128)
 
     phase_correction = np.zeros_like(freqs_up, dtype=np.float64)
-    rolling_S_xy = np.zeros(group_delay_state_fft_len, dtype=np.complex128)
-
     scale_factor = group_delay_state_fft_len / fft_len
     
-    for measurement in group_delay_state:
-        rolling_S_xy += measurement.get('s_xy')
-        phase_error_base = -np.unwrap(np.angle(rolling_S_xy))
-            
-        # Upscale the base 512 phase error vector to match the rfft bin count
-        old_x = np.linspace(0.0, 1.0, len(phase_error_base))
-        new_x = np.linspace(0.0, 1.0, len(freqs_up))
+    # 1. Extract the new state shape (Ring Buffer)
+    state_dict = group_delay_state[0]
+    valid_count = state_dict['count']
+    
+    # 2. Compute the aggregate S_xy directly from the history buffer
+    # (Summing the complex vectors achieves the same phase as the old iterative += method)
+    rolling_S_xy = np.sum(state_dict['s_xy_history'][:valid_count], axis=0)
+    
+    # 3. Calculate Phase Error
+    phase_error_base = -np.unwrap(np.angle(rolling_S_xy))
         
-        base_complex = np.exp(-1j * phase_error_base)
-        upscaled_complex = (
-            np.interp(new_x, old_x, base_complex.real) + 
-            1j * np.interp(new_x, old_x, base_complex.imag)
-        )
-        phase_error = -np.unwrap(np.angle(upscaled_complex))
+    # Upscale the base 512 phase error vector to match the rfft bin count
+    old_x = np.linspace(0.0, 1.0, len(phase_error_base))
+    new_x = np.linspace(0.0, 1.0, len(freqs_up))
+    
+    base_complex = np.exp(-1j * phase_error_base)
+    upscaled_complex = (
+        np.interp(new_x, old_x, base_complex.real) + 
+        1j * np.interp(new_x, old_x, base_complex.imag)
+    )
+    phase_error = -np.unwrap(np.angle(upscaled_complex))
 
-        w_axis = 2.0 * np.pi * np.linspace(0.0, 0.5, len(freqs_up))
-        w_safe = np.where(np.abs(w_axis) < 1e-6, 1e-6, w_axis)
-        measured_group_delay = -np.gradient(phase_error, w_safe)
+    w_axis = 2.0 * np.pi * np.linspace(0.0, 0.5, len(freqs_up))
+    w_safe = np.where(np.abs(w_axis) < 1e-6, 1e-6, w_axis)
+    measured_group_delay = -np.gradient(phase_error, w_safe)
 
-        cu_norm_f = color_under_carrier_f / (fsc * 4.0)
-        chroma_band_mask = (freqs_up > (cu_norm_f - 0.08 * fsc)) & (freqs_up < (cu_norm_f + 0.08 * fsc))
+    cu_norm_f = color_under_carrier_f / (fsc * 4.0)
+    chroma_band_mask = (freqs_up > (cu_norm_f - 0.08 * fsc)) & (freqs_up < (cu_norm_f + 0.08 * fsc))
 
-        delay_modulation = np.clip(
-            measured_group_delay / np.maximum(np.percentile(np.abs(measured_group_delay), 90), 1e-12), 
-            0.5, 2.5
-        )
+    delay_modulation = np.clip(
+        measured_group_delay / np.maximum(np.percentile(np.abs(measured_group_delay), 90), 1e-12), 
+        0.5, 2.5
+    )
 
-        # Weigh this scaling statistically based on how much theroetical reslution
-        # is in sync pulse based fft vs. the burst phase fft, burst phase is higher resolution
-        scaling_weight = np.clip(scale_factor, 0.0, 1.0)
+    # Weigh this scaling statistically based on how much theoretical resolution
+    # is in sync pulse based fft vs. the burst phase fft, burst phase is higher resolution
+    scaling_weight = np.clip(scale_factor, 0.0, 1.0)
 
-        # Apply weighted phase correction
-        phase_correction[chroma_band_mask] = (
-            phase_error[chroma_band_mask] * 
-            delay_modulation[chroma_band_mask] * 
-            scaling_weight
-        )
+    # Apply weighted phase correction (now done once instead of re-written iteratively)
+    phase_correction[chroma_band_mask] = (
+        phase_error[chroma_band_mask] * 
+        delay_modulation[chroma_band_mask] * 
+        scaling_weight
+    )
 
     return np.exp(-1j * phase_correction)
 
