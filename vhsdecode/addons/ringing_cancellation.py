@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import numba as nb
 import scipy.fft
@@ -11,8 +12,9 @@ import matplotlib.ticker as mticker
 # 1. NUMBA KERNEL: CAUSAL PHASE EQUALIZATION FIR
 # -----------------------------------------------------------------------------
 
-FSC=3.579545 # TODO: parameterize (used only in debug)
-FSC_RATIO = 4 # sets ratio of FFT length to fsc
+FSC = 3.579545 # TODO: parameterize (used only in debug)
+FPS = 525
+FSC_RATIO = 4
 
 FIR_LEN = 127
 FFT_LEN = 512
@@ -22,6 +24,7 @@ DELAY_OFFSET = FIR_LEN // 2  # Anchors the causal peak
 def _make_interpolated_inverse_eq(fir_len, delay_offset):
     @nb.njit(
         "float32[:](float32[::1], float32[::1], int64, float32[::1], float32[::1])",
+        parallel=True,
         cache=True,
         nogil=True,
         fastmath=True
@@ -31,24 +34,21 @@ def _make_interpolated_inverse_eq(fir_len, delay_offset):
         first = picture_clean[0]
         last = picture_clean[n_samples - 1]
 
-        # Pre-allocate tap buffer for the per-pixel interpolated kernel
-        h_interp = np.empty(fir_len, dtype=np.float32)
-
-        for k in range(n_samples):
+        # Process each sample independently in parallel without allocating inner arrays
+        for k in nb.prange(n_samples):
             alpha = np.float32(k) / np.float32(n_samples - 1) if n_samples > 1 else np.float32(0.0)
             one_minus_alpha = np.float32(1.0) - alpha
 
-            # 2. Interpolate FIR taps directly for current pixel k
-            for j in range(fir_len):
-                h_interp[j] = one_minus_alpha * kernel_a[j] + alpha * kernel_b[j]
-
-            # 3. Apply the causal filter sweep for pixel k
             read_head = k + delay_offset
             acc = 0.0
 
+            # Interpolate FIR tap for current pixel on the fly
             for j in range(fir_len):
+                h_val = one_minus_alpha * kernel_a[j] + alpha * kernel_b[j]
+                
                 idx = read_head - j
                 
+                # Boundary clamping
                 if idx < 0:
                     val = first
                 elif idx >= n_samples:
@@ -56,11 +56,10 @@ def _make_interpolated_inverse_eq(fir_len, delay_offset):
                 else:
                     val = picture_clean[idx]
 
-                acc += val * h_interp[j]
+                acc += val * h_val
 
-            # 4. Delta Injection
-            delta = acc - picture_clean[k]
-            out[k] = picture_raw[k] + delta
+            # Delta Injection
+            out[k] = picture_raw[k] + (acc - picture_clean[k])
 
         return out
     return _apply_interpolated_inverse_eq
@@ -68,7 +67,7 @@ def _make_interpolated_inverse_eq(fir_len, delay_offset):
 _apply_interpolated_inverse_eq = _make_interpolated_inverse_eq(FIR_LEN, DELAY_OFFSET)
 
 
-@nb.njit("float32[:](float32[::1], float32[::1])", cache=True, nogil=True, fastmath=True)
+@nb.njit("float32[:](float32[::1], float32[::1])", parallel=True, cache=True, nogil=True, fastmath=True)
 def _apply_zero_phase_fir(picture, fir_kernel):
     n_samples = len(picture)
     fir_len = len(fir_kernel)
@@ -78,6 +77,7 @@ def _apply_zero_phase_fir(picture, fir_kernel):
     first = picture[0]
     last = picture[n_samples - 1]
 
+    # Apply standard zero-phase FIR filtering across pixels
     for i in nb.prange(n_samples):
         acc = 0.0
         for j in range(fir_len):
@@ -121,6 +121,7 @@ def _build_ideal_step(
     for i in range(win_size):
         t_rise = float(i) - measured_center_rise
 
+        # Build smooth cosine transition between sync and blanking limits
         if t_rise < -target_transition / 2.0:
             ideal[i] = local_sync
         elif t_rise <= target_transition / 2.0:
@@ -146,6 +147,7 @@ def _build_ideal_hsync_pulse(
     center_fall = float(front_porch_len) + phase_delay
     center_rise = float(front_porch_len + sync_len) + phase_delay
     
+    # Generate complete target pulse for reference plot
     for i in range(win_size):
         t_fall = float(i) - center_fall
         t_rise = float(i) - center_rise
@@ -188,46 +190,44 @@ def _get_levels(data):
     return sync_tip_average, blanking_average
 
 
+@nb.njit(cache=True, nogil=True, fastmath=True)
 def _suppress_color_carrier_fft(samples):
     out = samples.copy()
-    i = 0.0
-    q = 0.0
-    for n, x in enumerate(samples):
-        phase = (n & 3)
-        if phase == 0:
-            i += x
-        elif phase == 2:
-            i -= x
-        elif phase == 1:
-            q -= x
-        else:
-            q += x
-            
-    scale = 2.0 / len(samples)
-    i *= scale
-    q *= scale
+    i_acc, q_acc = 0.0, 0.0
+    n = len(samples)
     
-    for n in range(len(out)):
-        phase = n & 3
-        if phase == 0:
-            out[n] -= i
-        elif phase == 1:
-            out[n] -= -q
-        elif phase == 2:
-            out[n] -= -i
-        else:
-            out[n] -= q
+    # Accumulate quadrature phases
+    for j in range(n):
+        phase = j & 3
+        if phase == 0: i_acc += samples[j]
+        elif phase == 2: i_acc -= samples[j]
+        elif phase == 1: q_acc -= samples[j]
+        else: q_acc += samples[j]
+            
+    scale = 2.0 / n
+    i_acc *= scale
+    q_acc *= scale
+    
+    # Subtract average carrier
+    for j in range(n):
+        phase = j & 3
+        if phase == 0: out[j] -= i_acc
+        elif phase == 1: out[j] -= -q_acc
+        elif phase == 2: out[j] -= -i_acc
+        else: out[j] -= q_acc
+        
     return out
 
 
 def _build_causal_fir_from_spectrum(H_inv, fft_len, fir_len, delay_offset):
-    freqs_norm = np.abs(np.fft.fftfreq(fft_len))
+    freqs_norm = np.abs(scipy.fft.fftfreq(fft_len))
     
     taper = np.clip((0.45 - freqs_norm) / 0.10, 0.0, 1.0)
     taper_smooth = 0.5 * (1.0 - np.cos(np.pi * taper)) 
     H_inv_tapered = H_inv * taper_smooth
 
-    omega = 2.0 * np.pi * np.fft.fftfreq(fft_len)
+    # Apply linear phase shift to maintain causal peak location
+    omega = 2.0 * np.pi * scipy.fft.fftfreq(fft_len)
     causal_phase_shift = np.exp(-1j * omega * delay_offset)
     H_inv_tapered *= causal_phase_shift
 
@@ -263,7 +263,6 @@ def apply_inverse_equalization(
     back_porch_len,
     target_transition,
     group_delay_state,
-    noise_threshold=1,
     interpolate_amplitude=True,
     interpolate_phase=True,
     interpolate_time=True, # TODO: allow interpolation to be disabled for speed
@@ -282,6 +281,7 @@ def apply_inverse_equalization(
     win_noise = scipy.signal.windows.hann(sync_tip_flat_len)
     start_idx_noise = (FFT_LEN - sync_tip_flat_len) // 2
 
+    # Accumulate noise profile from flat sync tip regions
     for line in range(line_start, line_end + 1):
         loc = line * line_length
         tip_start = loc + front_porch_len + int(sync_len * 0.3)
@@ -301,7 +301,7 @@ def apply_inverse_equalization(
         noise_mag_profile = np.zeros(FFT_LEN, dtype=np.float64)
 
     # =========================================================================
-    # PARTS 1 & 2: Pass 1 - Line Measurement & 1000-Pulse Ring Buffer Validation
+    # PARTS 1 & 2: Pass 1 - Line Measurement & Pulse Ring Buffer Validation
     # =========================================================================
     MAX_HISTORY_PULSES = 1000
 
@@ -348,6 +348,7 @@ def apply_inverse_equalization(
         if start_loc >= 0 and start_loc + win_size < n_samples:
             pulse = video_buf[start_loc : start_loc + win_size]
 
+            # Measure dynamic levels for ideal pulse target
             measured_sync_tip_level, measured_blanking_level = _get_levels(pulse)
             mid_val = measured_sync_tip_level + (measured_blanking_level - measured_sync_tip_level) / 2.0
 
@@ -411,7 +412,7 @@ def apply_inverse_equalization(
                 avg_power_magnitude = np.mean(historical_mean_s_yy) + 1e-12
                 relative_deviation = spectral_distance / avg_power_magnitude
                 
-                if relative_deviation > (0.4 * noise_threshold + 0.20):
+                if relative_deviation > (0.4 * 0.20):
                     is_outlier = True
 
             if not is_outlier:
@@ -436,11 +437,12 @@ def apply_inverse_equalization(
         hf_power = accum_s_yy[hf_mask]
         hf_median = np.median(hf_power) if len(hf_power) > 0 else 0.0
         hf_mad = np.median(np.abs(hf_power - hf_median)) if len(hf_power) > 0 else 0.0
-        noise_penalty = (hf_median + 3.0 * hf_mad) * noise_threshold
+        noise_penalty = (hf_median + 3.0 * hf_mad)
 
         num_passes = 5  
         H_total = np.ones(FFT_LEN, dtype=np.complex128)
 
+        # Iteratively solve for the optimal equalizer response
         for pass_idx in range(num_passes):
             current_S_xy = accum_s_xy * np.conj(H_total)
             current_S_yy = accum_s_yy * (np.abs(H_total) ** 2)
@@ -475,6 +477,7 @@ def apply_inverse_equalization(
     line_kernels = []
     line_H_invs = []
 
+    # Compile the final FIR arrays for delta injection
     for i in range(len(raw_line_spectra)):
         mag = np.abs(raw_line_spectra[i]) if interpolate_amplitude else avg_amplitude
         phase = np.angle(raw_line_spectra[i]) if interpolate_phase else avg_phase
@@ -491,6 +494,7 @@ def apply_inverse_equalization(
     video_clean = _suppress_color_carrier_fft(video_buf)
     video_buf_filtered = video_buf.copy()
     
+    # Process delta corrections across each line
     for i, line in enumerate(range(line_start, line_end + 1)):
         loc = line * line_length
         if loc >= len(video_buf):
@@ -512,9 +516,9 @@ def apply_inverse_equalization(
         
         video_buf_filtered[loc : loc + line_length] = filtered_line
 
-    # ==============================================
+    # =========================================================================
     # PART 5: Exact Inverse Noise Floor Compensation
-    # ==============================================
+    # =========================================================================
     avg_H_inv = np.mean(line_H_invs, axis=0) if len(line_H_invs) > 0 else np.ones(FFT_LEN, dtype=np.complex128)
 
     gd_mag = np.abs(avg_H_inv)
@@ -524,6 +528,7 @@ def apply_inverse_equalization(
     mean_noise = np.mean(noise_mag_profile)
     noise_weight = np.clip((noise_mag_profile / (mean_noise + 1e-12)) * 2.0, 0.0, 1.0)
 
+    # Invert the static noise response characteristics
     H_corrective = 1.0 - (noise_weight * (1.0 - inverse_multiplier))
     H_corrective[0] = 1.0
 
@@ -549,7 +554,7 @@ def apply_inverse_equalization(
     )
 
     mid_kernel = line_kernels[len(line_kernels) // 2] if len(line_kernels) > 0 else np.zeros(FIR_LEN)
-    lti_params = derive_lti_parameters(mid_kernel, noise_threshold=noise_threshold)
+    lti_params = derive_lti_parameters(mid_kernel)
 
     if debug:
         full_win_size = max(front_porch_len + sync_len + back_porch_len, FIR_LEN)
@@ -783,7 +788,7 @@ def _show_group_delay_debug(
 # -----------------------------------------------------------------------------
 # LTI PARAMETER DERIVATION FUNCTION
 # -----------------------------------------------------------------------------
-def derive_lti_parameters(fir_kernel, noise_threshold):
+def derive_lti_parameters(fir_kernel):
     total_energy = np.sum(fir_kernel**2)
     if total_energy <= 1e-12:
         return {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
@@ -794,10 +799,10 @@ def derive_lti_parameters(fir_kernel, noise_threshold):
     indices = np.arange(len(fir_kernel))
     weighted_spread = np.sum(indices * np.abs(fir_kernel)) / np.sum(np.abs(fir_kernel))
     
-    noise_suppression_factor = max(0.2, 1.0 - 2.0 * noise_threshold)
+    noise_suppression_factor = max(0.2, 1.0 - 2.0)
     lti_gain = np.clip(energy_dispersion * 1.5 * noise_suppression_factor, 0.0, 1.0)
     
-    lti_threshold = np.clip(noise_threshold * 0.75, 0.02, 0.15)
+    lti_threshold = np.clip(0.75, 0.02, 0.15)
 
     return {
         'gain': float(lti_gain),

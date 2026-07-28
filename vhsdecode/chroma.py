@@ -5,6 +5,7 @@ import lddecode.core as ldd
 import scipy.signal as sps
 import scipy.fft as sps_fft
 from vhsdecode.rust_utils import sosfiltfilt_rust
+from vhsdecode.addons.ringing_cancellation import FFT_LEN as GROUP_DELAY_FFT_LEN
 
 import numba
 from numba import njit
@@ -1758,14 +1759,13 @@ def _chroma_phase_correction_from_sync(
     fft_len
 ) -> np.ndarray:
     freqs_up = sps_fft.rfftfreq(fft_len, d=1.0 / (fsc * 4.0))
-    group_delay_state_fft_len = 512
     
     # Fast exit if no valid measurements have been accumulated
     if len(group_delay_state) == 0 or group_delay_state[0].get('count', 0) == 0:
         return np.ones_like(freqs_up, dtype=np.complex128)
 
     phase_correction = np.zeros_like(freqs_up, dtype=np.float64)
-    scale_factor = group_delay_state_fft_len / fft_len
+    scale_factor = GROUP_DELAY_FFT_LEN / fft_len
     
     # 1. Extract the new state shape (Ring Buffer)
     state_dict = group_delay_state[0]
