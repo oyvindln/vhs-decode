@@ -1165,6 +1165,7 @@ class FieldShared:
                     self.outlinelen,
                     self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["vsync_ire"] * self.rf.DecoderParams["hz_ire"], # sync tip level
                     self.rf.DecoderParams["ire0"], # blanking level
+                    burst_phase_avg=self.burst_phase_avg,
                     front_porch_len=front_porch_len,
                     sync_len=sync_len,
                     back_porch_len=back_porch_len,

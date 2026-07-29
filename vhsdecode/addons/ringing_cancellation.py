@@ -7,15 +7,17 @@ from scipy.interpolate import UnivariateSpline
 
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.ticker as mticker
+import matplotlib.pyplot as plt
 
 # -----------------------------------------------------------------------------
 # 1. NUMBA KERNEL: CAUSAL PHASE EQUALIZATION FIR
 # -----------------------------------------------------------------------------
 
-FSC = 3.579545 # TODO: parameterize (used only in debug)
+FSC = 3.579545 
 FPS = 525
 FSC_RATIO = 4
 
+MAX_HISTORY_PULSES = int(FPS / 2)
 FIR_LEN = 127
 FFT_LEN = 512
 DELAY_OFFSET = FIR_LEN // 2  # Anchors the causal peak
@@ -110,7 +112,7 @@ def _build_fsc_mask(n, width_bins=3):
 
 
 @nb.njit(cache=True, nogil=True, fastmath=True)
-def _build_ideal_step(
+def _build_ideal_rising_pulse(
     measured_center_rise,
     target_transition,
     local_sync,
@@ -263,6 +265,7 @@ def apply_inverse_equalization(
     back_porch_len,
     target_transition,
     group_delay_state,
+    burst_phase_avg,
     interpolate_amplitude=True,
     interpolate_phase=True,
     interpolate_time=True, # TODO: allow interpolation to be disabled for speed
@@ -303,8 +306,6 @@ def apply_inverse_equalization(
     # =========================================================================
     # PARTS 1 & 2: Pass 1 - Line Measurement & Pulse Ring Buffer Validation
     # =========================================================================
-    MAX_HISTORY_PULSES = 1000
-
     if len(group_delay_state) == 0:
         state_dict = {
             's_xy_history': np.zeros((MAX_HISTORY_PULSES, FFT_LEN), dtype=np.complex128),
@@ -330,21 +331,17 @@ def apply_inverse_equalization(
     freqs = np.abs(np.fft.fftfreq(FFT_LEN))
     hf_mask = freqs > 0.35  
 
-    raw_line_spectra = []
-    raw_line_rises = []
-    
-    last_valid_h_inv = np.ones(FFT_LEN, dtype=np.complex128)
-    last_valid_rise = float(offset_rise)
+    # --- PASS 1: Extract and Accumulate All Gradients ---
+    extracted_data = []
+    accum_d_pulse = np.zeros(FFT_LEN, dtype=np.float64)
+    valid_extraction_count = 0
 
     for line in range(line_start, line_end + 1):
         loc = line * line_length
         start_loc = loc + sync_len - pre_rise_samples
         
         measured_center_rise = float(offset_rise)
-        is_outlier = False
-        current_s_xy = np.zeros(FFT_LEN, dtype=np.complex128)
-        current_s_yy = np.zeros(FFT_LEN, dtype=np.float64)
-
+        
         if start_loc >= 0 and start_loc + win_size < n_samples:
             pulse = video_buf[start_loc : start_loc + win_size]
 
@@ -360,71 +357,114 @@ def apply_inverse_equalization(
                         measured_center_rise = float(i) + abs(y0) / abs(y1 - y0)
                     break
                     
-            sum_sync, count_sync = 0.0, 0
-            end_sync_idx = max(1, int(measured_center_rise - 2))
-            for i in range(0, end_sync_idx):
-                sum_sync += pulse[i]
-                count_sync += 1
-            local_sync = sum_sync / count_sync if count_sync > 0 else measured_sync_tip_level
-            
-            sum_bp, count_bp = 0.0, 0
-            start_bp_idx = min(win_size - 1, int(measured_center_rise + 2))
-            for i in range(start_bp_idx, win_size):
-                sum_bp += pulse[i]
-                count_bp += 1
-            local_blank_r = sum_bp / count_bp if count_bp > 0 else measured_blanking_level
-
-            ideal_for_fir = _build_ideal_step(
+            # 1. Generate the pure mathematical reference
+            ideal_rising_pulse = _build_ideal_rising_pulse(
                 measured_center_rise, target_transition,
-                local_sync, local_blank_r, win_size
+                measured_sync_tip_level, measured_blanking_level, win_size
             )
 
-            peak_idx = int(measured_center_rise)
+            # 2. DO NOT blend the raw pulse back into the ideal pulse.
+            # We want the ideal reference to remain perfectly flat on the back porch
+            # so the FFT captures the full length of the causal ringing tail as an error.
+            ideal_for_fir = ideal_rising_pulse.copy()
+
+            # 3. Use the Tukey window to handle boundary conditions smoothly.
             transient_win = np.zeros(win_size, dtype=np.float64)
             
-            if peak_idx > 0:
-                transient_win[0:peak_idx] = 0.5 * (1.0 - np.cos(np.pi * np.arange(peak_idx) / peak_idx))
+            # Slightly softer alpha (e.g., 0.10) ensures we don't accidentally clamp 
+            # the far end of the ringing tail before it naturally decays.
+            alpha = 0.10 
+            base_tukey = scipy.signal.windows.tukey(win_size, alpha=alpha)
             
-            ringing_tail_len = int(target_transition * 5.0) 
-            right_width = min(ringing_tail_len, win_size - peak_idx)
+            center_offset = win_size // 2
+            shift = int(measured_center_rise) - center_offset
+            transient_win = np.roll(base_tukey, shift)
             
-            if right_width > 0:
-                transient_win[peak_idx : peak_idx + right_width] = 0.5 * (1.0 + np.cos(np.pi * np.arange(right_width) / right_width))
-
+            if shift > 0:
+                transient_win[:shift] = 0.0
+            elif shift < 0:
+                transient_win[shift:] = 0.0
+            
+            # Now, d_ideal will be perfectly zero on the back porch, 
+            # and d_pulse will contain the FULL ringing tail.
             d_ideal = np.gradient(ideal_for_fir) * transient_win
             d_pulse = np.gradient(pulse) * transient_win
+            
+            pad_ideal = np.zeros(FFT_LEN, dtype=np.float64)
             
             pad_ideal = np.zeros(FFT_LEN, dtype=np.float64)
             pad_pulse = np.zeros(FFT_LEN, dtype=np.float64)
             pad_ideal[start_idx : start_idx + win_size] = d_ideal
             pad_pulse[start_idx : start_idx + win_size] = d_pulse
 
-            Y = scipy.fft.fft(pad_pulse)
-            X = scipy.fft.fft(pad_ideal)
+            extracted_data.append({
+                'valid': True,
+                'pad_pulse': pad_pulse,
+                'pad_ideal': pad_ideal,
+                'rise': measured_center_rise,
+                'pulse_raw': pulse
+            })
+            accum_d_pulse += pad_pulse
+            valid_extraction_count += 1
+        else:
+            extracted_data.append({'valid': False})
+
+    # Calculate the exact average gradient across the entire field
+    if valid_extraction_count > 0:
+        avg_d_pulse = accum_d_pulse / valid_extraction_count
+    else:
+        avg_d_pulse = np.zeros(FFT_LEN, dtype=np.float64)
+
+    # Compute Median Absolute Deviation (MAD) of the distances from the average gradient 
+    # to establish a robust threshold for outlier rejection.
+    distances = []
+    for data in extracted_data:
+        if data['valid']:
+            distances.append(np.mean(np.abs(data['pad_pulse'] - avg_d_pulse)))
+            
+    if len(distances) > 0:
+        median_dist = np.median(distances)
+        mad_dist = np.median(np.abs(distances - median_dist))
+        # Equivalent to 3-sigma rejection
+        dist_threshold = median_dist + 3.0 * mad_dist + 1e-6 
+    else:
+        dist_threshold = 0.0
+
+    # --- PASS 2: Filter Outliers and Execute Wiener Deconvolution Setup ---
+    raw_line_spectra = []
+    raw_line_rises = []
+    
+    last_valid_h_inv = np.ones(FFT_LEN, dtype=np.complex128)
+    last_valid_rise = float(offset_rise)
+
+    accum_raw_pulse = np.zeros(win_size, dtype=np.float64)
+    field_pulse_count = 0
+
+    for data in extracted_data:
+        is_outlier = True
+        
+        if data['valid']:
+            # Check individual gradient against the field average
+            dist = np.mean(np.abs(data['pad_pulse'] - avg_d_pulse))
+            if dist <= dist_threshold:
+                is_outlier = False
+
+        if not is_outlier:
+            Y = scipy.fft.fft(data['pad_pulse'])
+            X = scipy.fft.fft(data['pad_ideal'])
 
             current_s_xy = X * np.conj(Y)
             current_s_yy = np.abs(Y)**2
 
-            # Ring buffer outlier check against the 1000-pulse history
-            if state_dict['count'] > 10:
-                historical_mean_s_yy = np.mean(state_dict['s_yy_history'][:state_dict['count']], axis=0)
-                spectral_distance = np.mean(np.abs(current_s_yy - historical_mean_s_yy))
-                avg_power_magnitude = np.mean(historical_mean_s_yy) + 1e-12
-                relative_deviation = spectral_distance / avg_power_magnitude
-                
-                if relative_deviation > (0.4 * 0.20):
-                    is_outlier = True
+            ptr = state_dict['ptr']
+            state_dict['s_xy_history'][ptr] = current_s_xy
+            state_dict['s_yy_history'][ptr] = current_s_yy
+            state_dict['ptr'] = (ptr + 1) % MAX_HISTORY_PULSES
+            state_dict['count'] = min(MAX_HISTORY_PULSES, state_dict['count'] + 1)
 
-            if not is_outlier:
-                ptr = state_dict['ptr']
-                state_dict['s_xy_history'][ptr] = current_s_xy
-                state_dict['s_yy_history'][ptr] = current_s_yy
-                state_dict['ptr'] = (ptr + 1) % MAX_HISTORY_PULSES
-                state_dict['count'] = min(MAX_HISTORY_PULSES, state_dict['count'] + 1)
+            accum_raw_pulse += data['pulse_raw']
+            field_pulse_count += 1
         else:
-            is_outlier = True
-
-        if is_outlier:
             raw_line_spectra.append(last_valid_h_inv)
             raw_line_rises.append(last_valid_rise)
             continue
@@ -439,52 +479,55 @@ def apply_inverse_equalization(
         hf_mad = np.median(np.abs(hf_power - hf_median)) if len(hf_power) > 0 else 0.0
         noise_penalty = (hf_median + 3.0 * hf_mad)
 
-        num_passes = 5  
-        H_total = np.ones(FFT_LEN, dtype=np.complex128)
-
-        # Iteratively solve for the optimal equalizer response
-        for pass_idx in range(num_passes):
-            current_S_xy = accum_s_xy * np.conj(H_total)
-            current_S_yy = accum_s_yy * (np.abs(H_total) ** 2)
-
-            denom = current_S_yy + noise_penalty
-            denom[denom == 0] = 1e-12
-            H_step = current_S_xy / denom
-
-            alpha = 0.4 
-            H_total = H_total * (1.0 - alpha) + H_total * H_step * alpha
+        # EXACT ANALYTIC WIENER SOLUTION (Unchokes Phase)
+        denom = accum_s_yy + noise_penalty
+        denom[denom == 0] = 1e-12
+        
+        # This one-step calculation perfectly preserves the exact phase angle
+        # while applying the noise penalty strictly to the magnitude.
+        H_total = accum_s_xy / denom
 
         raw_line_spectra.append(H_total)
-        raw_line_rises.append(measured_center_rise)
+        raw_line_rises.append(data['rise'])
         
         last_valid_h_inv = H_total
-        last_valid_rise = measured_center_rise
+        last_valid_rise = data['rise']
 
     if state_dict['count'] == 0:
         _denormalize_inplace(video_buf, sync_tip_level, blanking_level)
         return video_buf, {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
 
     # =========================================================================
-    # PART 3: Field-Wide Statistical Averaging & Parameter Toggles
+    # PART 3: Field-Wide Statistical Averaging & Phase Equalization Extraction
     # =========================================================================
     field_magnitudes = [np.abs(h) for h in raw_line_spectra]
-    field_phases = [np.angle(h) for h in raw_line_spectra]
-
     avg_amplitude = np.mean(field_magnitudes, axis=0)
-    avg_phase = np.angle(np.mean([np.exp(1j * p) for p in field_phases], axis=0))
-    avg_rise = np.mean(raw_line_rises)
 
     line_kernels = []
     line_H_invs = []
 
-    # Compile the final FIR arrays for delta injection
     for i in range(len(raw_line_spectra)):
-        mag = np.abs(raw_line_spectra[i]) if interpolate_amplitude else avg_amplitude
-        phase = np.angle(raw_line_spectra[i]) if interpolate_phase else avg_phase
+        # 1. Extract pure per-line phase directly
+        phase = np.angle(raw_line_spectra[i])
         
-        H_inv_modified = mag * np.exp(1j * phase)
+        # 2. Extract magnitude but enforce the Phase Authority Floor
+        raw_mag = np.abs(raw_line_spectra[i]) if interpolate_amplitude else avg_amplitude
         
+        phase_authority_floor = 0.85
+        mag_clamped = np.clip(raw_mag, phase_authority_floor, 1.15)
+        
+        # 3. Recombine into a Phase-Dominant Equalizer
+        H_inv_modified = mag_clamped * np.exp(1j * phase)
+        
+        # 4. Taper the extreme high frequencies to pass-through
+        freqs_norm = np.abs(scipy.fft.fftfreq(FFT_LEN))
+        hf_taper = np.clip((0.48 - freqs_norm) / 0.08, 0.0, 1.0)
+        hf_taper_smooth = 0.5 * (1.0 - np.cos(np.pi * hf_taper))
+        
+        H_inv_modified = H_inv_modified * hf_taper_smooth + (1.0 + 0j) * (1.0 - hf_taper_smooth)
+
         fir_kernel = _build_causal_fir_from_spectrum(H_inv_modified, FFT_LEN, FIR_LEN, DELAY_OFFSET)
+
         line_kernels.append(fir_kernel)
         line_H_invs.append(H_inv_modified)
 
@@ -516,45 +559,7 @@ def apply_inverse_equalization(
         
         video_buf_filtered[loc : loc + line_length] = filtered_line
 
-    # =========================================================================
-    # PART 5: Exact Inverse Noise Floor Compensation
-    # =========================================================================
-    avg_H_inv = np.mean(line_H_invs, axis=0) if len(line_H_invs) > 0 else np.ones(FFT_LEN, dtype=np.complex128)
-
-    gd_mag = np.abs(avg_H_inv)
-    gd_boost = np.maximum(1.0, gd_mag)
-    inverse_multiplier = 1.0 / gd_boost
-
-    mean_noise = np.mean(noise_mag_profile)
-    noise_weight = np.clip((noise_mag_profile / (mean_noise + 1e-12)) * 2.0, 0.0, 1.0)
-
-    # Invert the static noise response characteristics
-    H_corrective = 1.0 - (noise_weight * (1.0 - inverse_multiplier))
-    H_corrective[0] = 1.0
-
-    h_corrective_time = scipy.fft.fftshift(
-        scipy.fft.ifft(H_corrective).real
-    )
-
-    center = FFT_LEN // 2
-    fir_corrective = np.zeros(FIR_LEN, dtype=np.float32)
-
-    start_idx_corr = center - (FIR_LEN // 2)
-    fir_corrective[:] = h_corrective_time[start_idx_corr:start_idx_corr + FIR_LEN]
-
-    fir_corrective *= scipy.signal.windows.hann(FIR_LEN)
-
-    fir_corr_sum = np.sum(fir_corrective)
-    if abs(fir_corr_sum) > 1e-12:
-        fir_corrective /= fir_corr_sum
-
-    video_buf_filtered = _apply_zero_phase_fir(
-        video_buf_filtered.astype(np.float32),
-        fir_corrective.astype(np.float32)
-    )
-
-    mid_kernel = line_kernels[len(line_kernels) // 2] if len(line_kernels) > 0 else np.zeros(FIR_LEN)
-    lti_params = derive_lti_parameters(mid_kernel)
+    lti_params = derive_lti_parameters(line_kernels[16]) # TODO work on this
 
     if debug:
         full_win_size = max(front_porch_len + sync_len + back_porch_len, FIR_LEN)
@@ -580,11 +585,6 @@ def apply_inverse_equalization(
                     full_win_size, 
                     kernel_a,
                     kernel_b
-                )
-                
-                corr_p = _apply_zero_phase_fir(
-                    corr_p.astype(np.float32), 
-                    fir_corrective.astype(np.float32)
                 )
 
                 raw_pulses.append(raw_p)
@@ -616,7 +616,7 @@ def apply_inverse_equalization(
             raw_pulses,
             corrected_pulses,
             ideal_debug,
-            mid_kernel,
+            line_kernels[16], # TODO add line kernels to debug plot
             0,
             line_indices,
             pulse_ffts,
@@ -786,7 +786,7 @@ def _show_group_delay_debug(
 
 
 # -----------------------------------------------------------------------------
-# LTI PARAMETER DERIVATION FUNCTION
+# LTI PARAMETER DERIVATION FUNCTION (Pulse-Profile Guided)
 # -----------------------------------------------------------------------------
 def derive_lti_parameters(fir_kernel):
     total_energy = np.sum(fir_kernel**2)
