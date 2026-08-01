@@ -630,39 +630,49 @@ def _show_group_delay_debug(
 
 
 # -----------------------------------------------------------------------------
-# LTI PARAMETER DERIVATION FUNCTION
+# LTI Luma Transient Improvement
 # -----------------------------------------------------------------------------
-def derive_lti_parameters(fir_kernel, noise_threshold=0.2):
-    """
-    Derives optimal Luminance Transient Improvement (LTI) parameters
-    analytically from the derived causal group-delay FIR kernel.
-    """
 
-    # 1. Total energy vs. center tap energy
+LUMA_NOISE_FLOOR_DB = -45.0
+NOISE_REF_AMPLITUDE = 1.0
+
+LTI_GAIN_SCALE = 90.0
+LTI_GAIN_MAX = 8.0
+
+# How many noise-floors above the floor an edge needs to be before LTI treats
+# it as real, and how much that margin grows per unit of energy_dispersion
+# (a kernel doing more correction is also carrying more amplified noise).
+NOISE_MARGIN = 3.0
+DISPERSION_MARGIN_GAIN = 2.0
+
+
+def derive_lti_parameters(fir_kernel, noise_floor_db=LUMA_NOISE_FLOOR_DB):
+    """
+    Derives Luminance Transient Improvement (LTI) parameters from the shape
+    of the causal group-delay correction kernel.
+    """
     total_energy = np.sum(fir_kernel**2)
     if total_energy <= 1e-12:
-        return {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0}
+        return {'gain': 0.0, 'threshold': 0.1, 'blur_radius': 0.0, 'dispersion': 0.0}
 
-    center_energy = fir_kernel[0]**2
+
+    center_energy = fir_kernel[0] ** 2
     energy_dispersion = 1.0 - (center_energy / total_energy)
 
-    # 2. Compute second moment (spatial spread radius)
-    indices = np.arange(len(fir_kernel))
-    weighted_spread = np.sum(indices * np.abs(fir_kernel)) / np.sum(np.abs(fir_kernel))
 
-    # 3. Scale LTI Gain proportionally to dispersion and noise threshold
-    # High noise_threshold reduces max gain to prevent boosting noise floor
-    noise_suppression_factor = max(0.2, 1.0 - 2.0 * noise_threshold)
-    lti_gain = np.clip(energy_dispersion * 1.5 * noise_suppression_factor, 0.0, 1.0)
+    # Gain scales directly with how much correction the kernel had to do.
+    lti_gain = float(np.clip(energy_dispersion * LTI_GAIN_SCALE, 0.0, LTI_GAIN_MAX))
 
-    # 4. Adaptive Threshold: Set above the residual high-frequency noise level
-    lti_threshold = np.clip(noise_threshold * 0.75, 0.02, 0.15)
+    # Threshold sits a fixed margin above the known noise floor so
+    # noise doesn't trigger the peaking correction; the margin widens
+    # with energy_dispersion
+    noise_floor_amp = NOISE_REF_AMPLITUDE * (10.0 ** (noise_floor_db / 20.0))
+    lti_threshold = float(noise_floor_amp * (NOISE_MARGIN + DISPERSION_MARGIN_GAIN * energy_dispersion))
 
     return {
-        'gain': float(lti_gain),
-        'threshold': float(lti_threshold),
-        'blur_radius': float(weighted_spread),
-        'dispersion': float(energy_dispersion)
+        'gain': lti_gain,
+        'threshold': lti_threshold,
+        'dispersion': float(energy_dispersion),
     }
 
 
