@@ -1165,7 +1165,7 @@ class FieldShared:
                     self.outlinelen,
                     self.rf.DecoderParams["ire0"] + self.rf.DecoderParams["vsync_ire"] * self.rf.DecoderParams["hz_ire"], # sync tip level
                     self.rf.DecoderParams["ire0"], # blanking level
-                    burst_phase_avg=self.burst_phase_avg,
+                    color_under_carrier_fsc_ratio=self.rf.SysParams["fsc_mhz"] / (self.rf.DecoderParams["color_under_carrier"] / 1e6), # TODO might remove crosshatch
                     front_porch_len=front_porch_len,
                     sync_len=sync_len,
                     back_porch_len=back_porch_len,

@@ -5,6 +5,7 @@ import scipy.fft
 import scipy
 from scipy.interpolate import UnivariateSpline
 import scipy.optimize
+from scipy.signal.windows import tukey
 
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.ticker as mticker
@@ -19,7 +20,7 @@ FPS = 525
 FSC_RATIO = 4
 
 MAX_AVG_MEASUREMENTS = int(FPS)
-FIR_LEN = 31
+FIR_LEN = 21
 FFT_LEN = 512
 
 
@@ -45,6 +46,53 @@ def _apply_inverse_eq(picture, n_samples, causal_kernel):
     return out
 
 
+# Frequency energy estimate
+freq = scipy.fft.fftfreq(FFT_LEN)
+freq_abs = np.abs(freq)
+eps = 1e-12
+# Automatically centered derivative weighting
+def compute_fft_derivatives(
+    data,
+    win,
+    win_range,
+    derivative_count=5
+):
+    data_len = len(data)
+
+    pad_start = (FFT_LEN - data_len) // 2
+
+    def pad(sig):
+        out = np.zeros(FFT_LEN, dtype=np.float64)
+        out[pad_start:pad_start + data_len] = sig
+        return out
+
+    # Find strongest coherent frequency bands
+    def center_band(power, width=0.04):
+        idx = np.argmax(power[1:FFT_LEN//2]) + 1
+        center = freq_abs[idx]
+        return np.exp(-0.5 * ((freq_abs - center) / width)**2)
+
+    # Calculate centered derivatives
+    spl = UnivariateSpline(win_range, data, s=0, k=5)
+    d1 = spl.derivative(1)(win_range)
+
+    d_splines = [spl.derivative(i) for i in range(2, derivative_count)]
+    derivatives = [d1] + [ds(win_range) * win for ds in d_splines]
+
+    ffts = [scipy.fft.fft(pad(d)) for d in derivatives]
+    energies = [np.abs(f)**2 for f in ffts]
+    bands = [center_band(e) for e in energies]
+    derivatives_norm = [np.sum(b * energies[i]) + eps for i, b in enumerate(bands)]
+
+    w = [1.0 / np.sqrt(p) for p in derivatives_norm]
+    w /= np.mean(w)
+
+    X = sum(wi * Fi for wi, Fi in zip(w, ffts))
+    weights = sum(wi * Bi for wi, Bi in zip(w, bands))
+
+    return X, weights, d1
+
+
 # -----------------------------------------------------------------------------
 # Group Delay Correction
 # -----------------------------------------------------------------------------
@@ -60,7 +108,7 @@ def apply_inverse_equalization(
     back_porch_len,
     target_transition,
     state,
-    burst_phase_avg,
+    color_under_carrier_fsc_ratio,
     use_amplitude=True,
     use_phase=True,
     interpolate_time=True, 
@@ -69,6 +117,7 @@ def apply_inverse_equalization(
     _normalize_inplace(video_buf, sync_tip_level, blanking_level)
 
     if not state:
+        state['s_xy_delay_history'] = np.zeros((MAX_AVG_MEASUREMENTS, FFT_LEN), dtype=np.complex128)
         state['s_xy_history'] = np.zeros((MAX_AVG_MEASUREMENTS, FFT_LEN), dtype=np.complex128)
         state['s_yy_history'] = np.zeros((MAX_AVG_MEASUREMENTS, FFT_LEN), dtype=np.float64)
         state['ptr'] = 0
@@ -81,11 +130,13 @@ def apply_inverse_equalization(
     # =========================================================================
 
     pulse_data = []
-    pulse_pad_sum = np.zeros(FFT_LEN, dtype=np.float64)
 
     pre_rise_samples = int(np.round(0.25 * sync_len))
     win_size = pre_rise_samples + back_porch_len
-    win = np.hamming(win_size)
+    win = tukey(win_size, alpha=0.25)
+    win_range = np.arange(win_size)
+
+    pulse_pad_sum = np.zeros(win_size, dtype=np.float32)
     offset_rise = pre_rise_samples
 
     for line in range(line_start, line_end):
@@ -94,13 +145,13 @@ def apply_inverse_equalization(
         # Extract the full horizontal blanking interval
         pulse_start = max(0, loc + sync_len - pre_rise_samples)
         pulse_end = min(len(video_buf), pulse_start + win_size)
-        pulse_len = pulse_end - pulse_start
-
         pulse_measured = video_buf[pulse_start:pulse_end]
-        measured_sync_tip_level, measured_blanking_level = _get_levels(pulse_measured)
 
+        # measure pulse levels
+        measured_sync_tip_level, measured_blanking_level = _get_levels(pulse_measured)
         mid_val = measured_sync_tip_level + (measured_blanking_level - measured_sync_tip_level) / 2.0
 
+        # get the point of comparison, given this pulse will be a off spec (i.e. VHS)
         measured_center_rise = float(offset_rise)
         for i in range(win_size - 1):
             if pulse_measured[i] <= mid_val <= pulse_measured[i+1]:
@@ -109,48 +160,39 @@ def apply_inverse_equalization(
                 if (y1 - y0) != 0.0:
                     measured_center_rise = float(i) + abs(y0) / abs(y1 - y0)
                 break
-                
-        sum_sync, count_sync = 0.0, 0
-        end_sync_idx = max(1, int(measured_center_rise - 2))
-        for i in range(0, end_sync_idx):
-            sum_sync += pulse_measured[i]
-            count_sync += 1
-        local_sync = sum_sync / count_sync if count_sync > 0 else measured_sync_tip_level
-        
-        sum_bp, count_bp = 0.0, 0
-        start_bp_idx = min(win_size - 1, int(measured_center_rise + 2))
-        for i in range(start_bp_idx, win_size):
-            sum_bp += pulse_measured[i]
-            count_bp += 1
-        local_blank_r = sum_bp / count_bp if count_bp > 0 else measured_blanking_level
 
-        ideal_for_fir = _build_ideal_step(
+        pulse_reference = _build_ideal_step(
             measured_center_rise, target_transition,
-            local_sync, local_blank_r, win_size
+            measured_sync_tip_level, measured_blanking_level, win_size
         )
 
-        d_ideal = np.gradient(ideal_for_fir, edge_order=2) * win
-        d_pulse = np.gradient(pulse_measured, edge_order=2) * win
-        
-        pad_ideal = np.zeros(FFT_LEN, dtype=np.float64)
-        pad_pulse = np.zeros(FFT_LEN, dtype=np.float64)
-        pad_start = (FFT_LEN - pulse_len) // 2
+        # Combine spectra
+        X1, W_x, pulse_d1 = compute_fft_derivatives(pulse_measured, win, win_range)
+        Y1, W_y, ideal_d1 = compute_fft_derivatives(pulse_reference, win, win_range)
 
-        pad_ideal[pad_start : pad_start + pulse_len] = d_ideal
-        pad_pulse[pad_start : pad_start + pulse_len] = d_pulse
+        # Use the reference weighting (W_y) (or 0.5*(W_x+W_y) if you prefer)
+        W = 0.5 * (W_x + W_y)
+
+        s_xy = (X1 * np.conj(Y1)) * W
+        s_yy = (np.abs(Y1) ** 2) * W
+
+        s_xy_delay = X1 * np.conj(Y1)
+
+        # maintain local sums so
+        pulse_pad_sum += pulse_d1
 
         pulse_data.append({
             'pulse_raw': pulse_measured,
-            'pad_pulse': pad_pulse,
-            'pad_ideal': pad_ideal,
+            'pad_pulse': pulse_d1,
+            's_xy': s_xy,
+            's_yy': s_yy,
+            's_xy_delay': s_xy_delay,
             'measured_sync_tip_level': measured_sync_tip_level,
             'measured_blanking_level': measured_blanking_level,
         })
-        pulse_pad_sum += pad_pulse
 
     # Average of the padded raw pulses for outlier detection
     pulse_pad_avg = pulse_pad_sum / max(1, len(pulse_data))
-
     distances = []
     for d in pulse_data:
         d['distance'] = np.mean(np.abs(d['pad_pulse'] - pulse_pad_avg))
@@ -164,6 +206,7 @@ def apply_inverse_equalization(
     # PART 2: Filter Outliers, Wiener Deconvolution Setup (Frequency Domain)
     # =========================================================================
     # These are ring buffers storing the rolling averages
+    s_xy_delay_history = state['s_xy_delay_history']
     s_xy_history = state['s_xy_history']
     s_yy_history = state['s_yy_history']
 
@@ -171,6 +214,7 @@ def apply_inverse_equalization(
     first_half = min(state['count'], MAX_AVG_MEASUREMENTS - state['ptr'])
     second_half = state['count'] - first_half
 
+    s_xy_delay_sum = np.sum(s_xy_delay[state['ptr']:state['ptr'] + first_half], axis=0) + np.sum(s_xy_delay[:second_half], axis=0, dtype=np.complex64)
     s_xy_sum = np.sum(s_xy_history[state['ptr']:state['ptr'] + first_half], axis=0) + np.sum(s_xy_history[:second_half], axis=0)
     s_yy_sum = np.sum(s_yy_history[state['ptr']:state['ptr'] + first_half], axis=0) + np.sum(s_yy_history[:second_half], axis=0)
 
@@ -179,17 +223,16 @@ def apply_inverse_equalization(
         dist = np.mean(np.abs(data['pad_pulse'] - pulse_pad_avg))
 
         if dist <= dist_threshold:
-            # Take the raw FFTs of the actual and ideal step transitions
-            Y = scipy.fft.fft(data['pad_pulse'])
-            X = scipy.fft.fft(data['pad_ideal'])
+            # sum the delay for the weighting later
+            s_xy = data['s_xy']
+            s_yy = data['s_yy']
+            s_xy_delay = data['s_xy_delay']
 
-            # Compute the Frequency-Domain Delta (Cross-Spectrum)
-            s_xy = X * np.conj(Y)
-            s_yy = np.abs(Y)**2
-
+            s_xy_delay_sum += s_xy_delay
             s_xy_sum += s_xy
             s_yy_sum += s_yy
 
+            s_xy_delay_history[state['ptr']] = s_xy_delay
             s_xy_history[state['ptr']] = s_xy
             s_yy_history[state['ptr']] = s_yy
             state['ptr'] = (state['ptr'] + 1) % MAX_AVG_MEASUREMENTS
@@ -199,13 +242,15 @@ def apply_inverse_equalization(
             continue
 
     if state['count'] > 0:
+        s_xy_delay_mean = s_xy_delay_sum / state['count']
         s_xy_mean = s_xy_sum / state['count']
         s_yy_mean = s_yy_sum / state['count']
     else:
+        s_xy_delay_mean = s_xy_delay_sum
         s_xy_mean = s_xy_sum
         s_yy_mean = s_yy_sum
 
-    phase_advance = _calc_phase_advance(s_xy_mean)
+    phase_advance = _calc_phase_advance(s_xy_delay_mean)
     phase_advance_int = int(np.round(phase_advance))
     phase_advance_frac = phase_advance - phase_advance_int
 
@@ -214,36 +259,47 @@ def apply_inverse_equalization(
     # hf_median = np.median(hf_power) if len(hf_power) > 0 else 0.0
     # hf_mad = np.median(np.abs(hf_power - hf_median)) if len(hf_power) > 0 else 0.0
 
-    denom = s_yy_mean + np.max(s_yy_mean)
+    denom = s_yy_mean # + np.max(s_yy_mean) * 0.05 # TODO: tunable noise floor, perhaps determine from pulses
     denom[denom == 0] = 1e-12
 
     # The analytic Wiener transfer function (delta applied)
     H_inv = s_xy_mean / denom
     # Apply ONLY the fractional sub-sample advance to the kernel in frequency domain.
-    H_inv = H_inv * np.exp(-1j * 2.0 * np.pi * fft_freqs * phase_advance_frac)
+    H_inv = H_inv * np.exp(1j * 2.0 * np.pi * fft_freqs * phase_advance_frac)
 
-    # Create the FIR Kernel
+    # correction response
+    H_delta = 1 - H_inv
 
-    # Wiener deconvolution naturally places the main impulse offset by int_adv.
-    # By shifting our extraction center to match this offset
+    # frequency taper
+    freq_mag = np.abs(fft_freqs) / 0.5
+
+    roll_start = 0.70
+    roll_width = 0.30
+
+    freq_window = np.ones_like(freq_mag)
+
+    mask = freq_mag > roll_start
+    freq_window[mask] = 0.5 * (1.0 + np.cos(np.pi * (freq_mag[mask] - roll_start) / roll_width))
+    freq_window[freq_mag >= 1.0] = 0.0
+
+    H_delta *= freq_window
+
+    # time domain
+    h_full = scipy.fft.fftshift(
+        scipy.fft.ifft(H_delta).real
+    )
+
+    # causal extraction
     fir_center = FFT_LEN // 2 - phase_advance_int
-            
-    # Isolate causal tail taps for t >= 1
-    h_full = scipy.fft.fftshift(scipy.fft.ifft(H_inv).real)
-    fir_tail = h_full[fir_center + 1:]
-    
-    # Safely insert the tail up to the maximum available filter length
-    insert_len = min(len(fir_tail), FIR_LEN - 1)
+
+    fir_tail = h_full[fir_center+1:]
+
     fir_kernel = np.zeros(FIR_LEN, dtype=np.float32)
-    fir_kernel[1:1 + insert_len] = fir_tail[:insert_len]
 
-    # Fade out the tail using a half-cosine window
-    fade_len = round(FIR_LEN * 0.30) # fade out last 15%
-    fade_axis = np.arange(fade_len, dtype=np.float64)
-    fir_kernel[FIR_LEN - fade_len:] *= 0.5 * (1.0 + np.cos(np.pi * fade_axis / fade_len))
+    insert_len = min(len(fir_tail), FIR_LEN-1)
+    fir_kernel[1:1+insert_len] = fir_tail[:insert_len]
 
-    # 3. Base DC Normalization: Enforce DC Unity strictly on the center tap (t=0)
-    # MUST sum the faded kernel itself, not the raw infinite tail
+    # preserve unity DC
     fir_kernel[0] = 1.0 - np.sum(fir_kernel[1:])
 
     if state['count'] == 0:
@@ -636,7 +692,7 @@ def _show_group_delay_debug(
 LUMA_NOISE_FLOOR_DB = -45.0
 NOISE_REF_AMPLITUDE = 1.0
 
-LTI_GAIN_SCALE = 90.0
+LTI_GAIN_SCALE = 80.0
 LTI_GAIN_MAX = 8.0
 
 # How many noise-floors above the floor an edge needs to be before LTI treats

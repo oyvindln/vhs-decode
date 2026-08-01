@@ -1772,7 +1772,7 @@ def _chroma_phase_correction_from_sync(
     valid_count = state_dict['count']
     
     # 2. Compute the aggregate S_xy directly from the history buffer
-    rolling_S_xy = np.sum(state_dict['s_xy_history'][:valid_count], axis=0)
+    rolling_S_xy = np.sum(state_dict['s_xy_delay_history'][:valid_count], axis=0)
     
     # 3. Calculate Phase Error
     phase_error_base = -np.unwrap(np.angle(rolling_S_xy))
