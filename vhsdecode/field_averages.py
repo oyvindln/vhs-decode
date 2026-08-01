@@ -16,7 +16,7 @@ class FieldAverage:
             group_delay_len = 0
 
         self.group_delay_len = group_delay_len
-        self._group_delay = deque(maxlen=self.group_delay_len)
+        self._group_delay = {}
         # self.line_length = StackableMA()
         # self.vsync_dist = StackableMA
 

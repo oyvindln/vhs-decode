@@ -1761,18 +1761,17 @@ def _chroma_phase_correction_from_sync(
     freqs_up = sps_fft.rfftfreq(fft_len, d=1.0 / (fsc * 4.0))
     
     # Fast exit if no valid measurements have been accumulated
-    if len(group_delay_state) == 0 or group_delay_state[0].get('count', 0) == 0:
+    if not group_delay_state or group_delay_state.get('count', 0) == 0:
         return np.ones_like(freqs_up, dtype=np.complex128)
 
     phase_correction = np.zeros_like(freqs_up, dtype=np.float64)
     scale_factor = GROUP_DELAY_FFT_LEN / fft_len
     
     # 1. Extract the new state shape (Ring Buffer)
-    state_dict = group_delay_state[0]
+    state_dict = group_delay_state
     valid_count = state_dict['count']
     
     # 2. Compute the aggregate S_xy directly from the history buffer
-    # (Summing the complex vectors achieves the same phase as the old iterative += method)
     rolling_S_xy = np.sum(state_dict['s_xy_history'][:valid_count], axis=0)
     
     # 3. Calculate Phase Error
@@ -1805,7 +1804,7 @@ def _chroma_phase_correction_from_sync(
     # is in sync pulse based fft vs. the burst phase fft, burst phase is higher resolution
     scaling_weight = np.clip(scale_factor, 0.0, 1.0)
 
-    # Apply weighted phase correction (now done once instead of re-written iteratively)
+    # Apply weighted phase correction
     phase_correction[chroma_band_mask] = (
         phase_error[chroma_band_mask] * 
         delay_modulation[chroma_band_mask] * 

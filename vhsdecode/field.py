@@ -1170,7 +1170,7 @@ class FieldShared:
                     sync_len=sync_len,
                     back_porch_len=back_porch_len,
                     target_transition=target_transition,
-                    group_delay_state=self.rf.field_averages.group_delay,
+                    state=self.rf.field_averages.group_delay,
                     debug=self.rf.debug_plot and self.rf.debug_plot.is_plot_requested("inverse_eq")
                 )
 
