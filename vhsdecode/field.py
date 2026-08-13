@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
 from vhsdecode.doc import detect_dropouts_rf
-from vhsdecode.chroma import decode_chroma, decode_chroma_phase_rotation
+from vhsdecode.chroma.heterodyne import decode_chroma, decode_chroma_phase_rotation
 
 from vhsdecode.debug_plot import plot_data_and_pulses
 

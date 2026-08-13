@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from numba.typed import List
 
-from vhsdecode.chroma import BurstInfo, chroma_automatic_gain, upconvert_chroma
+from vhsdecode.chroma.heterodyne import BurstInfo, chroma_automatic_gain, upconvert_chroma
 
 OUTWIDTH = 1135
 LINESOUT = 313
