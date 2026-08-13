@@ -4,11 +4,11 @@ Public entry points are re-exported here so external code can keep
 importing from vhsdecode.chroma.
 """
 
-from vhsdecode.chroma.qam import (
+from vhsdecode.chroma.common import (
     chroma_color_under_filter,
     decode_chroma,
-    decode_chroma_phase_rotation,
 )
+from vhsdecode.chroma.qam import decode_chroma_phase_rotation
 from vhsdecode.chroma.secam import (
     SECAM_IDENT_MIN_CONFIDENCE,
     SECAM_M1_SEPARATION_RANGE,
