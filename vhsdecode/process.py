@@ -16,7 +16,7 @@ import numpy.fft as npfft
 import lddecode.utils as lddu
 import vhsdecode.utils as utils
 from vhsdecode.utils import StackableMA, filtfft
-from vhsdecode.chroma import chroma_color_under_filter
+from vhsdecode.chroma.heterodyne import chroma_color_under_filter
 
 import vhsdecode.formats as vhs_formats
 
