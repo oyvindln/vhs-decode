@@ -292,6 +292,16 @@ def main(args=None, use_gui=False):
     )
     chroma_group = parser.add_argument_group("Chroma decoding options")
     chroma_group.add_argument(
+        "--cagc",
+        dest="cagc_fields",
+        type=int,
+        default=0,
+        help=(
+            "Sets the number of fields to use for averaging chroma automatic gain control. Default is 0 (no averaging). "
+            "\nThis is useful for correcting chroma gain issues commonly present in camcorder recordings."
+        ),
+    )
+    chroma_group.add_argument(
         "--cafc",
         "--chroma_AFC",
         dest="cafc",
@@ -636,6 +646,7 @@ def main(args=None, use_gui=False):
     rf_options["cti_mix"] = args.cti_mix
     rf_options["cti_width"] = args.cti_width
     rf_options["cafc"] = args.cafc
+    rf_options["cagc_fields"] = args.cagc_fields
     rf_options["disable_right_hsync"] = args.disable_right_hsync
     rf_options["fallback_vsync"] = args.fallback_vsync
     rf_options["relaxed_line0"] = args.relaxed_line0
