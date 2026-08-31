@@ -86,17 +86,16 @@ jobs:
           "${APPIMAGE_PATH}" --appimage-extract
           APPDIR_PATH="${PWD}/squashfs-root"
           BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
-          BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" -type f -name 'libportaudio.so.2' | head -n 1)"
+          BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" \( -type f -o -type l \) \( -name 'libportaudio.so.2' -o -name 'libportaudio.so' \) | head -n 1)"
           if [ -z "${BUNDLED_PYTHON}" ] || [ ! -x "${BUNDLED_PYTHON}" ]; then
             echo "Failed to locate bundled Python interpreter in AppImage."
             exit 1
           fi
-          if [ -z "${BUNDLED_PORTAUDIO}" ] || [ ! -f "${BUNDLED_PORTAUDIO}" ]; then
-            echo "Failed to locate bundled libportaudio.so.2 inside AppImage."
+          if [ -z "${BUNDLED_PORTAUDIO}" ]; then
+            echo "Failed to locate bundled libportaudio shared library inside AppImage."
             exit 1
           fi
-
-          APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path"
+          APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path; assert 'portaudio' in os.path.basename(lib_path).lower(), lib_path"
           rm -rf squashfs-root
 
       - name: Upload binary artifact
