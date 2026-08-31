@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Setup environment
         run: |
-          dnf install --assumeyes git python3.12-pip gcc-c++ file
+          dnf install --assumeyes git python3.12-pip gcc-c++ file portaudio
 
       - uses: actions/checkout@v5
         with:
@@ -55,14 +55,43 @@ jobs:
             echo "PyQt6==6.7.1"
             echo "$(pwd)[hifi_gui_qt6,hifi_gnuradio]"
           } > _build_appimage/requirements.txt
+          PORTAUDIO_LIB_PATH="$(rpm -ql portaudio | grep -E 'libportaudio\.so\.2$' | head -n 1)"
+          if [ -z "${PORTAUDIO_LIB_PATH}" ] || [ ! -f "${PORTAUDIO_LIB_PATH}" ]; then
+            echo "Failed to locate libportaudio.so.2 from the portaudio package."
+            exit 1
+          fi
+          cp "${PORTAUDIO_LIB_PATH}" _build_appimage/libportaudio.so.2
+          ln -sf libportaudio.so.2 _build_appimage/libportaudio.so
 
-          python-appimage build app -p 3.12 _build_appimage
+          python-appimage build app -p 3.12 \
+            -x _build_appimage/libportaudio.so.2 \
+            -x _build_appimage/libportaudio.so \
+            _build_appimage
           APPIMAGE_SRC="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
           if [ -z "${APPIMAGE_SRC}" ]; then
             echo "Failed to locate generated AppImage."
             exit 1
           fi
           mv "${APPIMAGE_SRC}" "./decode-${{ matrix.arch }}.AppImage"
+
+      - name: Smoke test AppImage hifi preview dependency bundle
+        run: |
+          APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
+          "${APPIMAGE_PATH}" --appimage-extract
+          APPDIR_PATH="${PWD}/squashfs-root"
+          BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
+          BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" -type f -name 'libportaudio.so.2' | head -n 1)"
+          if [ -z "${BUNDLED_PYTHON}" ] || [ ! -x "${BUNDLED_PYTHON}" ]; then
+            echo "Failed to locate bundled Python interpreter in AppImage."
+            exit 1
+          fi
+          if [ -z "${BUNDLED_PORTAUDIO}" ] || [ ! -f "${BUNDLED_PORTAUDIO}" ]; then
+            echo "Failed to locate bundled libportaudio.so.2 inside AppImage."
+            exit 1
+          fi
+
+          APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path"
+          rm -rf squashfs-root
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7

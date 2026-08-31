@@ -113,14 +113,128 @@ SOUNDDEVICE_AVAILABLE = None
 from vhsdecode.hifi.HiFiDecode import HiFiDecode
 from vhsdecode.hifi.PostProcessor import PostProcessor
 
+def _linux_portaudio_search_roots() -> list[str]:
+    roots = []
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        roots.extend(
+            [
+                appdir,
+                os.path.join(appdir, "usr", "lib"),
+                os.path.join(appdir, "usr", "lib64"),
+                os.path.join(appdir, "lib"),
+                os.path.join(appdir, "lib64"),
+            ]
+        )
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        roots.extend(
+            [
+                meipass,
+                os.path.join(meipass, "usr", "lib"),
+                os.path.join(meipass, "usr", "lib64"),
+                os.path.join(meipass, "lib"),
+                os.path.join(meipass, "lib64"),
+            ]
+        )
+
+    executable_dir = os.path.dirname(sys.executable)
+    if executable_dir:
+        roots.extend(
+            [
+                executable_dir,
+                os.path.join(executable_dir, "lib"),
+                os.path.join(executable_dir, "..", "lib"),
+            ]
+        )
+
+    ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+    if ld_library_path:
+        roots.extend(
+            [entry for entry in ld_library_path.split(os.pathsep) if entry]
+        )
+
+    return roots
+
+
+def _iter_linux_portaudio_candidates():
+    seen_paths = set()
+    for root in _linux_portaudio_search_roots():
+        normalized_root = os.path.realpath(root)
+        if normalized_root in seen_paths:
+            continue
+        seen_paths.add(normalized_root)
+
+        for fallback_name in ("libportaudio.so.2", "libportaudio.so"):
+            candidate_path = os.path.join(normalized_root, fallback_name)
+            if os.path.isfile(candidate_path):
+                yield candidate_path
+
+    for fallback_name in ("libportaudio.so.2", "libportaudio.so"):
+        yield fallback_name
+
+
+def _import_sounddevice_with_linux_portaudio_fallback():
+    import ctypes.util
+
+    original_find_library = ctypes.util.find_library
+    last_error = None
+
+    for candidate in _iter_linux_portaudio_candidates():
+        def _find_library_with_fallback(name, _candidate=candidate):
+            if name == "portaudio":
+                return _candidate
+            return original_find_library(name)
+
+        ctypes.util.find_library = _find_library_with_fallback
+        try:
+            sys.modules.pop("sounddevice", None)
+            import sounddevice as imported_sounddevice
+            return imported_sounddevice
+        except (ImportError, OSError) as error:
+            last_error = error
+        finally:
+            ctypes.util.find_library = original_find_library
+
+    if last_error is not None:
+        raise last_error
+    raise OSError("PortAudio library not found")
+
 
 def _sounddevice_available():
     global sd, SOUNDDEVICE_AVAILABLE
 
     if SOUNDDEVICE_AVAILABLE is None:
-        try:
-            import sounddevice as imported_sounddevice
-        except (ImportError, OSError):
+        imported_sounddevice = None
+        is_linux = sys.platform.startswith("linux")
+        prefer_bundled_portaudio = is_linux and (
+            bool(os.environ.get("APPDIR")) or bool(getattr(sys, "_MEIPASS", None))
+        )
+
+        if prefer_bundled_portaudio:
+            try:
+                imported_sounddevice = (
+                    _import_sounddevice_with_linux_portaudio_fallback()
+                )
+            except (ImportError, OSError):
+                imported_sounddevice = None
+
+        if imported_sounddevice is None:
+            try:
+                import sounddevice as imported_sounddevice
+            except (ImportError, OSError):
+                if is_linux:
+                    try:
+                        imported_sounddevice = (
+                            _import_sounddevice_with_linux_portaudio_fallback()
+                        )
+                    except (ImportError, OSError):
+                        imported_sounddevice = None
+                else:
+                    imported_sounddevice = None
+
+        if imported_sounddevice is None:
             SOUNDDEVICE_AVAILABLE = False
         else:
             sd = imported_sounddevice
