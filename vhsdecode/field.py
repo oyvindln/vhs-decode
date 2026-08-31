@@ -10,7 +10,11 @@ import matplotlib.pyplot as plt
 import vhsdecode.sync as sync
 import vhsdecode.formats as formats
 from vhsdecode.doc import detect_dropouts_rf
-from vhsdecode.chroma import decode_chroma, decode_chroma_phase_rotation
+from vhsdecode.chroma import (
+    apply_chroma_envelope_gain,
+    decode_chroma,
+    decode_chroma_phase_rotation,
+)
 
 from vhsdecode.debug_plot import plot_data_and_pulses
 
@@ -1122,6 +1126,16 @@ class FieldShared:
         )
 
     def lock_to_burst(self):
+        # Take the tape's amplitude noise out of the color-under before
+        # anything is measured from it. The luma FM carrier and the color-under
+        # were written by the same head at the same instant, so the luma
+        # envelope measures the loss they shared. It happens here, on the raw RF
+        # sample grid, because this is the last point before the bursts are
+        # measured - so those measurements read a corrected signal rather than
+        # having to be compensated for one afterwards.
+        apply_chroma_envelope_gain(self)
+
+        # required to trigger the chroma downscaling to happen again (if this is run after scaling for some reason)
         self.chroma_tbc_buffer = None
         (
             self.rf.track_phase,

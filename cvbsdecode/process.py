@@ -865,13 +865,19 @@ class CVBSDecodeInner(ldd.RFDecode):
             plt.show()
         #            exit(0)
 
-        video_out = np.rec.array(
-            [luma, luma05, videoburst],
-            names=["demod", "demod_05", "demod_burst"],
-        )
+        video_out = {
+            "demod": luma,
+            "demod_05": luma05,
+            "demod_burst": videoburst,
+        }
 
         rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
+            {
+                name: channel[self.blockcut : -self.blockcut_end]
+                for name, channel in video_out.items()
+            }
+            if cut
+            else video_out
         )
 
         return rv

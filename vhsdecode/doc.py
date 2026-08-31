@@ -95,6 +95,23 @@ def detect_dropouts_rf(field, dod_options):
     # could be merged.
     dropouts_rf = list(filter(lambda s: s[1] - s[0] > vhs_formats.DOD_MIN_LENGTH, dropouts_rf))
 
+    debug_plot = getattr(field.rf, "debug_plot", None)
+    if debug_plot and debug_plot.is_plot_requested("luma_noise"):
+        from vhsdecode.debug_plot import plot_luma_noise
+
+        plot_luma_noise(
+            env,
+            field.data["video"]["demod"],
+            dropouts_rf,
+            threshold,
+            hysteresis,
+            start_rf,
+            end_rf,
+            field.linelocs,
+            field.rf.hztoire,
+            field.rf.dod_options.dod_threshold_p,
+        )
+
     return map_dropouts_rf_to_tbc(dropouts_rf, start_line, end_line, field.linelocs, field.outlinelen, field.lineoffset)
 
 def map_dropouts_rf_to_tbc(errlist, start_line_idx, end_line_idx, linelocs, outlinelen, lineoffset):

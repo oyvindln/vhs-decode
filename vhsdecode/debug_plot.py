@@ -512,3 +512,102 @@ def plot_final_chroma_field(input_chroma, final_chroma) -> None:
         ax2.legend()
         plt.show()
         sys.exit()
+
+
+def plot_luma_noise(
+    envelope,
+    demod,
+    dropouts,
+    threshold,
+    hysteresis,
+    start_rf,
+    end_rf,
+    linelocs,
+    hz_to_ire,
+    dropout_fraction,
+):
+    """Luma carrier amplitude beside the luma it was demodulated from.
+
+    The carrier is frequency modulated, so its amplitude should be constant and
+    everything in the top trace is the tape rather than the picture. That makes
+    it a continuous noise profile: where it dips, the demodulator's output noise
+    rises and the color-under recorded alongside it lost signal at the same
+    instant.
+
+    All three panels cover the whole field on one shared axis, so they line up
+    sample for sample and zooming or panning any of them moves the others with
+    it. Nothing is zoomed in advance - finding where the interesting excursions
+    are is what the plot is for.
+
+    Shaded spans are the dropouts the decoder detected from this same envelope,
+    so the plot shows both what the threshold caught and the shallower
+    excursions it did not.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    envelope = np.asarray(envelope, dtype=float)
+    demod = np.asarray(demod, dtype=float)
+    samples = np.arange(start_rf, end_rf)
+    window = envelope[start_rf:end_rf]
+    reference = float(np.median(window)) if len(window) else 1.0
+
+    # the same weight the color-under amplitude correction uses to decide how
+    # far to trust itself, so the plot shows where that correction backs off
+    relative = window / reference if reference > 0 else window
+    squared = relative * relative
+    half = dropout_fraction * dropout_fraction
+    confidence = squared * (1.0 + half) / (squared + half)
+
+    fig, (ax_env, ax_luma, ax_conf) = plt.subplots(
+        3,
+        1,
+        figsize=(14, 9),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 3, 1]},
+    )
+
+    ax_env.plot(
+        samples, window, color="tab:blue", linewidth=0.5, label="carrier amplitude"
+    )
+    ax_env.axhline(
+        reference, color="tab:grey", linestyle=":", linewidth=1, label="field median"
+    )
+    ax_env.axhline(
+        threshold, color="tab:red", linestyle="--", linewidth=1,
+        label="dropout threshold",
+    )
+    ax_env.axhline(
+        threshold * hysteresis, color="tab:orange", linestyle="--", linewidth=1,
+        label="recovery (hysteresis)",
+    )
+    ax_env.set_ylabel("carrier amplitude")
+    ax_env.legend(loc="lower left", fontsize="small", ncol=2)
+    ax_env.set_title(
+        "Luma carrier amplitude (noise profile), detected dropouts, "
+        "and the demodulated luma"
+    )
+
+    ax_luma.plot(
+        samples, hz_to_ire(demod[start_rf:end_rf]), color="tab:green",
+        linewidth=0.5, label="demodulated luma",
+    )
+    for level in (0, 100):
+        ax_luma.axhline(level, color="tab:grey", linestyle=":", linewidth=1)
+    ax_luma.set_ylabel("luma (IRE)")
+    ax_luma.legend(loc="lower left", fontsize="small")
+
+    ax_conf.plot(samples, confidence, color="tab:purple", linewidth=0.5)
+    ax_conf.set_ylim(0, 1.05)
+    ax_conf.set_ylabel("correction\nconfidence")
+    ax_conf.set_xlabel("RF sample")
+
+    for start, end in dropouts or []:
+        if end < 0:
+            end = end_rf
+        for ax in (ax_env, ax_luma, ax_conf):
+            ax.axvspan(start, end, color="tab:red", alpha=0.3, linewidth=0)
+
+    ax_env.set_xlim(start_rf, end_rf)
+    fig.tight_layout()
+    plt.show()
