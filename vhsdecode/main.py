@@ -330,6 +330,16 @@ def main(args=None, use_gui=False):
         help="Detects and corrects color-under heterodyne rotation change around head-switching area. Corrects chroma artifacts around head-switching area for color-under formats. (Experimental feature)",
     )
     chroma_group.add_argument(
+        "--chroma_env_gain",
+        dest="chroma_env_gain",
+        type=float,
+        default=1,
+        help=(
+            "Corrects color-under amplitude from the luma FM envelope (color-under only). Wet/dry mix of the correction, 0 disables it. Default is 1. (Experimental feature)"
+            "\n  The luma FM carrier and the color-under chroma were written by the same head at the same instant, so head-to-medium separation loss is shared between them and scales with wavelength. The luma envelope therefore measures, at full sample rate, the intra-line amplitude profile that the once-per-line color burst cannot see, and restores saturation through dropouts and modulation noise. Amplifies chroma noise in the regions it corrects."
+        ),
+    )
+    chroma_group.add_argument(
         "--cti_mix",
         dest="cti_mix",
         type=float,
@@ -408,7 +418,7 @@ def main(args=None, use_gui=False):
             " some of the chroma processing."
         ),
     )
-    plot_options = "demodblock, deemphasis, raw_pulses, line_locs, rf_luma, vsync_levels"
+    plot_options = "demodblock, deemphasis, raw_pulses, line_locs, rf_luma, vsync_levels, luma_noise"
     debug_group.add_argument(
         "--dp",
         "--debug_plot",
@@ -647,6 +657,7 @@ def main(args=None, use_gui=False):
     rf_options["cti_width"] = args.cti_width
     rf_options["cafc"] = args.cafc
     rf_options["cagc_fields"] = args.cagc_fields
+    rf_options["chroma_env_gain"] = args.chroma_env_gain
     rf_options["disable_right_hsync"] = args.disable_right_hsync
     rf_options["fallback_vsync"] = args.fallback_vsync
     rf_options["relaxed_line0"] = args.relaxed_line0

@@ -143,6 +143,11 @@ def get_rfparams_pal_vhs(rfparams_pal: dict, tape_speed: int = 0) -> dict:
     RFParams_PAL_VHS["video_lpf_order"] = 6
 
     # PAL color under carrier is 40H + 1953
+    # Recorded video track width, micrometers. JVC VTG82063 gives PAL LP as
+    # 0.024 mm at 11.70 mm/s against SP's 23.39; the exact ratio is 24.51.
+    # PAL VHS has no EP speed, so LP repeats for any higher index.
+    RFParams_PAL_VHS["video_track_width"] = [49.0, 24.5, 24.5][min(tape_speed, 2)]
+
     RFParams_PAL_VHS["color_under_carrier"] = ((625 * 25) * 40) + 1953
 
     # Upper frequency of bandpass to filter out chroma from the rf signal.
@@ -287,6 +292,11 @@ def get_rfparams_ntsc_vhs(rfparams_ntsc: dict, tape_speed: int = 0) -> dict:
     RFParams_NTSC_VHS["video_lpf_supergauss"] = True
     RFParams_NTSC_VHS["video_lpf_freq"] = 6600000
     RFParams_NTSC_VHS["video_lpf_order"] = 9
+
+    # Recorded video track width, micrometers. JVC VTG82063 section 1: 0.058 mm
+    # at SP, 0.019 mm at EP. The drum turns at one rate whatever the tape speed,
+    # so the pitch follows the tape speed and EP is 58 * 11.12 / 33.35 = 19.34.
+    RFParams_NTSC_VHS["video_track_width"] = [58.0, 29.0, 19.3][tape_speed]
 
     # NTSC color under carrier is 40H
     RFParams_NTSC_VHS["color_under_carrier"] = (525 * (30 / 1.001)) * 40

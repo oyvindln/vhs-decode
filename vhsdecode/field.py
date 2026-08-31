@@ -1122,7 +1122,9 @@ class FieldShared:
         )
 
     def lock_to_burst(self):
+        # required to trigger the chroma downscaling to happen again (if this is run after scaling for some reason)
         self.chroma_tbc_buffer = None
+        self.chroma_env_gain_buffer = None
         (
             self.rf.track_phase,
             self.phase_sequence,

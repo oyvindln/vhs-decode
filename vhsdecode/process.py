@@ -762,6 +762,7 @@ class VHSRFDecode(ldd.RFDecode):
                 "chroma_audio_notch",
                 "chroma_offset",
                 "cagc_fields",
+                "chroma_env_gain",
                 "cti_mix",
                 "cti_width",
                 "ire0_adjust",
@@ -808,6 +809,7 @@ class VHSRFDecode(ldd.RFDecode):
             self.DecoderParams.get("chroma_audio_notch_freq", 0) > 0,
             int(self.DecoderParams.get("chroma_offset", 5) * (self.freq / 40.0)),
             rf_options.get("cagc_fields", 0),
+            rf_options.get("chroma_env_gain", 0),
             rf_options.get("cti_mix", 1),
             rf_options.get("cti_width", 2),
             ire0_adjust,
@@ -1467,10 +1469,33 @@ class VHSRFDecode(ldd.RFDecode):
             out_video = demod
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
-        video_out = np.rec.array(
-            [out_video, out_video05, out_chroma, env],
-            names=["demod", "demod_05", "demod_burst", "envelope"],
-        )
+        if self.options.chroma_env_gain > 0:
+            # The color-under amplitude correction models the carrier amplitude
+            # as a function of the instantaneous carrier frequency, so it needs
+            # the demodulated frequency before de-emphasis - the de-emphasised
+            # output understates deviation above the de-emphasis corner, which
+            # is well inside the bandwidth the envelope is measured over.
+            # "demod_raw" is the name lddecode's own demodblock already uses for
+            # this signal. Only carried when the correction is enabled, so the
+            # extra channel costs nothing otherwise.
+            video_out = np.rec.array(
+                [
+                    out_video, demod.astype(np.float32), out_video05, out_chroma,
+                    env,
+                ],
+                names=[
+                    "demod",
+                    "demod_raw",
+                    "demod_05",
+                    "demod_burst",
+                    "envelope",
+                ],
+            )
+        else:
+            video_out = np.rec.array(
+                [out_video, out_video05, out_chroma, env],
+                names=["demod", "demod_05", "demod_burst", "envelope"],
+            )
 
         rv["video"] = (
             video_out[self.blockcut : -self.blockcut_end] if cut else video_out

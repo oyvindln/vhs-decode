@@ -5,11 +5,235 @@ import lddecode.core as ldd
 import scipy.signal as sps
 import scipy.fft as sps_fft
 from vhsdecode.rust_utils import sosfiltfilt_rust
+from vhsdecode import luma_amplitude
 
 import numba
 from numba import njit
 from numba.experimental import jitclass
 from functools import cache
+
+
+# Sentinel passed to the up-conversion when no envelope-derived amplitude
+# correction is available; numba needs a concrete array of the same dtype.
+EMPTY_CHROMA_GAIN = np.empty(0, dtype=np.float64)
+
+
+def corrected_burst_amplitudes(
+    chroma_gain, phase_sequence, burstarea, lineoffset, outwidth
+):
+    """Each burst's amplitude, as it will be after the correction is applied.
+
+    The burst is measured before the up-conversion and the correction lands
+    inside it, so the amplitude the automatic gain control would otherwise act
+    on is the one from before. Correcting the measurement here keeps the two in
+    step; the mean over the burst window is what the correction does to that
+    window.
+
+    Returns the measured amplitudes unchanged when the correction is off.
+    """
+    amplitudes = np.array(
+        [burst.amplitude for burst in phase_sequence], dtype=np.float64
+    )
+    if len(chroma_gain) == 0:
+        return amplitudes
+
+    for index in range(len(phase_sequence)):
+        line_start = (phase_sequence[index].line_number - lineoffset) * outwidth
+        window_start = line_start + burstarea[0]
+        window_end = line_start + burstarea[1]
+        if (
+            window_start >= 0
+            and window_end <= len(chroma_gain)
+            and window_end > window_start
+        ):
+            amplitudes[index] *= np.mean(chroma_gain[window_start:window_end])
+    return amplitudes
+
+
+# ---------------------------------------------------------------------------
+# Color-under amplitude correction from the luma carrier's amplitude
+#
+# The Luma FM carrier has a mostly constant amplitude at record time, so every
+# deviation from constant is imposed by the tape. The luma carrier and the
+# color-under were written by the same head, onto the same oxide, at the same
+# instant, so head-to-medium separation is shared between them and scales with
+# wavelength. `vhsdecode.luma_amplitude` measures that deviation; everything
+# here scales it across to the color-under and applies it.
+#
+# Measured on the RF sample grid over the assembled field, ahead of the time
+# base correction, so the measurement is free of its wow level adjustment - a
+# timebase artifact, not tape noise. Applied on the output grid, resampled
+# through the same time base correction as the chroma and with the same shift,
+# so it lands on the samples it was measured from, and inside the up-conversion
+# so it cannot feed back into the burst measurements that set chroma phase and
+# line locations.
+
+# How the luma carrier's amplitude noise transfers to the color-under, and how
+# far it can be trusted.
+#
+# Format figures are from the JVC Video Technical Guide VTG82063 section 1:
+# writing speed 5.80 m/s, video track pitch 0.058 mm at SP and 0.019 mm at EP,
+# luma FM sync tip 3.4 MHz and peak white 4.4 MHz, colour-under 629.371 kHz.
+# At that writing speed the luma carrier is recorded at 1.32 to 1.71 um and the
+# colour-under at 9.22 um, so the two bands sit about a factor of six apart in
+# wavelength - which is the whole reason one can be corrected from the other.
+#
+# The transfer. Head-to-medium separation modulates both bands together, and the
+# Wallace relation makes that transfer the ratio of their wavelengths - at a
+# common writing speed, the inverse ratio of their frequencies. Everything else
+# the carrier passed through drops out of it. Gap loss and coating thickness
+# loss do not depend on separation, so they differentiate away, and the transfer
+# for a spacing perturbation is the frequency ratio whatever the tape is made
+# of. That is why the guide's silence on head gap length and coating thickness
+# does not matter here: those terms cancel.
+#
+# But not all of the amplitude noise is spacing. Particulate density varies from
+# one reproduce volume to the next, and that varies the flux at every wavelength
+# equally - it transfers at unity, not at the wavelength ratio. So the measured
+# coupling sits above the pure Wallace value, and what sets it is the fraction
+# of the noise that is wavelength independent:
+#
+#     transfer = fraction + (1 - fraction) * wavelength ratio
+#
+# Calibrated at 0.19, which is where the measured within-field luma-to-chroma
+# coupling of 0.186-0.248 lands once the attenuation of its own regression is
+# taken into account. Bounded by construction: 0 is pure spacing loss, 1 is
+# noise that ignores wavelength entirely.
+WAVELENGTH_INDEPENDENT_NOISE = 0.194
+
+# The trust. A correction driven by a noisy estimate has to be scaled back by
+# the Wiener factor, signal power over signal plus noise power. That noise is
+# particulate - the medium is a finite number of particles - so its power goes
+# as one over the number the head reproduces from, and that count is
+# proportional to track width. Tape signal-to-noise therefore improves by 3 dB
+# per doubling of track width, and the weight is
+#
+#     weight = track width / (track width + half-coupling width)
+#
+# where the half-coupling width is where signal and noise powers are equal.
+# At 18.3 um that puts the amplitude measurement at 5.0 dB at the 58 um SP
+# track and 0.2 dB at the 19.3 um EP track - which is why the correction has to
+# be scaled back so much harder at the slower speeds. It matters: measured
+# optimum amounts were 0.94-1.07 across five SP patterns but 0.62-0.73 across
+# four EP patterns, and running the SP value on EP does not merely
+# under-perform, it makes the picture worse.
+#
+# This and the fraction above are calibrated against those two speeds and
+# reproduce both exactly, so neither is separately identified - two parameters
+# through two points. LP falls out at 0.61 and PAL SP at 0.73; neither has been
+# tested. Note the knee lands within 5% of the EP width itself, which is the
+# usual sign of a fit with no degrees of freedom left over.
+HALF_COUPLING_TRACK_WIDTH = 18.29
+
+# Used only when a format supplies no track width of its own.
+REFERENCE_TRACK_WIDTH = 58.0
+
+
+@njit(cache=True, nogil=True, fastmath=True)
+def _envelope_gain_from_deviation(
+    deviation,
+    carrier_hz,
+    color_under_carrier_hz,
+    wavelength_independent,
+    trust,
+    dropout_fraction,
+):
+    """The color-under gain that reverses the luma's measured amplitude noise.
+
+    The exponent is the transfer from luma amplitude loss to color-under
+    amplitude loss: the wavelength ratio for the part of the noise that is
+    spacing, unity for the part that is not, taken per sample against the luma
+    carrier's own instantaneous frequency because that is what set the luma
+    wavelength at that moment. Scaled back by how far the measurement can be
+    trusted at this track width.
+
+    The confidence weight is the Wiener weight for an estimate whose noise is
+    fixed and whose signal is the measured level, normalised to one at nominal
+    so undamaged material is left exactly as it was. Where the carrier has
+    collapsed, scaling the chroma up would restore noise rather than
+    saturation, so the correction is withdrawn there.
+
+    One pass, in float32 out: this runs over every sample of every field.
+    """
+    count = len(deviation)
+    gain = np.empty(count, dtype=np.float32)
+    half = dropout_fraction * dropout_fraction
+    for i in range(count):
+        value = deviation[i]
+        squared = value * value
+        confidence = squared * (1.0 + half) / (squared + half)
+        wavelength_ratio = color_under_carrier_hz / carrier_hz[i]
+        exponent = (
+            wavelength_independent
+            + (1.0 - wavelength_independent) * wavelength_ratio
+        ) * trust
+        gain[i] = np.exp(-exponent * np.log(value) * confidence)
+    return gain
+
+
+def chroma_envelope_gain(field, shift):
+    """The color-under amplitude correction, on the chroma output grid.
+
+    Measures the luma carrier's amplitude deviation over the field, scales it
+    across to the color-under by the wavelength ratio, and puts it through the
+    identical time base correction the chroma gets.
+
+    Called beside the chroma's own downscale and with the same shift, so the
+    two come off the resampler aligned by construction. Returns None when there
+    is nothing to correct, which leaves the chroma untouched.
+    """
+    rf = field.rf
+    decoder_params = rf.DecoderParams
+    if rf.options.chroma_env_gain <= 0 or rf.do_cafc:
+        return None
+    if (
+        "color_under_carrier" not in decoder_params
+        or "chroma_bpf_upper" not in decoder_params
+    ):
+        return None
+
+    measured = luma_amplitude.measure_amplitude_deviation(field)
+    if measured is None:
+        return None
+    deviation, carrier_hz = measured
+
+    # How far the measurement can be trusted at this track width.
+    track_width = decoder_params.get("video_track_width", REFERENCE_TRACK_WIDTH)
+    trust = track_width / (track_width + HALF_COUPLING_TRACK_WIDTH)
+
+    gain = _envelope_gain_from_deviation(
+        deviation,
+        carrier_hz,
+        decoder_params["color_under_carrier"],
+        WAVELENGTH_INDEPENDENT_NOISE,
+        trust,
+        rf.dod_options.dod_threshold_p,
+    )
+
+    # Through the same resampler as the chroma. `Field.downscale` can only
+    # resample a named channel of the field's record array, so this goes through
+    # `scale_field` directly - with the wow level adjustment switched off, since
+    # that adjustment belongs to demodulated signal channels and imposing it on
+    # a measurement would put the timebase's own wow into the correction.
+    outwidth = field.outlinelen
+    resampled = np.zeros(field.outlinecount * outwidth, dtype=np.float32)
+    interpolated_pixel_locs, wowfactors = field.computewow_scaled()
+    lddu.scale_field(
+        gain,
+        resampled,
+        interpolated_pixel_locs,
+        wowfactors,
+        rf.downscale_sinc_lut,
+        field.lineoffset,
+        outwidth,
+        wow_level_adjust_smoothing=field.wow_level_adjust_smoothing,
+        shift=shift,
+        apply_level_adjust=False,
+    )
+    return resampled if len(resampled) else None
+
+
+BURST_START_LINE=10
 
 
 @njit(cache=True, nogil=True, fastmath=True)
@@ -36,6 +260,7 @@ def chroma_automatic_gain(
     sync_tip_len,
     decode_average,
     decode_average_count,
+    burst_amplitude,
     smoothing_window=8,
     k=2.0
 ):
@@ -61,7 +286,15 @@ def chroma_automatic_gain(
     # extract gain values and track valid amplitudes
     for i in range(burst_count):
         current_burst = phase_sequence[i]
-        current_amp = current_burst.amplitude if current_burst.amplitude != 0 else 1e-8
+        # The burst measurements were taken before the envelope-derived
+        # amplitude correction was applied, so scale them by the gain that
+        # correction actually put on the burst window. Without this the two
+        # controls both act on the same per-line level: the correction lifts a
+        # burst the tape attenuated, and the automatic gain then lifts the whole
+        # line again because it is still reading the uncorrected measurement.
+        current_amp = burst_amplitude[i]
+        if current_amp == 0:
+            current_amp = 1e-8
 
         raw_gain = burst_abs_ref / current_amp
         raw_gains[i] = raw_gain
@@ -837,7 +1070,9 @@ def upconvert_chroma_phase_comp(
     color_under_carrier_fs,
     fsc,
     target_phase_even,
-    target_phase_odd
+    target_phase_odd,
+    chroma_gain,
+    chroma_gain_amount
 ):
     deg2rad_scale = np.pi / 180.0
     pi_over_two = np.pi / 2.0
@@ -855,6 +1090,9 @@ def upconvert_chroma_phase_comp(
     # Pre-generate a local pixel coordinate array to help Numba vectorize
     # Computing on a local range [0, outwidth) helps the compiler reason about alignment
     local_idx = np.arange(outwidth, dtype=np.float64)
+
+    apply_chroma_gain = chroma_gain_amount > 0.0
+    epsilon = np.finfo(np.float64).tiny
 
     for idx in range(num_bursts):
         current_burst = phase_rotation_sequence[idx]
@@ -896,13 +1134,38 @@ def upconvert_chroma_phase_comp(
         # Slice target and source arrays to provide direct contiguous memory views
         chroma_slice = chroma[linestart:lineend]
 
-        # No outer dependencies so LLVM can vectorize
-        for k in range(outwidth):
-            # Compute closed-form phase directly (no dependency on previous k)
-            theta_k = theta_0 + alpha * local_idx[k] + beta * (local_idx[k] * local_idx[k])
-            
-            # Vectorized trigonometric and arithmetic execution
-            chroma_slice[k] = chroma_slice[k] * -np.cos(theta_k) - dc_val
+        if apply_chroma_gain:
+            # Amplitude correction from the luma FM envelope. The gain has to
+            # act on zero-mean color under: a residual DC offset multiplied by
+            # a time varying gain and then mixed produces a real component at
+            # the subcarrier frequency, which reads as a synthetic burst, i.e.
+            # hue and saturation error correlated with tape damage. Scaling the
+            # deviation from the line's own fitted DC leaves the DC path
+            # untouched, so a gain of one reproduces the uncorrected result
+            # exactly.
+            gain_slice = chroma_gain[linestart:lineend]
+
+            # No outer dependencies so LLVM can vectorize
+            for k in range(outwidth):
+                # Compute closed-form phase directly (no dependency on previous k)
+                theta_k = theta_0 + alpha * local_idx[k] + beta * (local_idx[k] * local_idx[k])
+
+                gain_k = gain_slice[k]
+                if gain_k < epsilon:
+                    gain_k = epsilon
+                gain_k = 1.0 + (gain_k - 1.0) * chroma_gain_amount
+
+                # Vectorized trigonometric and arithmetic execution
+                corrected = dc_val + (chroma_slice[k] - dc_val) * gain_k
+                chroma_slice[k] = corrected * -np.cos(theta_k) - dc_val
+        else:
+            # No outer dependencies so LLVM can vectorize
+            for k in range(outwidth):
+                # Compute closed-form phase directly (no dependency on previous k)
+                theta_k = theta_0 + alpha * local_idx[k] + beta * (local_idx[k] * local_idx[k])
+
+                # Vectorized trigonometric and arithmetic execution
+                chroma_slice[k] = chroma_slice[k] * -np.cos(theta_k) - dc_val
 
 
 @njit(cache=True, nogil=True)
@@ -1853,7 +2116,12 @@ def process_chroma(
         # TODO: shift amount may need tuning / needs validation
         chroma_subcarrier_delay_cycles = field.rf.SysParams['fsc_mhz'] * 1e6 / (2.0 * np.pi * field.rf.DecoderParams["color_under_carrier"])
         chroma_subcarrier_delay_samples = chroma_subcarrier_delay_cycles * 4
-        chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst", shift=chroma_subcarrier_delay_samples * chroma_shift_direction)
+        chroma_downscale_shift = chroma_subcarrier_delay_samples * chroma_shift_direction
+
+        chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst", shift=chroma_downscale_shift)
+        # The luma amplitude correction rides the identical time base correction,
+        # with the same shift, so it lands on the samples it was measured from.
+        chroma_env_gain = chroma_envelope_gain(field, chroma_downscale_shift)
 
         # If chroma AFC is enabled
         if field.rf.do_cafc:
@@ -1900,8 +2168,10 @@ def process_chroma(
 
         field.rf.chroma_tbc_buffer = chroma
         field.chroma_tbc_buffer = chroma
+        field.chroma_env_gain_buffer = chroma_env_gain
     else:
         chroma = field.chroma_tbc_buffer
+        chroma_env_gain = field.chroma_env_gain_buffer
 
     burstarea = get_burst_area(field)
 
@@ -1936,6 +2206,21 @@ def process_chroma(
         # this uses the burst measurements to interpolate the correct phase of the color under heterodyne
         # phase issues are corrected continiously for each sample using a linear spline interpolated from the burst measurements
         # the mixing is performed on the upsampled signal to avoid aliasing introduced from the up-heterodyne mixing product
+        # Per-sample color-under amplitude correction measured from the luma
+        # FM envelope. Both bands were written by the same head at the same
+        # instant, so head-to-medium separation is shared between them and the
+        # envelope supplies the intra-line gain profile the once-per-line burst
+        # cannot see. An empty array leaves the up-conversion unchanged.
+        # Measure the luma envelope for changes in amplitude that do not follow the demodulated signal
+        # Changes in amplitude that are not correlated to the demodulated luma's frequency are likely noise
+        # This uses the luma's carrier's amplitude as a base to measure amplitude based noise and reverse this noise in the QAM color under
+        #
+        chroma_gain = EMPTY_CHROMA_GAIN
+        chroma_gain_amount = 0.0
+        if chroma_env_gain is not None and len(chroma_env_gain) == len(chroma):
+            chroma_gain = chroma_env_gain.astype(np.float64)
+            chroma_gain_amount = field.rf.options.chroma_env_gain
+
         upconvert_chroma_phase_comp(
             chroma, # modifies this in place
             lineoffset,
@@ -1945,6 +2230,8 @@ def process_chroma(
             field.rf.SysParams["fsc_mhz"] * 1e6,
             target_phase_even,
             target_phase_odd,
+            chroma_gain,
+            chroma_gain_amount,
         )
         uphet = chroma
     else:
@@ -2030,6 +2317,12 @@ def process_chroma(
     else:
         decode_average = 0
 
+    # The burst amplitudes the correction leaves behind, so the automatic gain
+    # control measures the signal it is actually acting on.
+    burst_amplitude = corrected_burst_amplitudes(
+        chroma_gain, field.phase_sequence, burstarea, lineoffset, outwidth
+    )
+
     field_average, chroma_noise_floor = chroma_automatic_gain(
         uphet,
         field.rf.SysParams["burst_abs_ref"],
@@ -2037,7 +2330,8 @@ def process_chroma(
         field.burst_detected_line,
         math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"])),
         decode_average,
-        decode_average_count
+        decode_average_count,
+        burst_amplitude,
     )
 
     chroma_average_state.append((field_average, chroma_noise_floor))
