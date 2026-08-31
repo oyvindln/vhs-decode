@@ -215,7 +215,7 @@ def apply_chroma_envelope_gain(field):
         return False
 
     video = field.data["video"]
-    if video is None or "demod_burst" not in (video.dtype.names or ()):
+    if video is None or "demod_burst" not in video:
         return False
 
     measured = luma_amplitude.measure_amplitude_deviation(field)

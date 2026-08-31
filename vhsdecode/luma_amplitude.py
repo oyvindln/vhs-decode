@@ -426,7 +426,7 @@ def measure_amplitude_deviation(field):
     '''
     rf = field.rf
     video = field.data["video"]
-    if video is None or "demod_raw" not in (video.dtype.names or ()):
+    if video is None or "demod_raw" not in video:
         return None
 
     # Read as recorded. Both channels are already single precision, so these are

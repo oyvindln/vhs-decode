@@ -837,30 +837,28 @@ class RFDecode:
 
         if self.system == "PAL":
             out_videopilot = npfft.ifft(demod_fft * self.Filters["FVideoPilot"]).real
-            video_out = np.rec.array(
-                [
-                    out_video.astype(np.float32),
-                    demod.astype(np.float32),
-                    out_video05.astype(np.float32),
-                    out_videoburst.astype(np.float32),
-                    out_videopilot.astype(np.float32),
-                ],
-                names=[
-                    "demod",
-                    "demod_raw",
-                    "demod_05",
-                    "demod_burst",
-                    "demod_pilot",
-                ],
-            )
+            video_out = {
+                "demod": out_video.astype(np.float32),
+                "demod_raw": demod.astype(np.float32),
+                "demod_05": out_video05.astype(np.float32),
+                "demod_burst": out_videoburst.astype(np.float32),
+                "demod_pilot": out_videopilot.astype(np.float32),
+            }
         else:
-            video_out = np.rec.array(
-                [out_video.astype(np.float32), demod.astype(np.float32), out_video05.astype(np.float32), out_videoburst.astype(np.float32)],
-                names=["demod", "demod_raw", "demod_05", "demod_burst"],
-            )
+            video_out = {
+                "demod": out_video.astype(np.float32),
+                "demod_raw": demod.astype(np.float32),
+                "demod_05": out_video05.astype(np.float32),
+                "demod_burst": out_videoburst.astype(np.float32),
+            }
 
         rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
+            {
+                name: channel[self.blockcut : -self.blockcut_end]
+                for name, channel in video_out.items()
+            }
+            if cut
+            else video_out
         )
 
         if self.decode_digital_audio:
@@ -1419,7 +1417,19 @@ class DemodCache:
 
         rv = {}
         for k in t.keys():
-            rv[k] = np.concatenate(t[k]) if len(t[k]) else None
+            if not len(t[k]):
+                rv[k] = None
+            elif isinstance(t[k][0], dict):
+                # The video channels are separate arrays rather than one
+                # interleaved record, so each concatenates on its own - a plain
+                # contiguous copy per channel, and every consumer afterwards
+                # reads the channel it wants without walking the others' bytes.
+                rv[k] = {
+                    name: np.concatenate([block[name] for block in t[k]])
+                    for name in t[k][0]
+                }
+            else:
+                rv[k] = np.concatenate(t[k])
 
         if rv["audio"] is not None:
             rv["audio_phase1"] = rv["audio"]

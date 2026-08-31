@@ -1478,27 +1478,28 @@ class VHSRFDecode(ldd.RFDecode):
             # "demod_raw" is the name lddecode's own demodblock already uses for
             # this signal. Only carried when the correction is enabled, so the
             # extra channel costs nothing otherwise.
-            video_out = np.rec.array(
-                [
-                    out_video, demod.astype(np.float32), out_video05, out_chroma,
-                    env,
-                ],
-                names=[
-                    "demod",
-                    "demod_raw",
-                    "demod_05",
-                    "demod_burst",
-                    "envelope",
-                ],
-            )
+            video_out = {
+                "demod": out_video,
+                "demod_raw": demod.astype(np.float32),
+                "demod_05": out_video05,
+                "demod_burst": out_chroma,
+                "envelope": env,
+            }
         else:
-            video_out = np.rec.array(
-                [out_video, out_video05, out_chroma, env],
-                names=["demod", "demod_05", "demod_burst", "envelope"],
-            )
+            video_out = {
+                "demod": out_video,
+                "demod_05": out_video05,
+                "demod_burst": out_chroma,
+                "envelope": env,
+            }
 
         rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
+            {
+                name: channel[self.blockcut : -self.blockcut_end]
+                for name, channel in video_out.items()
+            }
+            if cut
+            else video_out
         )
 
         demod_end_time = time.time()
