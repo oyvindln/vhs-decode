@@ -2651,8 +2651,7 @@ class Field:
         audio=0,
         final=False,
         lastfieldwritten=None,
-        shift=0,
-        level_adjust=True
+        shift=0
     ):
         if lineinfo is None:
             lineinfo = self.linelocs
@@ -2720,8 +2719,7 @@ class Field:
             self.lineoffset,
             outwidth,
             wow_level_adjust_smoothing=self.wow_level_adjust_smoothing,
-            shift=shift,
-            apply_level_adjust=level_adjust
+            shift=shift
         )
 
         if self.rf.decode_digital_audio:

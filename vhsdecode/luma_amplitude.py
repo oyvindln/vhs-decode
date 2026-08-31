@@ -2,8 +2,15 @@
 
 An FM carrier carries no amplitude information - its amplitude should be
 constant. Every deviation from that constant is imposed by the tape, and is
-measurable continuously at full sample rate on the raw RF, before the time base
-correction has run and before any scaling has been applied.
+measurable on the raw RF, before the time base correction has run and before
+any scaling has been applied.
+
+The amplitude is taken as the decoder's own envelope channel, which is
+band limited to 700 kHz by the demodulator's envelope detector - a single pole
+applied forward and backward, so 12 dB per octave. Nothing here narrows it
+further: no smoothing, no additional band limit, no windowing. The tape imposes
+its amplitude noise at whatever rate it imposes it, and a filter here would
+decide in advance which of that the correction is allowed to see.
 
 Two causes of amplitude change, only one of them noise
 ------------------------------------------------------
@@ -29,6 +36,12 @@ several dB across the carrier sweep on its own. The remainder - tape channel,
 head response, record and playback equalization - is measured by binning the
 flattened amplitude against carrier frequency and fitting a curve.
 
+Both parts are functions of the carrier's frequency and of nothing else, so they
+are combined into a single table over frequency and divided out together, once
+per sample. That is what keeps this affordable: the response is exponentiated
+where it is described, over the few thousand points of the table, rather than
+over the million samples it is applied to.
+
 What comes back is a property of the luma carrier and of the tape, and of
 nothing else. It carries no assumption about what will consume it.
 """
@@ -44,6 +57,10 @@ from numba import njit
 # by the tape's multiplicative noise. `carrier_hz` is the instantaneous carrier
 # frequency conditioned the same way the deviation was measured against, so a
 # consumer scaling by wavelength uses the frequency that actually applies.
+#
+# Both are single precision, which is what the demodulator produced them in;
+# widening them here would cost two full copies of the field per field and buy
+# no precision that was ever recorded.
 AmplitudeDeviation = namedtuple("AmplitudeDeviation", ["deviation", "carrier_hz"])
 
 
@@ -88,8 +105,12 @@ def _flatten_by_response(amplitude, carrier_hz, response, frequency_step):
     """Divide the decoder's own RF response out of the carrier amplitude.
 
     The response is tabulated on a uniform frequency grid, so the sample's bin
-    is an index rather than a search; this runs over every sample of every
-    field.
+    is an index rather than a search.
+
+    Only the samples the response curve is fitted from come through here - a
+    few tens of thousands of the field's million. Applying the finished model
+    to the whole field is `_deviation_from_inverse_response`, which divides out
+    this response and the fitted curve together.
     """
     count = len(amplitude)
     # Carrier amplitude is physically positive, so zero
@@ -118,12 +139,21 @@ def rf_path_response(rf):
     signal before the carrier amplitude is taken, so consuming it directly keeps
     this correct for every format and every combination of ramp boost, peaking
     and notch options.
+
+    Fixed for the life of the decoder, so it is derived once and kept on the
+    decoder rather than rebuilt every field.
     """
+    cached = getattr(rf, "_luma_amplitude_response", None)
+    if cached is not None:
+        return cached
+
     response = np.abs(rf.Filters["RFVideo"])
     # The stored response covers the whole spectrum with the negative
     # frequencies mirrored above Nyquist; only the positive half is meaningful.
     half = len(response) // 2
-    return response[:half], rf.freq_hz / len(response)
+    cached = (response[:half], rf.freq_hz / len(response))
+    rf._luma_amplitude_response = cached
+    return cached
 
 
 def carrier_frequency_bins(sys_params, rf):
@@ -151,7 +181,7 @@ def carrier_frequency_bins(sys_params, rf):
 
 @njit(cache=True, nogil=True, fastmath=True)
 def measure_amplitude_by_frequency(
-    amplitude, carrier_hz, sync_tip_hz, hz_ire, bin_count, group_count, stride
+    amplitude, carrier_hz, sync_tip_hz, hz_ire, bin_count, group_count
 ):
     """Carrier amplitude against carrier frequency, as points on a curve.
 
@@ -168,15 +198,16 @@ def measure_amplitude_by_frequency(
     the curve at the same confidence, and puts them where the picture actually
     is.
 
-    `stride` subsamples the field for the curve only; the correction itself
-    still applies to every sample. The curve has three parameters and a field
-    has hundreds of thousands of samples, so it is not short of evidence.
+    The caller passes a subsample of the field, already gathered; the curve has
+    three parameters and even a subsample carries tens of thousands of points,
+    so it is not short of evidence. The correction itself still applies to every
+    sample.
     """
     count = len(amplitude)
     fine = np.zeros(bin_count, dtype=np.int64)
     index = np.full(count, -1, dtype=np.int64)
 
-    for i in range(0, count, stride):
+    for i in range(count):
         value = amplitude[i]
         if value <= 0.0:
             continue
@@ -223,7 +254,7 @@ def measure_amplitude_by_frequency(
         start[g + 1] = start[g] + np.int64(population[g])
     cursor = start[:groups].copy()
     grouped = np.empty(start[groups], dtype=amplitude.dtype)
-    for i in range(0, count, stride):
+    for i in range(count):
         b = index[i]
         if b >= 0:
             g = group_of[b]
@@ -300,31 +331,67 @@ def _normalize_frequency(carrier_hz, sync_tip_hz, peak_white_hz):
     return (carrier_hz - sync_tip_hz) / span
 
 
-@njit(cache=True, nogil=True, fastmath=True)
-def _deviation_from_response(
-    flattened, carrier_hz, coefficients, sync_tip_hz, span_hz, low, high
+def _inverse_response_table(
+    response, frequency_step, coefficients, sync_tip_hz, peak_white_hz
 ):
-    """How far the amplitude departs from the response fitted to it.
+    """The whole modelled response, inverted, on the grid it is tabulated on.
 
-    One pass over the field: the curve is evaluated, divided out and bounded in
-    place, rather than building an expected-amplitude array to divide by.
+    The decoder's own RF path and the curve fitted on top of it are both
+    functions of carrier frequency alone, evaluated on the same uniform grid, so
+    there is no reason to carry them as two divisions per sample. Combining them
+    here turns the correction's per-sample work into a table lookup and a
+    multiply, and confines the exponential to the few thousand points that
+    describe the response rather than the million it is applied to.
+
+    Zero marks a frequency at which the model says nothing usable - the response
+    vanishes, or the extrapolated curve has run out of range. That is the same
+    sentinel the amplitude itself uses, and it leaves the deviation at unity.
     """
-    count = len(flattened)
-    deviation = np.ones(count)
-    order = len(coefficients)
+    grid_hz = np.arange(len(response), dtype=np.float64) * frequency_step
+    normalized = _normalize_frequency(grid_hz, sync_tip_hz, peak_white_hz)
+
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        modelled = response * np.exp(np.polyval(coefficients, normalized))
+        # Narrowed here rather than after, so a reciprocal that is finite in
+        # double and infinite in single is caught by the same test as the rest.
+        inverse = np.reciprocal(modelled).astype(np.float32)
+
+    inverse[~np.isfinite(inverse)] = 0.0
+    inverse[modelled <= 0.0] = 0.0
+    return inverse
+
+
+@njit(cache=True, nogil=True, fastmath=True)
+def _deviation_from_inverse_response(
+    amplitude, carrier_hz, inverse_response, frequency_step, low, high
+):
+    """How far the amplitude departs from the response modelled for it.
+
+    One pass over the field, and no transcendental in it: the modelled response
+    was inverted where it was tabulated, so what is left per sample is an
+    interpolation, a multiply and a bound.
+    """
+    count = len(amplitude)
+    deviation = np.empty(count, dtype=np.float32)
+    last = len(inverse_response) - 1
+    one = np.float32(1.0)
+    zero = np.float32(0.0)
     for i in range(count):
-        value = flattened[i]
-        if value <= 0.0:
-            continue
-        normalized = (carrier_hz[i] - sync_tip_hz) / span_hz
-        accumulated = 0.0
-        for c in range(order):
-            accumulated = accumulated * normalized + coefficients[c]
-        expected = np.exp(accumulated)
-        if expected <= 0.0:
-            continue
-        ratio = value / expected
-        if ratio < low:
+        position = carrier_hz[i] / frequency_step
+        if position <= zero:
+            inverse = inverse_response[0]
+        elif position >= last:
+            inverse = inverse_response[last]
+        else:
+            lower = np.int32(position)
+            fraction = position - np.float32(lower)
+            base = inverse_response[lower]
+            inverse = base + (inverse_response[lower + 1] - base) * fraction
+        ratio = amplitude[i] * inverse
+        if ratio <= zero:
+            # no measurement here, or no usable model - leave the sample alone
+            ratio = one
+        elif ratio < low:
             ratio = low
         elif ratio > high:
             ratio = high
@@ -335,11 +402,6 @@ def _deviation_from_response(
 def measure_amplitude_deviation(field):
     '''How far the luma carrier's amplitude departs from the constant it should
     hold, measured across the whole field on the raw RF sample grid.
-
-    The amplitude is taken as measured, instantaneously, with no band limit:
-    the tape imposes its amplitude noise at whatever rate it imposes it, and a
-    filter here would decide in advance which of that the correction is allowed
-    to see.
 
     Returns an `AmplitudeDeviation`, or None if the field cannot support a
     measurement.
@@ -352,6 +414,11 @@ def measure_amplitude_deviation(field):
     be continuous too - fitting each demodulation block separately puts a step
     at every block seam, on a carrier amplitude that has none.
 
+    The response curve is fitted from a subsample and applied to every sample.
+    The curve has three parameters and the subsample carries tens of thousands
+    of points, so the fit is not the limiting factor; walking the whole field
+    twice to determine it would be.
+
     Nothing here knows about the color-under. What comes back is a property of
     the luma carrier alone - the tape's multiplicative noise, with the path's
     response to the carrier's own frequency already removed - so it can drive
@@ -362,32 +429,35 @@ def measure_amplitude_deviation(field):
     if video is None or "demod_raw" not in (video.dtype.names or ()):
         return None
 
-    amplitude = np.asarray(video["envelope"], dtype=np.float64)
-    carrier_hz = np.asarray(video["demod_raw"], dtype=np.float64)
+    # Read as recorded. Both channels are already single precision, so these are
+    # views onto the field's record array rather than copies of it.
+    amplitude = video["envelope"]
+    carrier_hz = video["demod_raw"]
     if len(amplitude) != len(carrier_hz) or len(amplitude) == 0:
         return None
 
     sys_params = rf.SysParams
     sync_tip_hz, peak_white_hz, bin_count = carrier_frequency_bins(sys_params, rf)
-
     response, frequency_step = rf_path_response(rf)
-    flattened = _flatten_by_response(amplitude, carrier_hz, response, frequency_step)
 
     # The part of the amplitude that follows the carrier's own frequency,
     # measured once over the concatenated field. Demodulation stays per block
     # and is not repeated here; what is measured is the assembled result, so
     # neither the curve nor the level it implies has a block boundary in it.
     stride = max(
-        1, len(flattened) // (RESPONSE_CURVE_POINTS * CURVE_SAMPLES_PER_POINT)
+        1, len(amplitude) // (RESPONSE_CURVE_POINTS * CURVE_SAMPLES_PER_POINT)
     )
+    sampled_amplitude = np.asarray(amplitude[::stride], dtype=np.float64)
+    sampled_carrier_hz = np.asarray(carrier_hz[::stride], dtype=np.float64)
     levels, population, centre_hz = measure_amplitude_by_frequency(
-        flattened,
-        carrier_hz,
+        _flatten_by_response(
+            sampled_amplitude, sampled_carrier_hz, response, frequency_step
+        ),
+        sampled_carrier_hz,
         sync_tip_hz,
         sys_params["hz_ire"],
         bin_count,
         RESPONSE_CURVE_POINTS,
-        stride,
     )
     coefficients = fit_response_curve(
         levels, population, centre_hz, sync_tip_hz, peak_white_hz
@@ -396,14 +466,15 @@ def measure_amplitude_deviation(field):
         return None
 
     dropout_fraction = rf.dod_options.dod_threshold_p
-    deviation = _deviation_from_response(
-        flattened,
+    deviation = _deviation_from_inverse_response(
+        amplitude,
         carrier_hz,
-        coefficients,
-        sync_tip_hz,
-        max(peak_white_hz - sync_tip_hz, np.finfo(np.float64).tiny),
-        dropout_fraction,
-        1.0 / dropout_fraction,
+        _inverse_response_table(
+            response, frequency_step, coefficients, sync_tip_hz, peak_white_hz
+        ),
+        np.float32(frequency_step),
+        np.float32(dropout_fraction),
+        np.float32(1.0 / dropout_fraction),
     )
 
     return AmplitudeDeviation(deviation, carrier_hz)
