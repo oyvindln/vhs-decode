@@ -71,6 +71,7 @@ jobs:
           python-appimage build app -p 3.12 \
             -x _build_appimage/libportaudio.so.2 \
             -x _build_appimage/libportaudio.so \
+            -- \
             _build_appimage
           APPIMAGE_SRC="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
           if [ -z "${APPIMAGE_SRC}" ]; then
