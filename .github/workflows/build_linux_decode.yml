@@ -28,7 +28,12 @@ jobs:
     steps:
       - name: Setup environment
         run: |
-          dnf install --assumeyes git python3.12-pip gcc-c++ file portaudio
+          dnf install --assumeyes git python3.12-pip gcc-c++ file
+          if ! dnf install --assumeyes portaudio; then
+            dnf install --assumeyes oracle-epel-release-el8 || \
+              dnf install --assumeyes https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+            dnf install --assumeyes portaudio
+          fi
 
       - uses: actions/checkout@v5
         with:
