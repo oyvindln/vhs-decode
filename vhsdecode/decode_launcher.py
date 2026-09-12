@@ -662,6 +662,8 @@ class DecodeLauncherWindow(QWidget):
         self._hosted_launches: list[object] = []
         self._native_gui_warmup_started = False
         self._native_gui_warmup_done = threading.Event()
+        self._force_terminal_by_tool: dict[str, bool] = {"hifi": True}
+        self._active_tool_subcommand: Optional[str] = None
 
         self.launch_button = QPushButton("Launch selected tool")
         self.launch_tbc_tools_button = QPushButton("Launch tbc-tools / ld-analyse")
@@ -746,13 +748,18 @@ class DecodeLauncherWindow(QWidget):
         self.tape_format_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.tape_speed_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.threads_spin.valueChanged.connect(self._refresh_tool_state)
-        self.force_terminal_check.toggled.connect(self._refresh_tool_state)
+        self.force_terminal_check.toggled.connect(self._on_force_terminal_toggled)
         self.params_json_browse_button.clicked.connect(self._browse_params_json_file)
         self.input_browse_button.clicked.connect(self._browse_input_file)
         self.output_browse_button.clicked.connect(self._browse_output_file)
         self.launch_button.clicked.connect(self._launch_selected_tool)
         self.launch_tbc_tools_button.clicked.connect(self._launch_tbc_tools)
         self.close_button.clicked.connect(self.close)
+
+    def _on_force_terminal_toggled(self, checked: bool) -> None:
+        tool = self._selected_tool()
+        self._force_terminal_by_tool[tool.subcommand] = checked
+        self._refresh_tool_state()
 
     def _selected_tool(self) -> ToolSpec:
         return self._tools[self.tool_combo.currentIndex()]
@@ -863,6 +870,15 @@ class DecodeLauncherWindow(QWidget):
 
     def _refresh_tool_state(self) -> None:
         tool = self._selected_tool()
+        if self._active_tool_subcommand != tool.subcommand:
+            self._active_tool_subcommand = tool.subcommand
+            desired_force_terminal = self._force_terminal_by_tool.get(
+                tool.subcommand,
+                tool.subcommand == "hifi",
+            )
+            self.force_terminal_check.blockSignals(True)
+            self.force_terminal_check.setChecked(desired_force_terminal)
+            self.force_terminal_check.blockSignals(False)
         self._sync_system_options_for_tool(tool)
         self._sync_tape_format_options_for_tool(tool)
         params_json_allowed = tool.subcommand == "vhs"
