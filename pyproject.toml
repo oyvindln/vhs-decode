@@ -29,7 +29,6 @@ classifiers = [
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Video :: Capture",
 ]
-requires-python = ">=3.6"
 
 dependencies = [
     "cython",
