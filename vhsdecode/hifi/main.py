@@ -2210,21 +2210,21 @@ def build_decode_options_from_args(args):
         "input_format_override": input_format_override,
         "standard": "p" if system == "PAL" else "n",
         "format": tape_format,
-        "preview": args.preview,
+        "preview": args.preview or args.preview_real_time,
         "preview_real_time": args.preview_real_time,
-        "preview_available": args.preview,
+        "preview_available": args.preview or args.preview_real_time,
         "demod_type": args.demod_type,
         "afe_left_carrier_deviation": args.afe_left_carrier_deviation * 10e5,
         "afe_right_carrier_deviation": args.afe_right_carrier_deviation * 10e5,
         "afe_left_carrier": args.afe_left_carrier * 10e5,
         "afe_right_carrier": args.afe_right_carrier * 10e5,
-        "resampler_quality": resampler_quality if not args.preview else "low",
-        "spectral_nr_amount": args.spectral_nr_amount if not args.preview else 0,
+        "resampler_quality": resampler_quality if not (args.preview or args.preview_real_time) else "low",
+        "spectral_nr_amount": args.spectral_nr_amount if not (args.preview or args.preview_real_time) else 0,
         "head_switching_interpolation": args.head_switching_interpolation == "on",
         "doc": args.doc,
         "enable_expander": args.enable_expander == "on",
         "enable_deemphasis": args.enable_deemphasis == "on",
-        "auto_fine_tune": args.auto_fine_tune == "on" if not args.preview else False,
+        "auto_fine_tune": args.auto_fine_tune == "on" if not (args.preview or args.preview_real_time) else False,
         "bias_guess": args.bias_guess,
         "normalize": args.normalize,
         "expander_gain": args.expander_gain or default_expander_gain,
@@ -2242,7 +2242,7 @@ def build_decode_options_from_args(args):
         "deemphasis_low_tau": args.deemphasis_low_tau or default_deemphasis_low_tau,
         "deemphasis_high_tau": args.deemphasis_high_tau or default_deemphasis_high_tau,
         "grc": args.GRC,
-        "audio_rate": args.rate if not args.preview else 44100,
+        "audio_rate": args.rate if not (args.preview or args.preview_real_time) else 44100,
         "gain": args.gain,
         "input_file": filename,
         "output_file": outname,
@@ -2258,8 +2258,9 @@ def _run_ui_transport_action(args, ui_t):
     options = ui_parameters_to_decode_options(ui_t.window.getValues())
     previous_state = ui_t.window.transport_state
     options["preview"] = previous_state == PREVIEW_STATE
-    # Preserve the --preview-real-time flag from CLI args when launching via UI
-    options.setdefault("preview_real_time", getattr(args, "preview_real_time", False))
+    # preview_real_time comes from the UI checkbox (in getValues) when
+    # launching via the GUI. Fall back to CLI arg for non-GUI paths.
+    options.setdefault("preview_real_time", False)
     # apply the thread count chosen in the UI (run_decoder reads args.threads)
     args.threads = max(1, int(options.get("threads", args.threads)))
 

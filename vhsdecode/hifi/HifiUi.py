@@ -215,6 +215,7 @@ class MainUIParameters:
         self.head_switching_interpolation = True
         self.doc = doc_mode_to_ui[DEFAULT_DOC_MODE]
         self.threads: int = cpu_count()
+        self.preview_real_time: bool = False
 
 
 def decode_options_to_ui_parameters(decode_options):
@@ -256,6 +257,7 @@ def decode_options_to_ui_parameters(decode_options):
     values.head_switching_interpolation = decode_options["head_switching_interpolation"]
     values.doc = doc_mode_to_ui[decode_options["doc"]]
     values.threads = decode_options.get("threads", values.threads)
+    values.preview_real_time = decode_options.get("preview_real_time", False)
     return values
 
 
@@ -300,6 +302,7 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
         "doc": ui_to_doc_mode[values.doc],
         "mode": ui_to_audio_mode[values.audio_mode],
         "threads": max(1, int(values.threads)),
+        "preview_real_time": values.preview_real_time,
     }
     return decode_options
 
@@ -565,6 +568,14 @@ class HifiUi(QMainWindow):
         self.pause_button.setFixedHeight(compact_height)
         self.stop_button.setFixedHeight(compact_height)
         transport_controls_layout.addWidget(self.preview_button)
+        self.preview_realtime_checkbox = QCheckBox("RT", self)
+        self.preview_realtime_checkbox.setToolTip(
+            "Real-time preview: play at decode speed (fast scrubbing)\n"
+            "instead of normal 1x audio rate.\n"
+            "Unchecked = smooth playback locked to real-time."
+        )
+        self.preview_realtime_checkbox.setChecked(False)
+        transport_controls_layout.addWidget(self.preview_realtime_checkbox)
         transport_controls_layout.addWidget(self.play_button)
         transport_controls_layout.addWidget(self.pause_button)
         transport_controls_layout.addWidget(self.stop_button)
@@ -1162,6 +1173,7 @@ class HifiUi(QMainWindow):
 
         self.input_file = values.input_file
         self.output_file = values.output_file
+        self.preview_realtime_checkbox.setChecked(values.preview_real_time)
 
     def getValues(self) -> MainUIParameters:
         values = MainUIParameters()
@@ -1214,6 +1226,7 @@ class HifiUi(QMainWindow):
         values.input_file = self.input_file
         values.output_file = self.output_file
         values.threads = self.threads_spinbox.value()
+        values.preview_real_time = self.preview_realtime_checkbox.isChecked()
         return values
 
     def update_afe_values(
