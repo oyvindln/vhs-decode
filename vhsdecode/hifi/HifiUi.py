@@ -216,6 +216,7 @@ class MainUIParameters:
         self.doc = doc_mode_to_ui[DEFAULT_DOC_MODE]
         self.threads: int = cpu_count()
         self.preview_real_time: bool = False
+        self.preview_only: bool = False
 
 
 def decode_options_to_ui_parameters(decode_options):
@@ -258,6 +259,7 @@ def decode_options_to_ui_parameters(decode_options):
     values.doc = doc_mode_to_ui[decode_options["doc"]]
     values.threads = decode_options.get("threads", values.threads)
     values.preview_real_time = decode_options.get("preview_real_time", False)
+    values.preview_only = decode_options.get("preview_only", False)
     return values
 
 
@@ -303,6 +305,7 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
         "mode": ui_to_audio_mode[values.audio_mode],
         "threads": max(1, int(values.threads)),
         "preview_real_time": values.preview_real_time,
+        "preview_only": values.preview_only,
     }
     return decode_options
 
@@ -568,14 +571,6 @@ class HifiUi(QMainWindow):
         self.pause_button.setFixedHeight(compact_height)
         self.stop_button.setFixedHeight(compact_height)
         transport_controls_layout.addWidget(self.preview_button)
-        self.preview_realtime_checkbox = QCheckBox("RT", self)
-        self.preview_realtime_checkbox.setToolTip(
-            "Real-time preview: play at decode speed (fast scrubbing)\n"
-            "instead of normal 1x audio rate.\n"
-            "Unchecked = smooth playback locked to real-time."
-        )
-        self.preview_realtime_checkbox.setChecked(False)
-        transport_controls_layout.addWidget(self.preview_realtime_checkbox)
         transport_controls_layout.addWidget(self.play_button)
         transport_controls_layout.addWidget(self.pause_button)
         transport_controls_layout.addWidget(self.stop_button)
@@ -864,6 +859,23 @@ class HifiUi(QMainWindow):
         resampler_quality_layout.addWidget(resampler_quality_label)
         resampler_quality_layout.addWidget(self.resampler_quality_combo)
         advanced_format_options_frame.inner_layout.addLayout(resampler_quality_layout)
+
+        # Preview mode selection
+        preview_mode_layout = QHBoxLayout()
+        preview_mode_label = QLabel("Preview Mode")
+        self.preview_mode_combo = QComboBox(self)
+        self.preview_mode_combo.addItems(
+            ["Preview with decode", "Preview real-time", "Preview only"]
+        )
+        self.preview_mode_combo.setToolTip(
+            "Preview with decode: decode to file + play at 1x real-time (smooth)\n"
+            "Preview real-time: decode to file + play at decode speed (fast)\n"
+            "Preview only: play at decode speed, no file output (quick scrubbing)"
+        )
+        self.preview_mode_combo.setCurrentIndex(0)
+        preview_mode_layout.addWidget(preview_mode_label)
+        preview_mode_layout.addWidget(self.preview_mode_combo)
+        advanced_format_options_frame.inner_layout.addLayout(preview_mode_layout)
 
         return layout
 
@@ -1173,7 +1185,13 @@ class HifiUi(QMainWindow):
 
         self.input_file = values.input_file
         self.output_file = values.output_file
-        self.preview_realtime_checkbox.setChecked(values.preview_real_time)
+        # Map preview flags to combo index
+        if values.preview_only:
+            self.preview_mode_combo.setCurrentIndex(2)
+        elif values.preview_real_time:
+            self.preview_mode_combo.setCurrentIndex(1)
+        else:
+            self.preview_mode_combo.setCurrentIndex(0)
 
     def getValues(self) -> MainUIParameters:
         values = MainUIParameters()
@@ -1226,7 +1244,10 @@ class HifiUi(QMainWindow):
         values.input_file = self.input_file
         values.output_file = self.output_file
         values.threads = self.threads_spinbox.value()
-        values.preview_real_time = self.preview_realtime_checkbox.isChecked()
+        # Map combo index to preview flags
+        preview_mode_index = self.preview_mode_combo.currentIndex()
+        values.preview_real_time = preview_mode_index in (1, 2)
+        values.preview_only = preview_mode_index == 2
         return values
 
     def update_afe_values(

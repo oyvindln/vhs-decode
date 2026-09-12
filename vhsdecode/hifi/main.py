@@ -357,6 +357,13 @@ parser.add_argument(
     help="When previewing, play audio at decode speed (faster than real-time) instead of\n  buffering and locking to real-time. Audio will play as fast as samples are decoded.",
 )
 parser.add_argument(
+    "--preview-only",
+    dest="preview_only",
+    action="store_true",
+    default=False,
+    help="Preview only: play decoded audio without writing an output file.\n  Implies --preview --preview-real-time. Useful for quick 'is there something' scrubbing.",
+)
+parser.add_argument(
     "--gui",
     dest="UI",
     action="store_true",
@@ -1564,6 +1571,7 @@ def write_soundfile_process_worker(
     normalize = decode_options["normalize"]
     dual_mono = decode_options["mode"] == AUDIO_MODE_DUAL_MONO or decode_options["mode"] == AUDIO_MODE_DUAL_MONO_MS
     preview_real_time = decode_options.get("preview_real_time", False)
+    preview_only = decode_options.get("preview_only", False)
     if preview_playback_enabled:
         player = SoundDeviceProcess(audio_rate, stop_requested, real_time=preview_real_time)
     else:
@@ -1571,7 +1579,12 @@ def write_soundfile_process_worker(
             print("Import of sounddevice failed, preview is not available!", flush=True)
         player = nullcontext()
 
-    if dual_mono:
+    # In preview-only mode, skip file output entirely — just play audio.
+    if preview_only:
+        stereo_output = nullcontext()
+        channel_1_output = nullcontext()
+        channel_2_output = nullcontext()
+    elif dual_mono:
         stereo_output = nullcontext()
         channel_1_output = as_outputfile(
             get_dual_mono_filename(output_file, channel_1_suffix),
@@ -1609,7 +1622,7 @@ def write_soundfile_process_worker(
                 samples_decoded = len(stereo) / 2
                 
                 # pad the start of the audio due to beginning gap
-                if decoder_state.block_num == 0:
+                if decoder_state.block_num == 0 and not preview_only:
                     padding = round(decoder_state.block_audio_final_overlap / 2) * 2 * 4 # 2 channels, 4 bytes per channel
                     
                     if dual_mono:
@@ -1618,12 +1631,13 @@ def write_soundfile_process_worker(
                     else:
                         stereo_output.buffer_write(bytes(padding), dtype="float32")
 
-                if dual_mono:
-                    channel_1, channel_2 = stereo[::2], stereo[1::2]
-                    channel_1_output.write(channel_1)
-                    channel_2_output.write(channel_2)
-                else:
-                    stereo_output.buffer_write(stereo, dtype="float32")
+                if not preview_only:
+                    if dual_mono:
+                        channel_1, channel_2 = stereo[::2], stereo[1::2]
+                        channel_1_output.write(channel_1)
+                        channel_2_output.write(channel_2)
+                    else:
+                        stereo_output.buffer_write(stereo, dtype="float32")
 
                 if preview_playback_enabled:
                     stereo_copy = np.empty_like(stereo, order="C")
@@ -1652,11 +1666,12 @@ def write_soundfile_process_worker(
 
                 done = decoder_state.is_last_block
 
-            if dual_mono:
-                channel_1_output.flush()
-                channel_2_output.flush()
-            else:
-                stereo_output.flush()
+            if not preview_only:
+                if dual_mono:
+                    channel_1_output.flush()
+                    channel_2_output.flush()
+                else:
+                    stereo_output.flush()
     finally:
         decode_done.set()
 
@@ -2210,21 +2225,22 @@ def build_decode_options_from_args(args):
         "input_format_override": input_format_override,
         "standard": "p" if system == "PAL" else "n",
         "format": tape_format,
-        "preview": args.preview or args.preview_real_time,
-        "preview_real_time": args.preview_real_time,
-        "preview_available": args.preview or args.preview_real_time,
+        "preview": args.preview or args.preview_real_time or args.preview_only,
+        "preview_real_time": args.preview_real_time or args.preview_only,
+        "preview_only": args.preview_only,
+        "preview_available": args.preview or args.preview_real_time or args.preview_only,
         "demod_type": args.demod_type,
         "afe_left_carrier_deviation": args.afe_left_carrier_deviation * 10e5,
         "afe_right_carrier_deviation": args.afe_right_carrier_deviation * 10e5,
         "afe_left_carrier": args.afe_left_carrier * 10e5,
         "afe_right_carrier": args.afe_right_carrier * 10e5,
-        "resampler_quality": resampler_quality if not (args.preview or args.preview_real_time) else "low",
-        "spectral_nr_amount": args.spectral_nr_amount if not (args.preview or args.preview_real_time) else 0,
+        "resampler_quality": resampler_quality if not (args.preview or args.preview_real_time or args.preview_only) else "low",
+        "spectral_nr_amount": args.spectral_nr_amount if not (args.preview or args.preview_real_time or args.preview_only) else 0,
         "head_switching_interpolation": args.head_switching_interpolation == "on",
         "doc": args.doc,
         "enable_expander": args.enable_expander == "on",
         "enable_deemphasis": args.enable_deemphasis == "on",
-        "auto_fine_tune": args.auto_fine_tune == "on" if not (args.preview or args.preview_real_time) else False,
+        "auto_fine_tune": args.auto_fine_tune == "on" if not (args.preview or args.preview_real_time or args.preview_only) else False,
         "bias_guess": args.bias_guess,
         "normalize": args.normalize,
         "expander_gain": args.expander_gain or default_expander_gain,
@@ -2242,7 +2258,7 @@ def build_decode_options_from_args(args):
         "deemphasis_low_tau": args.deemphasis_low_tau or default_deemphasis_low_tau,
         "deemphasis_high_tau": args.deemphasis_high_tau or default_deemphasis_high_tau,
         "grc": args.GRC,
-        "audio_rate": args.rate if not (args.preview or args.preview_real_time) else 44100,
+        "audio_rate": args.rate if not (args.preview or args.preview_real_time or args.preview_only) else 44100,
         "gain": args.gain,
         "input_file": filename,
         "output_file": outname,
@@ -2258,9 +2274,9 @@ def _run_ui_transport_action(args, ui_t):
     options = ui_parameters_to_decode_options(ui_t.window.getValues())
     previous_state = ui_t.window.transport_state
     options["preview"] = previous_state == PREVIEW_STATE
-    # preview_real_time comes from the UI checkbox (in getValues) when
-    # launching via the GUI. Fall back to CLI arg for non-GUI paths.
+    # preview flags come from the UI (in getValues) when launching via GUI.
     options.setdefault("preview_real_time", False)
+    options.setdefault("preview_only", False)
     # apply the thread count chosen in the UI (run_decoder reads args.threads)
     args.threads = max(1, int(options.get("threads", args.threads)))
 
