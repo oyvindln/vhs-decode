@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import traceback
-import warnings
 
 import threading
 from queue import Queue
@@ -21,29 +20,12 @@ import numba
 import numpy as np
 import scipy.signal as sps
 
-def _ensure_ffmpeg_on_path():
-    try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Unable to find acceptable character detection dependency.*",
-            )
-            warnings.filterwarnings(
-                "ignore",
-                message="urllib3 .* or chardet .*charset_normalizer .* doesn't match a supported version!",
-            )
-            import static_ffmpeg
-    except ImportError:
-        return False
-    except Exception:
-        return False
-
-    try:
-        static_ffmpeg.add_paths(weak=True)
-    except Exception:
-        return False
-
-    return True
+# Try to make sure ffmpeg is available
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()  # adds static ffmpeg/ffprobe binaries to PATH
+except ImportError:
+    pass
 
 # If profiling is not enabled, make it a pass-through wrapper
 try:
@@ -142,8 +124,8 @@ sinc_phase_count = 2**16
 #     return table
 
 
-@njit(nogil=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift=0.0):
+@njit(nogil=True, cache=True, fastmath=True)
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift: float = 0.0):
     # average out any unusual spikes in wow that happen on a per line basis
     # this indicates an hsync tbc error vs. being normal wow from playback speed variations
     # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
@@ -174,30 +156,27 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineo
         # compensates for the amplitude/frequency shift caused by FM demodulation under varying playback speed.
         level_adjust = level_adjusts[i]
 
-        # reconstructs the waveform at the proper fractional sample position, undoing wow-induced timing variations
         # Adding the positive shift pulls future (late) samples backward into alignment.
+        # TODO: THIS NEEDS TO BE PUSHED UPSTREAM NOT HERE!!!11
         coord = np.float32(interpolated_pixel_locs[i] + shift)
         coord_int = int(coord)
 
         # fractional phase
         frac = coord - coord_int
 
-        phase_pos = frac * sinc_phase_count
-        phase_start = int(phase_pos)
-        phase_end = phase_start + 1
-
-        alpha = np.float32(phase_pos - phase_start)
-
-        w_start = sinc_lut[phase_start]
-        w_end = sinc_lut[phase_end]
+        # sinc_phase_count is 2**16, so the nearest tabulated phase is already
+        # accurate far below float32 precision. Interpolating between two
+        # adjacent phases would double LUT reads and add per-tap math in the
+        # innermost loop of the decoder for no change in output.
+        # If the LUT gets smaller, consider adding linear interpolation.
+        phase = int(frac * sinc_phase_count + np.float32(0.5))
+        w = sinc_lut[phase]
 
         start = coord_int - half_taps_m1
 
         result = 0.0
         for t in range(sinc_tap_count):
-            # do linear interpolation between pre-computed phases
-            ws = w_start[t]
-            result += buf[start + t] * (ws + alpha * (w_end[t] - ws))
+            result += buf[start + t] * w[t]
 
         dsout[i - dsout_start] = level_adjust * result
 
@@ -309,11 +288,11 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
     inbuf = infile.read(readlen * samplelength)
 
     if sampletype == 4:
-        indata = np.fromstring(inbuf, "float32", len(inbuf) // 4) * 32768
+        indata = np.frombuffer(inbuf, "float32", len(inbuf) // 4) * 32768
     elif sampletype == 3:
         indata = np.frombuffer(inbuf, "uint16", len(inbuf) // 2)
     elif sampletype == 2:
-        indata = np.fromstring(inbuf, "int16", len(inbuf) // 2)
+        indata = np.frombuffer(inbuf, "int16", len(inbuf) // 2)
     else:
         # NOTE(oln): Can probably use frombuffer for other variants too but
         # didn't have any samples to test with.
@@ -353,7 +332,7 @@ def load_packed_data_3_32(infile, sample, readlen):
     needed = int(np.ceil(readlen * 3 / 4) * 4) + 4
 
     inbuf = infile.read(needed)
-    indata = np.fromstring(inbuf, "uint32", len(inbuf) // 4)
+    indata = np.frombuffer(inbuf, "uint32", len(inbuf) // 4)
 
     if len(indata) < needed:
         return None
@@ -446,7 +425,7 @@ class LoadFFmpeg:
         # small amounts. The last byte returned by ffmpeg is at the end of
         # this buffer.
         self.rewind_size = 16 * 1024 * 1024
-        self.rewind_buf = b""
+        self.rewind_buf = bytearray()
 
     def _close(self):
         if self.ffmpeg is not None:
@@ -464,7 +443,8 @@ class LoadFFmpeg:
         self.position += len(data)
 
         self.rewind_buf += data
-        self.rewind_buf = self.rewind_buf[-self.rewind_size :]
+        if len(self.rewind_buf) > 2 * self.rewind_size:
+            del self.rewind_buf[: len(self.rewind_buf) - self.rewind_size]
 
         return data
 
@@ -473,7 +453,6 @@ class LoadFFmpeg:
         readlen_bytes = readlen * 2
 
         if self.ffmpeg is None:
-            _ensure_ffmpeg_on_path()
             command = ["ffmpeg", "-hide_banner", "-loglevel", "quiet"]
             command += self.input_args
             command += ["-i", "-"]
@@ -489,7 +468,7 @@ class LoadFFmpeg:
             end = min(start + readlen_bytes, len(self.rewind_buf))
             if start < 0:
                 raise IOError("Seeking too far backwards with ffmpeg")
-            buf_data = self.rewind_buf[start:end]
+            buf_data = bytes(self.rewind_buf[start:end])
             sample_bytes += len(buf_data)
             readlen_bytes -= len(buf_data)
         else:
@@ -537,7 +516,7 @@ class LoadLDF:
 
         self.position = 0
         self.rewind_size = 2 * 1024 * 1024
-        self.rewind_buf = b""
+        self.rewind_buf = bytearray()
 
         # Forward seeks farther than this (in bytes) restart the decoder with a
         # container seek instead of reading and discarding samples one by one.
@@ -595,7 +574,7 @@ class LoadLDF:
         self._stop_event = stop_event
 
         self.position = sample * 2
-        self.rewind_buf = b""
+        self.rewind_buf = bytearray()
 
         self._reader_thread = threading.Thread(
             target=self._reader_loop,
@@ -701,7 +680,8 @@ class LoadLDF:
         self.position += len(data)
 
         self.rewind_buf += data
-        self.rewind_buf = self.rewind_buf[-self.rewind_size:]
+        if len(self.rewind_buf) > 2 * self.rewind_size:
+            del self.rewind_buf[: len(self.rewind_buf) - self.rewind_size]
 
         return data
 
@@ -729,7 +709,7 @@ class LoadLDF:
                 self._start_decoder(sample)
                 buf_data = b""
             else:
-                buf_data = self.rewind_buf[start:end]
+                buf_data = bytes(self.rewind_buf[start:end])
                 sample_bytes += len(buf_data)
                 readlen_bytes -= len(buf_data)
         else:
@@ -758,7 +738,6 @@ class LoadLDF:
 
 
 def ffmpeg_pipe(outname: str, opts: str):
-    _ensure_ffmpeg_on_path()
     cmd = f"ffmpeg -y -hide_banner -loglevel quiet -f s16le -ar 40k -ac 1 -i -"
     if opts and len(opts):
         cmd += f" {opts}"
@@ -776,31 +755,6 @@ def ffmpeg_pipe(outname: str, opts: str):
 def ldf_pipe(outname: str, compression_level: int = 6):
     return ffmpeg_pipe(outname, f"-acodec flac -f ogg -compression_level {compression_level}")
 
-
-def ac3_pipe(outname: str):
-    processes = []
-
-    cmd1 = "sox -r 40000000 -b 8 -c 1 -e signed -t raw - -b 8 -r 46080000 -e unsigned -c 1 -t raw -".split()
-    cmd2 = "ld-ac3-demodulate -v 3 - -".split()
-    cmd3 = ["ld-ac3-decode", "-", outname]
-
-    logfp = open(outname + '.log', 'w')
-
-    # This is done in reverse order to allow for pipe building
-    processes.append(subprocess.Popen(cmd3,
-                                      stdin=subprocess.PIPE,
-                                      stdout=logfp,
-                                      stderr=subprocess.STDOUT))
-
-    processes.append(subprocess.Popen(cmd2,
-                                      stdin=subprocess.PIPE,
-                                      stdout=processes[-1].stdin))
-
-    processes.append(subprocess.Popen(cmd1,
-                                      stdin=subprocess.PIPE,
-                                      stdout=processes[-1].stdin))
-
-    return processes, processes[-1].stdin
 
 
 # Essential (or at least useful) standalone routines and lambdas
@@ -1086,7 +1040,7 @@ def compute_mtf(freq, cavframe=0, laser=780, na=0.52):
 
     freq_mhz = freq / 1000000
 
-    if type(freq_mhz) == np.ndarray:
+    if isinstance(freq_mhz, np.ndarray):
         freq_mhz[freq_mhz > fmax] = fmax
     elif freq_mhz > fmax:
         return 0
@@ -1272,6 +1226,18 @@ def LRUupdate(l, k):
         pass
 
     l.insert(0, k)
+
+
+def concatenate_blocks(blocks):
+    """Concatenate demodulator cache blocks, being sensitive to performance"""
+    dtype = blocks[0].dtype
+    if dtype.names is None:
+        return np.concatenate(blocks)
+
+    # np.concatenate does per-field/per-element copy on structured/record dtype.
+    # ~30x slower than simple memcpy. We happen to know the blocks here share
+    # the same dtype, so just copy the bytes.
+    return np.concatenate([b.view(np.uint8) for b in blocks]).view(dtype)
 
 
 # numba jit functions, used to numba-ify parts of more complex functions

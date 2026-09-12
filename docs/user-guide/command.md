@@ -364,7 +364,20 @@ ld-decode --preEFM input.ldf output
 ```
 
 #### `--AC3`
-Enable AC3 audio decoding (NTSC only).
+Enable AC3-RF audio demodulation (NTSC only).  On AC3 LaserDiscs the
+analog right audio channel carries a QPSK signal at 2.88 MHz with Dolby
+Digital data at 288 kbaud.  With this option, ld-decode demodulates that
+signal (see `lddecode/ac3rf.py`) and writes the raw QPSK symbols to
+`output.ac3sym` (one symbol per byte, values 0-3); the number of symbols
+demodulated during each field is recorded in the field metadata
+(`ac3Symbols`, analogous to `efmTValues`).
+
+The `.ac3sym` file is not playable audio by itself: framing, Reed-Solomon
+error correction and AC3 frame assembly are performed downstream by
+[decode-orc](https://github.com/simoninns/decode-orc)'s *AC3 RF Sink*
+stage, which reads the `.tbc`, its metadata, and the `.ac3sym` file and
+writes the final playable `.ac3` file.
+
 - **Default:** Disabled
 - **Note:** Only compatible with NTSC; attempting to use with PAL will result in an error
 - **Incompatible with:** `--PAL`
@@ -373,6 +386,14 @@ Enable AC3 audio decoding (NTSC only).
 ```bash
 ld-decode --NTSC --AC3 input.ldf output
 ```
+
+The demodulator has a self-contained unit test (synthetic QPSK loopback,
+no capture files needed), runnable from the repository root:
+```bash
+python3 -m tests.test_ac3rf
+```
+A quick sanity check on real output: `output.ac3sym` should grow by
+about 288,000 symbols (bytes) per second of decoded video.
 
 ### RF Sampling Options
 

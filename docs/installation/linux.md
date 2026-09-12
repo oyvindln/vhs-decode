@@ -9,9 +9,12 @@ Download the appImage which will have a filename similar to ***ld-decode-dev-x86
 This AppImage contains all required ld-decode tools:
 
 - ld-decode
-- ld-ldf-reader
+- ld-cut
+- ld-compress
 - ld-ldf-reader-py
-- ld-lds-reader
+- ld-lds-converter-py
+
+It also bundles the flac 1.5.0 that ld-compress needs for multithreaded encoding, along with its own Python interpreter, so nothing has to be installed separately.
 
 ## Usage
 
@@ -21,19 +24,17 @@ Run ld-decode (default):
 ./ld-decode-*.AppImage [arguments]
 ```
 
-Access other tools by adding them to your PATH:
+To run any of the other tools, create a symlink named after it:
+
+```
+ln -s ld-decode-*.AppImage ld-compress
+./ld-compress [arguments]
+```
+
+Or extract the AppImage and add its `bin` directory to your PATH:
 
 ```
 ./ld-decode-*.AppImage --appimage-extract
 export PATH="$PWD/squashfs-root/usr/bin:$PATH"
-ld-ldf-reader [arguments]
-ld-ldf-reader-py [arguments]
-ld-lds-reader [arguments]
-```
-
-Or create symlinks:
-
-```
-ln -s ld-decode-*.AppImage ld-ldf-reader
-./ld-ldf-reader [arguments]
+ld-compress [arguments]
 ```

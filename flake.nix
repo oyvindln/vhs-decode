@@ -21,16 +21,35 @@
         # Use flake's built-in git properties
         # dirtyShortRev already includes "-dirty" suffix, so we need to handle it
         gitCommit = if self ? dirtyShortRev then self.dirtyShortRev else self.shortRev;
+        gitDirty = self ? dirtyRev;
         
         # Build PEP-440 compliant version string with git info
         # Format: base_version+git.commit[.dirty]
         # dirtyShortRev format is "abc1234-dirty", so replace "-" with "."
         fullVersion = "${version}+git.${builtins.replaceStrings ["-"] ["."] gitCommit}";
         
-        docsEnv = python.withPackages (ps: with ps; [
-          mkdocs
-          mkdocs-material
-          mkdocs-awesome-nav
+        # External tools the installed commands shell out to at runtime.
+        # These are prefixed onto PATH rather than replacing it, so anything
+        # else the user has installed remains reachable.
+        #
+        # ld-compress does everything but the FLAC encoding in process, so flac
+        # is all it needs; ld-decode uses ffmpeg to read the input formats that
+        # PyAV does not cover and to resample with --inputfreq.
+        runtimeDeps = [
+          # ld-compress requires flac 1.5.0 or later for multithreaded encoding
+          pkgs.flac
+          pkgs.ffmpeg
+        ];
+
+        # PATH prefix for the installed commands: this package's own bin
+        # directory (so the commands can find each other) plus the external
+        # tools they shell out to.
+        toolPath = "${builtins.placeholder "out"}/bin:${pkgs.lib.makeBinPath runtimeDeps}";
+
+        docsEnv = pkgs.python3.withPackages (ps: with ps; [
+          ps.mkdocs
+          ps.mkdocs-material
+          ps.mkdocs-awesome-nav
         ]);
 
         cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
@@ -89,6 +108,7 @@
             description = "Software defined LaserDisc and videotape decoder";
             homepage = "https://github.com/oyvindln/vhs-decode";
             license = licenses.gpl3Plus;
+            maintainers = [ ];
           };
         };
       in

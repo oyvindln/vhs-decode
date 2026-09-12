@@ -9,9 +9,12 @@ Download the DMG which will have a filename similar to ***ld-decode-dev-macOS.dm
 This package contains all required ld-decode tools:
 
 - ld-decode
-- ld-ldf-reader
+- ld-cut
+- ld-compress
 - ld-ldf-reader-py
-- ld-lds-reader
+- ld-lds-converter-py
+
+It also bundles the flac 1.5.0 that ld-compress needs for multithreaded encoding, so nothing has to be installed separately.
 
 ## Installation
 
@@ -42,9 +45,7 @@ Run ld-decode from the terminal:
 Or add the tools to your PATH:
 
 ```
-export PATH="/path/to/ld-decode/bin:$PATH"
+export PATH="/Applications/LD-Decode.app/Contents/MacOS:$PATH"
 ld-decode [arguments]
-ld-ldf-reader [arguments]
-ld-ldf-reader-py [arguments]
-ld-lds-reader [arguments]
+ld-compress [arguments]
 ```

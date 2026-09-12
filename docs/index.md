@@ -13,7 +13,7 @@ The project aims to take high-quality FM RF Archival captures of LaserDiscs capt
 
 The decoding process (like a real LaserDisc player) is a multi-stage process.  The raw RF must be demodulated (from the original FM signal) and filtered into video, audio and EFM data. This data is then framed and passed through a digital time-base correction (TBC) process which attempts to remove errors caused by the mechanical nature of a LaserDisc player during capture.
 
-The resulting lossless 4fsc sampled TBC output then requires decode processing in order to result in usable video and sound (in modern formats).  For this please see the [Decode Orc project](https://simoninns.github.io/decode-orc-docs){target="_blank"}
+The resulting lossless 4fsc sampled TBC output then requires decode processing in order to result in usable video and sound (in modern formats).  For this please see the [Decode Orc project](https://simoninns.github.io/decode-orc/){target="_blank"}
 
 An overview of how a LaserDisc player functions (which can help you to understand the component parts of ld-decode) is available from [this link](https://simoninns.github.io/DomesdayDuplicator-docs/Misc/Laserdisc-Player.html){target="_blank"}.
 

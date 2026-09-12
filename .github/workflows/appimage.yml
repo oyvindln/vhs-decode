@@ -15,92 +15,122 @@ jobs:
           submodules: recursive
           fetch-depth: 0  # Fetch full history for version info
 
-      - name: Install Nix
-        uses: cachix/install-nix-action@v25
-
-      - name: Build AppImage with Nix
+      # flac is the one external program ld-compress shells out to, and it has
+      # to be 1.5.0 or later for its -j (multithreaded encoding) option -
+      # Ubuntu 24.04 still ships 1.4.3.  libFLAC and libogg are linked in
+      # statically so the bundle carries a single executable, and libc too
+      # where that works, so that flac does not raise the AppImage's glibc
+      # requirement above the one the bundled Python needs.
+      - name: Build flac for the bundle
         run: |
-          LD_DECODE_PATH=$(nix build .#default --out-link result-lddecode --print-out-paths)
-          
-          # Create AppDir structure
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/lib
-          mkdir -p AppDir/usr/lib/python3.12/site-packages
+          set -euo pipefail
+          FLAC_VERSION=1.5.0
+          OGG_VERSION=1.3.5
+          BUILD_DIR="${GITHUB_WORKSPACE}/flac-build"
+          PREFIX="${BUILD_DIR}/prefix"
+          mkdir -p "${BUILD_DIR}"
+          cd "${BUILD_DIR}"
+
+          curl -fsSLO "https://downloads.xiph.org/releases/ogg/libogg-${OGG_VERSION}.tar.xz"
+          curl -fsSLO "https://downloads.xiph.org/releases/flac/flac-${FLAC_VERSION}.tar.xz"
+          tar xf "libogg-${OGG_VERSION}.tar.xz"
+          tar xf "flac-${FLAC_VERSION}.tar.xz"
+
+          cd "${BUILD_DIR}/libogg-${OGG_VERSION}"
+          ./configure --prefix="${PREFIX}" --disable-shared --enable-static --quiet
+          make -j"$(nproc)" > /dev/null
+          make install > /dev/null
+
+          configure_flac () {
+            cd "${BUILD_DIR}/flac-${FLAC_VERSION}"
+            make distclean > /dev/null 2>&1 || true
+            PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig" ./configure --prefix="${PREFIX}" \
+              --disable-shared --enable-static --disable-cpplibs --disable-examples \
+              --disable-doxygen-docs --with-ogg="${PREFIX}" --quiet "$@"
+          }
+
+          if configure_flac LDFLAGS=-static && make -j"$(nproc)" > /dev/null 2>&1 ; then
+            echo "flac linked statically"
+          else
+            echo "::warning::Could not link flac statically - falling back to a dynamic link, which raises the AppImage's glibc requirement to this runner's."
+            configure_flac
+            make -j"$(nproc)" > /dev/null
+          fi
+
+          strip src/flac/flac
+          install -Dm755 src/flac/flac "${GITHUB_WORKSPACE}/runtime-tools/flac"
+          file "${GITHUB_WORKSPACE}/runtime-tools/flac"
+          "${GITHUB_WORKSPACE}/runtime-tools/flac" --version
+
+      # The AppDir is built around a python-build-standalone interpreter rather
+      # than a Nix one.  Nix binaries have absolute /nix/store paths baked into
+      # them - the ELF interpreter, and a wrapper that execv()s the real
+      # interpreter - so an AppImage built from a Nix closure cannot start on a
+      # machine that does not have that exact store path.  These builds are
+      # relocatable by design and target an old glibc, which is what an
+      # AppImage needs.
+      - name: Build AppDir
+        run: |
+          set -euo pipefail
+          PYTHON_VERSION=3.12.13
+          PBS_RELEASE=20260728
+          TARBALL="cpython-${PYTHON_VERSION}+${PBS_RELEASE}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+
+          curl -fsSLO "https://github.com/astral-sh/python-build-standalone/releases/download/${PBS_RELEASE}/${TARBALL}"
+          tar xzf "${TARBALL}"
+
+          mkdir -p AppDir/usr
+          cp -a python/. AppDir/usr/
+          AppDir/usr/bin/python3.12 --version
+
+          # Version info has to be in place before the package is installed,
+          # because it is packaged as lddecode/version
+          python3 scripts/generate_version.py > lddecode/version
+          VERSION="$(cat lddecode/version)"
+          echo "VERSION=${VERSION//:/-}" >> "${GITHUB_ENV}"
+          echo "Building version: ${VERSION}"
+
+          AppDir/usr/bin/python3.12 -m pip install \
+            --disable-pip-version-check --no-warn-script-location .
+
+          # pip bakes the build-time interpreter path into every console script
+          # it generates, so none of them survive the AppImage being mounted
+          # somewhere else.  Keep the interpreter and nothing else; ld-decode's
+          # own commands get self-locating wrappers below, and the third-party
+          # helpers (pip, f2py, ttx, numba, ...) are not part of the product.
+          find AppDir/usr/bin -mindepth 1 -maxdepth 1 \
+            ! -name 'python3.12' ! -name 'python3' ! -name 'python' -delete
+
+          # Wrappers locate the bundle from their own path, so they work
+          # whether they are reached through the AppImage, through a symlink,
+          # or by running an extracted AppDir in place.  Each puts its own
+          # directory on PATH so ld-compress finds the bundled flac, and -I
+          # isolates the interpreter from any PYTHONPATH or PYTHONHOME the
+          # user happens to have set.
+          for tool in ld-decode:lddecode.main \
+                      ld-cut:lddecode.cut \
+                      ld-ldf-reader-py:lddecode.ldf_reader \
+                      ld-lds-converter-py:lddecode.lds \
+                      ld-compress:lddecode.compress ; do
+            name="${tool%%:*}"
+            module="${tool##*:}"
+            cat > "AppDir/usr/bin/${name}" << EOF
+          #!/bin/sh
+          HERE="\$(dirname "\$(readlink -f "\$0")")"
+          PATH="\${HERE}:\${PATH}"
+          export PATH
+          exec "\${HERE}/python3.12" -I -m ${module} "\$@"
+          EOF
+            chmod +x "AppDir/usr/bin/${name}"
+          done
+
+          install -m755 runtime-tools/flac AppDir/usr/bin/flac
+
+          # Desktop entry and icon, both of which appimagetool wants at the
+          # AppDir root as well
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-          
-          # Copy Python interpreter
-          echo "Copying Python interpreter..."
-          PYTHON_PATH=$(nix build github:NixOS/nixpkgs/nixos-25.11#python312 --out-link result-python --print-out-paths)
-          cp -r --no-preserve=mode,ownership $PYTHON_PATH/* AppDir/usr/
-          chmod -R u+rwX AppDir/usr
-          chmod +x AppDir/usr/bin/python3.12
-          
-          # Copy ld-decode package itself first
-          echo "Copying ld-decode package..."
-          if [ -d "$LD_DECODE_PATH/lib/python3.12/site-packages" ]; then
-            cp -rL --no-preserve=mode,ownership "$LD_DECODE_PATH/lib/python3.12/site-packages"/* AppDir/usr/lib/python3.12/site-packages/
-          fi
-          
-          # Copy all runtime dependencies (libraries and Python packages)
-          echo "Copying runtime dependencies..."
-          nix-store -qR "$LD_DECODE_PATH" | while read dep; do
-            # Copy shared libraries
-            if [ -d "$dep/lib" ]; then
-              cp -rL --no-preserve=mode,ownership "$dep/lib"/* AppDir/usr/lib/ 2>/dev/null || true
-            fi
-            # Copy Python packages from all dependencies
-            if [ -d "$dep/lib/python3.12/site-packages" ]; then
-              echo "  Copying Python packages from $dep"
-              cp -rL --no-preserve=mode,ownership "$dep/lib/python3.12/site-packages"/* AppDir/usr/lib/python3.12/site-packages/ 2>/dev/null || true
-            fi
-          done
-          
-          # Ensure version file is present in the lddecode package
-          VERSION_FILE="AppDir/usr/lib/python3.12/site-packages/lddecode/version"
-          mkdir -p "$(dirname "$VERSION_FILE")"
-          VERSION_VALUE=$(nix eval --raw .#packages.x86_64-linux.default.version)
-          echo "$VERSION_VALUE" > "$VERSION_FILE"
-          
-          # Create wrapper scripts for the Python tools
-          cat > AppDir/usr/bin/ld-decode << 'EOF'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export PYTHONPATH="${HERE}/../lib/python3.12/site-packages:${PYTHONPATH}"
-          export PYTHONNOUSERSITE=1
-          exec "${HERE}/../bin/python3.12" -m lddecode.main "$@"
-          EOF
-          chmod +x AppDir/usr/bin/ld-decode
-          
-          cat > AppDir/usr/bin/ld-ldf-reader-py << 'EOF'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export PYTHONPATH="${HERE}/../lib/python3.12/site-packages:${PYTHONPATH}"
-          export PYTHONNOUSERSITE=1
-          exec "${HERE}/ld-ldf-reader" "$@"
-          EOF
-          chmod +x AppDir/usr/bin/ld-ldf-reader-py
-
-          cat > AppDir/usr/bin/ld-ldf-reader << 'EOF'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export PYTHONPATH="${HERE}/../lib/python3.12/site-packages:${PYTHONPATH}"
-          export PYTHONNOUSERSITE=1
-          exec "${HERE}/../bin/python3.12" -m lddecode.ldf_reader "$@"
-          EOF
-          chmod +x AppDir/usr/bin/ld-ldf-reader
-
-          cat > AppDir/usr/bin/ld-lds-reader << 'EOF'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export PYTHONPATH="${HERE}/../lib/python3.12/site-packages:${PYTHONPATH}"
-          export PYTHONNOUSERSITE=1
-          exec "${HERE}/../bin/python3.12" -m lddecode.lds_reader "$@"
-          EOF
-          chmod +x AppDir/usr/bin/ld-lds-reader
-          
-          # Create a desktop entry
-          cat > AppDir/usr/share/applications/ld-decode.desktop << EOF
+          cat > AppDir/usr/share/applications/ld-decode.desktop << 'EOF'
           [Desktop Entry]
           Name=LD-Decode
           Exec=ld-decode
@@ -109,109 +139,118 @@ jobs:
           Categories=AudioVideo;
           Comment=Software defined LaserDisc decoder
           EOF
-          
-          # Symlink desktop file to root (required by appimagetool)
-          ln -s usr/share/applications/ld-decode.desktop AppDir/ld-decode.desktop
-          
-          # Create a simple icon (you may want to add a real icon to the repo)
+          ln -sf usr/share/applications/ld-decode.desktop AppDir/ld-decode.desktop
+
           echo "Icon placeholder" > AppDir/usr/share/icons/hicolor/256x256/apps/ld-decode.png
-          
-          # Symlink icon to root (required by appimagetool)
-          ln -s usr/share/icons/hicolor/256x256/apps/ld-decode.png AppDir/ld-decode.png
-          
-          # Create AppRun
+          ln -sf usr/share/icons/hicolor/256x256/apps/ld-decode.png AppDir/ld-decode.png
+
           cat > AppDir/AppRun << 'EOF'
-          #!/bin/bash
-          HERE="$(dirname "$(readlink -f "${0}")")"
-          export PATH="${HERE}/usr/bin:${PATH}"
-          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-          export PYTHONPATH="${HERE}/usr/lib/python3.12/site-packages:${PYTHONPATH}"
-          export PYTHONNOUSERSITE=1
-          
-          # If called as a specific binary name, run that; otherwise default to ld-decode
-          BINARY_NAME="$(basename "$0")"
-          if [ "$BINARY_NAME" = "AppRun" ] || [ "$BINARY_NAME" = "ld-decode-x86_64.AppImage" ] || [ "$BINARY_NAME" = "ld-decode" ]; then
-            exec "${HERE}/usr/bin/ld-decode" "$@"
-          else
-            exec "${HERE}/usr/bin/${BINARY_NAME}" "$@"
-          fi
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          PATH="${HERE}/usr/bin:${PATH}"
+          export PATH
+
+          # Symlink the AppImage to a tool name to run that tool; anything else
+          # (including running the AppImage directly) gets ld-decode.
+          case "$(basename "$0")" in
+            ld-cut|ld-compress|ld-ldf-reader-py|ld-lds-converter-py|flac)
+              exec "${HERE}/usr/bin/$(basename "$0")" "$@" ;;
+            *)
+              exec "${HERE}/usr/bin/ld-decode" "$@" ;;
+          esac
           EOF
           chmod +x AppDir/AppRun
-          
-          # Verify all expected binaries are present
+
+      - name: Test the AppDir
+        run: |
+          set -euo pipefail
+
           echo "Verifying binaries in AppDir:"
           ls -la AppDir/usr/bin/
-          if [ ! -f "AppDir/usr/bin/ld-decode" ]; then
-            echo "ERROR: ld-decode binary not found!"
-            exit 1
-          fi
-          if [ ! -f "AppDir/usr/bin/ld-ldf-reader-py" ]; then
-            echo "ERROR: ld-ldf-reader-py binary not found!"
-            exit 1
-          fi
-          if [ ! -f "AppDir/usr/bin/ld-ldf-reader" ]; then
-            echo "ERROR: ld-ldf-reader binary not found!"
-            exit 1
-          fi
-          if [ ! -f "AppDir/usr/bin/ld-lds-reader" ]; then
-            echo "ERROR: ld-lds-reader binary not found!"
-            exit 1
-          fi
-          echo "✓ All required binaries present: ld-decode, ld-ldf-reader, ld-ldf-reader-py, ld-lds-reader"
+          for required in ld-decode ld-cut ld-ldf-reader-py ld-lds-converter-py ld-compress flac ; do
+            if [ ! -x "AppDir/usr/bin/${required}" ]; then
+              echo "ERROR: ${required} not found in AppDir/usr/bin!"
+              exit 1
+            fi
+          done
 
-          # Sanity check tool entry points
-          AppDir/usr/bin/ld-decode --version >/dev/null
-          AppDir/usr/bin/ld-ldf-reader --version >/dev/null
-          AppDir/usr/bin/ld-ldf-reader-py --version >/dev/null
-          AppDir/usr/bin/ld-lds-reader --version >/dev/null
-          
-          # Download appimagetool
+          # Nothing in the bundle may refer to where it was built - that is the
+          # failure mode that made the previous AppImage unrunnable off the
+          # build machine, and pip reintroduces it on every install.
+          if grep -rIl "${GITHUB_WORKSPACE}" AppDir/usr/bin ; then
+            echo "ERROR: the files listed above still point at the build directory!"
+            exit 1
+          fi
+
+          # Run from a copy at a different path, with the environment scrubbed,
+          # so that anything depending on the build location or on the runner's
+          # own Python shows up here rather than on a user's machine.
+          cp -a AppDir "${RUNNER_TEMP}/AppDir-relocated"
+          BIN="${RUNNER_TEMP}/AppDir-relocated/usr/bin"
+          env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/ld-decode" --version
+          env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/ld-compress" --version
+          env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/flac" --version
+
+          # A full ld-compress round trip, which is what catches a flac that is
+          # missing, too old, or not relocatable.
+          WORK="${RUNNER_TEMP}/smoke"
+          rm -rf "${WORK}"
+          mkdir -p "${WORK}/out"
+          cd "${WORK}"
+          head -c 4000000 /dev/urandom > raw.s16
+          env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/ld-lds-converter-py" -p -i raw.s16 -o sample.lds
+          env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/ld-compress" -n sample.lds
+          (cd out && env -i PATH=/usr/bin:/bin HOME="${RUNNER_TEMP}" "${BIN}/ld-compress" -n -u ../sample.ldf)
+          cmp sample.lds out/sample.lds
+          cd "${GITHUB_WORKSPACE}"
+          rm -rf "${WORK}" "${RUNNER_TEMP}/AppDir-relocated"
+
+          echo "✓ The bundle is relocatable and the ld-compress round trip is lossless"
+
+      - name: Build AppImage
+        run: |
+          set -euo pipefail
+
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
-          
+
           # Extract appimagetool (GitHub Actions doesn't have FUSE)
-          ./appimagetool-x86_64.AppImage --appimage-extract
-          
-          # Build the AppImage using extracted appimagetool
+          ./appimagetool-x86_64.AppImage --appimage-extract > /dev/null
+
           # Unset SOURCE_DATE_EPOCH to avoid mksquashfs timestamp conflicts
           env -u SOURCE_DATE_EPOCH ARCH=x86_64 ./squashfs-root/AppRun AppDir ld-decode-x86_64.AppImage
-          
-          # Make it executable
           chmod +x ld-decode-x86_64.AppImage
-          
-          # Get version info
-          VERSION=$(cat lddecode/version 2>/dev/null || echo "dev")
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          
-          # Rename with version
-          mv ld-decode-x86_64.AppImage ld-decode-${VERSION}-x86_64.AppImage
-          
-          # Create a README for users
+
+          mv ld-decode-x86_64.AppImage "ld-decode-${VERSION}-x86_64.AppImage"
+          ls -lh "ld-decode-${VERSION}-x86_64.AppImage"
+
           cat > AppImage-README.txt << 'EOF'
           ld-decode AppImage Usage
           =========================
-          
+
           This AppImage contains all ld-decode tools:
           - ld-decode
-          - ld-ldf-reader
+          - ld-cut
+          - ld-compress
           - ld-ldf-reader-py
-          - ld-lds-reader
-          
+          - ld-lds-converter-py
+
+          It also bundles flac 1.5.0, which ld-compress needs for multithreaded
+          encoding, so nothing has to be installed separately.
+
           Usage:
-          
+
           1. Run ld-decode (default):
              ./ld-decode-*.AppImage [arguments]
-          
-          2. Access other tools by adding them to your PATH:
+
+          2. Create a symlink named after any of the tools to run that tool:
+             ln -s ld-decode-*.AppImage ld-compress
+             ./ld-compress [arguments]
+
+          3. Or extract the AppImage and add its bin directory to your PATH:
              ./ld-decode-*.AppImage --appimage-extract
              export PATH="$PWD/squashfs-root/usr/bin:$PATH"
-             ld-ldf-reader [arguments]
-             ld-ldf-reader-py [arguments]
-             ld-lds-reader [arguments]
-          
-          Or create symlinks:
-             ln -s ld-decode-*.AppImage ld-ldf-reader
-             ./ld-ldf-reader [arguments]
+             ld-compress [arguments]
           EOF
 
       - name: Upload AppImage as artifact

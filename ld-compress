@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+import sys
+from lddecode.compress import main
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

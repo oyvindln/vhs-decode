@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+import sys
+
+from lddecode.start_finder import main
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

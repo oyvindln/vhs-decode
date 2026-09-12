@@ -46,14 +46,6 @@ jobs:
           
           # Create wrapper batch scripts
           New-Item -ItemType Directory -Force -Path build\package\bin
-          
-          @"
-          @echo off
-          set SCRIPT_DIR=%~dp0
-          set PYTHONHOME=%SCRIPT_DIR%..\python
-          set PYTHONPATH=%SCRIPT_DIR%..
-          "%PYTHONHOME%\python.exe" -c "from lddecode import ldf_reader; ldf_reader.main()" %*
-          "@ | Out-File -FilePath build\package\bin\ld-ldf-reader.bat -Encoding ascii
 
           @"
           @echo off
@@ -62,7 +54,7 @@ jobs:
           set PYTHONPATH=%SCRIPT_DIR%..
           "%PYTHONHOME%\python.exe" "%SCRIPT_DIR%..\lddecode\main.py" %*
           "@ | Out-File -FilePath build\package\bin\ld-decode.bat -Encoding ascii
-          
+
           @"
           @echo off
           set SCRIPT_DIR=%~dp0
@@ -76,16 +68,92 @@ jobs:
           set SCRIPT_DIR=%~dp0
           set PYTHONHOME=%SCRIPT_DIR%..\python
           set PYTHONPATH=%SCRIPT_DIR%..
-          "%PYTHONHOME%\python.exe" -c "from lddecode import lds_reader; lds_reader.main()" %*
-          "@ | Out-File -FilePath build\package\bin\ld-lds-reader.bat -Encoding ascii
+          "%PYTHONHOME%\python.exe" -c "import sys; from lddecode import cut; cut.main(sys.argv[1:])" %*
+          "@ | Out-File -FilePath build\package\bin\ld-cut.bat -Encoding ascii
 
-      - name: Sanity check packaged reader tools
+          @"
+          @echo off
+          set SCRIPT_DIR=%~dp0
+          set PYTHONHOME=%SCRIPT_DIR%..\python
+          set PYTHONPATH=%SCRIPT_DIR%..
+          "%PYTHONHOME%\python.exe" -c "import sys; from lddecode import lds; sys.exit(lds.main())" %*
+          "@ | Out-File -FilePath build\package\bin\ld-lds-converter-py.bat -Encoding ascii
+
+          # ld-compress finds flac.exe beside itself, so bin\ is the right home
+          # for both.  argv[0] has to be the .bat for that lookup to work, which
+          # it is: python -c leaves argv[0] as "-c", so use a real script path.
+          @"
+          @echo off
+          set SCRIPT_DIR=%~dp0
+          set PYTHONHOME=%SCRIPT_DIR%..\python
+          set PYTHONPATH=%SCRIPT_DIR%..
+          "%PYTHONHOME%\python.exe" "%SCRIPT_DIR%ld-compress.py" %*
+          "@ | Out-File -FilePath build\package\bin\ld-compress.bat -Encoding ascii
+
+          @"
+          import sys
+          from lddecode.compress import main
+
+          if __name__ == '__main__':
+              try:
+                  sys.exit(main())
+              except KeyboardInterrupt:
+                  sys.exit(130)
+          "@ | Out-File -FilePath build\package\bin\ld-compress.py -Encoding ascii
+
+      # flac is the one external program ld-compress shells out to, and it has
+      # to be 1.5.0 or later for its -j (multithreaded encoding) option.  Xiph
+      # publish an official Win64 build, so there is nothing to compile here.
+      - name: Bundle flac
         shell: pwsh
         run: |
-          build\package\bin\ld-decode.bat --version
-          build\package\bin\ld-ldf-reader.bat --version
-          build\package\bin\ld-ldf-reader-py.bat --version
-          build\package\bin\ld-lds-reader.bat --version
+          $ErrorActionPreference = "Stop"
+          $flacVersion = "1.5.0"
+          $zip = Join-Path $env:RUNNER_TEMP "flac-win.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "flac-win"
+
+          Invoke-WebRequest -Uri "https://downloads.xiph.org/releases/flac/flac-$flacVersion-win.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+
+          $release = Join-Path $extract "flac-$flacVersion-win"
+          $win64 = Join-Path $release "Win64"
+
+          # flac.exe loads libFLAC.dll from its own directory, which is the
+          # same bin\ that ld-compress looks in for flac
+          Copy-Item -Path (Join-Path $win64 "flac.exe") -Destination build\package\bin -Force
+          Copy-Item -Path (Join-Path $win64 "libFLAC.dll") -Destination build\package\bin -Force
+
+          # The flac command line tool is GPL, libFLAC is under the Xiph licence
+          New-Item -ItemType Directory -Force -Path build\package\licenses\flac | Out-Null
+          Copy-Item -Path (Join-Path $release "COPYING.GPL") -Destination build\package\licenses\flac -Force
+          Copy-Item -Path (Join-Path $release "COPYING.Xiph") -Destination build\package\licenses\flac -Force
+
+          & build\package\bin\flac.exe --version
+
+      - name: Test the package
+        shell: cmd
+        run: |
+          setlocal
+          set BIN=%GITHUB_WORKSPACE%\build\package\bin
+          call "%BIN%\ld-decode.bat" --version || exit /b 1
+          call "%BIN%\ld-compress.bat" --version || exit /b 1
+
+          rem A full ld-compress round trip, which is what catches a missing or
+          rem too-old flac.exe before it reaches a user.
+          set WORK=%RUNNER_TEMP%\ldcompress-smoke
+          rmdir /s /q "%WORK%" 2>nul
+          mkdir "%WORK%\out" || exit /b 1
+          cd /d "%WORK%" || exit /b 1
+
+          "%GITHUB_WORKSPACE%\build\package\python\python.exe" -c "import os,sys; sys.stdout.buffer.write(os.urandom(4000000))" > raw.s16 || exit /b 1
+          call "%BIN%\ld-lds-converter-py.bat" -p -i raw.s16 -o sample.lds || exit /b 1
+          call "%BIN%\ld-compress.bat" -n sample.lds || exit /b 1
+          cd out || exit /b 1
+          call "%BIN%\ld-compress.bat" -n -u ..\sample.ldf || exit /b 1
+          cd .. || exit /b 1
+          fc /b sample.lds out\sample.lds > nul || exit /b 1
+
+          echo Round trip is lossless
 
       - name: Create README for package
         shell: pwsh
@@ -103,13 +171,18 @@ jobs:
           3. Navigate to the bin directory
           4. Run the tools:
              - ld-decode.bat [options] input.lds output.tbc
-             - ld-ldf-reader.bat [options] input.ldf
+             - ld-cut.bat [options] input.ldf output.ldf
+             - ld-compress.bat [options] input.lds
              - ld-ldf-reader-py.bat [options] input.ldf
-             - ld-lds-reader.bat [options] input.lds
-          
+             - ld-lds-converter-py.bat [options]
+
           Alternatively, add the bin directory to your PATH environment variable
           to run the tools from anywhere.
-          
+
+          bin\flac.exe is the flac 1.5.0 that ld-compress uses for multithreaded
+          encoding; ld-compress finds it there without any setup of its own. The
+          flac licences are in the licenses\flac directory.
+
           Version: $($env:VERSION)
           "@ | Out-File -FilePath build\package\README.txt -Encoding UTF8
 

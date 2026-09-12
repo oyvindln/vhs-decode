@@ -6,12 +6,15 @@ Windows installation is performed using a portable ZIP archive. The pre-compiled
 
 Download the ZIP file which will have a filename similar to ***ld-decode-dev-windows.zip***
 
-This archive contains all required ld-decode tools:
+This archive contains all required ld-decode tools, in its `bin` directory:
 
-- ld-decode
-- ld-ldf-reader
-- ld-ldf-reader-py
-- ld-lds-reader
+- ld-decode.bat
+- ld-cut.bat
+- ld-compress.bat
+- ld-ldf-reader-py.bat
+- ld-lds-converter-py.bat
+
+`bin\flac.exe` is the flac 1.5.0 that ld-compress needs for multithreaded encoding; ld-compress finds it there without any setup, so nothing has to be installed separately.
 
 ## Installation
 
@@ -24,20 +27,20 @@ This archive contains all required ld-decode tools:
 Run ld-decode from Command Prompt or PowerShell:
 
 ```
-C:\path\to\ld-decode\ld-decode.exe [arguments]
+C:\path\to\ld-decode\bin\ld-decode.bat [arguments]
 ```
 
-For easier access, add the ld-decode directory to your PATH:
+For easier access, add the `bin` directory to your PATH:
 
 **Command Prompt:**
 ```
-set PATH=%PATH%;C:\path\to\ld-decode
+set PATH=%PATH%;C:\path\to\ld-decode\bin
 ld-decode [arguments]
 ```
 
 **PowerShell:**
 ```
-$env:Path += ";C:\path\to\ld-decode"
+$env:Path += ";C:\path\to\ld-decode\bin"
 ld-decode [arguments]
 ```
 

@@ -25,7 +25,8 @@ from scipy import interpolate
 # internal libraries
 
 from . import efm_pll
-from .utils import ac3_pipe, ldf_pipe, traceback
+from . import ac3rf
+from .utils import ldf_pipe, traceback
 from .utils import nb_mean, nb_median, nb_round, nb_min, nb_max, nb_abs, nb_absmax, n_orgt
 from .utils import polar2z, sqsum, genwave, dsa_rescale_and_clip, scale, scale_field, rms
 from .utils import findpeaks, findpulses, calczc, inrange, roundfloat
@@ -33,6 +34,7 @@ from .utils import LRUupdate, clb_findbursts, angular_mean_helper, phase_distanc
 from .utils import build_hilbert, unwrap_hilbert, emphasis_iir, filtfft
 from .utils import fft_do_slice, fft_determine_slices, StridedCollector, hz_to_output_array
 from .utils import Pulse, nb_std, n_ornotrange, gen_bpf_supergauss, FieldInfo
+from .utils import concatenate_blocks
 
 try:
     # If Anaconda's numpy is installed, mkl will use all threads for fft etc
@@ -415,26 +417,6 @@ class RFDecode:
         if self.decode_digital_audio:
             self.computeefmfilter()
 
-        if self.SysParams['AC3']:
-            apass = 288000 * .5
-
-            fpass = lambda apass: [(self.SysParams['audio_rfreq_AC3'] - apass) / self.freq_hz_half,
-                                   (self.SysParams['audio_rfreq_AC3'] + apass) / self.freq_hz_half]
-
-            # This analog audio bandpass filter is an approximation of
-            # http://sim.okawa-denshi.jp/en/RLCtool.php with resistor 2200ohm,
-            # inductor 180uH, and cap 27pF (taken from Pioneer service manuals)
-            # self.Filters['AC3_iir'] = sps.butter(5, [1.48/20, 3.45/20], btype='bandpass')
-
-            # However, the above didn't work, and we wound up with two IIR filters
-            self.Filters['AC3_bp1'] = sps.butter(3, [(2.88-.5)/20, (2.88+.5)/20], btype='bandpass')
-            self.Filters['AC3_bp2'] = sps.butter(3, fpass(apass), btype='bandpass')
-
-            filt1 = filtfft(self.Filters['AC3_bp1'], self.blocklen)
-            filt2 = filtfft(self.Filters['AC3_bp2'], self.blocklen)
-
-            self.Filters['AC3'] = filt1 * filt2
-
         self.computedelays()
 
 
@@ -571,6 +553,9 @@ class RFDecode:
         # This high pass filter is intended to detect RF dropouts
         Frfhpf = sps.butter(1, 10 / self.freq_half, btype="highpass")
         self.Filters["Frfhpf"] = filtfft(Frfhpf, self.blocklen)
+        self.Filters["Frfhpf_rfft"] = self.Filters["Frfhpf"][
+            : self.blocklen // 2 + 1
+        ]
 
         # First phase FFT filtering
 
@@ -697,6 +682,28 @@ class RFDecode:
             )
             SF["FVideoPilot"] = SF["Fvideo_lpf"] * SF["Fdeemp"] * SF["Fpilot"]
 
+        # These filters produce real outputs, so keep their positive-frequency
+        # halves and transform all video products together.
+        rfft_len = self.blocklen // 2 + 1
+        bins = np.arange(rfft_len)
+
+        def shifted_half_spectrum(filt, offset=0):
+            half = filt[:rfft_len]
+            if offset:
+                half = half * np.exp(2j * np.pi * offset * bins / self.blocklen)
+            return half
+
+        video_filters = [
+            shifted_half_spectrum(SF["FVideo"]),
+            shifted_half_spectrum(SF["FVideo05"], SF["F05_offset"]),
+            shifted_half_spectrum(
+                SF["FVideoBurst"], SF["FVideoBurst_offset"]
+            ),
+        ]
+        if self.system == "PAL":
+            video_filters.append(shifted_half_spectrum(SF["FVideoPilot"]))
+        SF["FVideo_rfft"] = np.asarray(video_filters)
+
     def computeaudiofilters(self):
         SP = self.SysParams
         DP = self.DecoderParams
@@ -770,6 +777,45 @@ class RFDecode:
 
         return self.demodblock_cpu(data, mtf_level, fftdata, cut)
 
+    def demodblock_sync(self, data=None, fftdata=None, cut=False):
+        """Demodulate only the 0.5 MHz path used for vertical-sync detection."""
+
+        if fftdata is not None:
+            indata_fft = fftdata
+        elif data is not None:
+            indata_fft = npfft.fft(data[: self.blocklen])
+        else:
+            raise Exception("demodblock_sync called without raw or FFT data")
+
+        if self.system == "PAL" and self.PAL_V4300D_NotchFilter:
+            indata_fft = indata_fft.copy()
+            sl = slice(
+                int(self.blocklen * (8.42 / self.freq)),
+                int(1 + (self.blocklen * (8.6 / self.freq))),
+            )
+            sq_sl = sqsum(indata_fft[sl])
+            m = np.mean(sq_sl) + (np.std(sq_sl) * 3)
+
+            for i in np.where(sq_sl > m)[0]:
+                indata_fft[(i - 1 + sl.start)] = 0
+                indata_fft[(i + sl.start)] = 0
+                indata_fft[(i + 1 + sl.start)] = 0
+                indata_fft[self.blocklen - (i + sl.start)] = 0
+                indata_fft[self.blocklen - (i - 1 + sl.start)] = 0
+                indata_fft[self.blocklen - (i + 1 + sl.start)] = 0
+
+        indata_fft_filt = indata_fft * self.Filters["RFVideo"]
+
+        hilbert = npfft.ifft(indata_fft_filt)
+        demod = unwrap_hilbert(hilbert, self.freq_hz)
+        demod_fft = npfft.fft(np.clip(demod, 1500000, self.freq_hz * 0.75))
+        sync = npfft.ifft(demod_fft * self.Filters["FVideo05"]).real
+        sync = np.roll(sync, -self.Filters["F05_offset"])
+
+        if cut:
+            sync = sync[self.blockcut : -self.blockcut_end]
+        return sync.astype(np.float32)
+
 
     def demodblock_cpu(self, data=None, mtf_level=0, fftdata=None, cut=False):
         rv = {}
@@ -785,7 +831,11 @@ class RFDecode:
         if getattr(self, "delays", None) is not None and "video_rot" in self.delays:
             rotdelay = self.delays["video_rot"]
 
-        rv["rfhpf"] = npfft.ifft(indata_fft * self.Filters["Frfhpf"]).real
+        rv["rfhpf"] = npfft.irfft(
+            indata_fft[: self.blocklen // 2 + 1]
+            * self.Filters["Frfhpf_rfft"],
+            n=self.blocklen,
+        )
         rv["rfhpf"] = rv["rfhpf"][
             self.blockcut - rotdelay : -self.blockcut_end - rotdelay
         ].astype(np.float32)
@@ -825,18 +875,17 @@ class RFDecode:
         demod = unwrap_hilbert(hilbert, self.freq_hz)
 
         # use a clipped demod for video output processing to reduce speckling impact
-        demod_fft = npfft.fft(np.clip(demod, 1500000, self.freq_hz * 0.75))
+        demod_rfft = npfft.rfft(np.clip(demod, 1500000, self.freq_hz * 0.75))
+        video_results = npfft.irfft(
+            demod_rfft * self.Filters["FVideo_rfft"],
+            n=self.blocklen,
+            axis=1,
+        )
 
-        out_video = npfft.ifft(demod_fft * self.Filters["FVideo"]).real
-
-        out_video05 = npfft.ifft(demod_fft * self.Filters["FVideo05"]).real
-        out_video05 = np.roll(out_video05, -self.Filters["F05_offset"])
-
-        out_videoburst = npfft.ifft(demod_fft * self.Filters["FVideoBurst"]).real
-        out_videoburst = np.roll(out_videoburst, -self.Filters["FVideoBurst_offset"])
+        out_video, out_video05, out_videoburst = video_results[:3]
 
         if self.system == "PAL":
-            out_videopilot = npfft.ifft(demod_fft * self.Filters["FVideoPilot"]).real
+            out_videopilot = video_results[3]
             video_out = np.rec.array(
                 [
                     out_video.astype(np.float32),
@@ -1107,6 +1156,7 @@ class DemodCache:
         self.q_in            = Queue()
         self.q_out           = Queue()
         self.waiting         = set()
+        self.sync_waiting    = set()
         self.q_out_cv        = threading.Condition(self.lock)
 
         self.threadpipes     = []
@@ -1216,6 +1266,20 @@ class DemodCache:
 
                 if output:
                     self.q_out.put((blocknum, output))
+            elif item[0] == "SYNC":
+                blocknum, block = item[1:]
+                output = {}
+                if "fft" not in block:
+                    output["fft"] = npfft.fft(block["rawinput"])
+                    fftdata = output["fft"]
+                else:
+                    fftdata = block["fft"]
+                output["sync"] = rf.demodblock_sync(
+                    data=block["rawinput"],
+                    fftdata=fftdata,
+                    cut=True,
+                )
+                self.q_out.put((blocknum, output))
             elif item[0] == "NEWPARAMS":
                 self.apply_newparams(item[1])
 
@@ -1298,6 +1362,66 @@ class DemodCache:
 
         return None if reached_end else need_blocks
 
+    def _load_raw_block(self, blocknum):
+        """Return a cached raw block without scheduling full demodulation."""
+
+        with self.lock:
+            if blocknum not in self.blocks:
+                LRUupdate(self.lru, blocknum)
+                self.blocks[blocknum] = {"rawinput": None}
+            block = self.blocks[blocknum]
+            if block is None:
+                return None
+            rawdata = block["rawinput"]
+
+        if rawdata is None:
+            with self.loader_lock:
+                rawdata = self.loader(
+                    self.infile, blocknum * self.blocksize, self.rf.blocklen
+                )
+            with self.lock:
+                if rawdata is None or len(rawdata) < self.rf.blocklen:
+                    self.blocks[blocknum] = None
+                    return None
+                self.blocks[blocknum]["rawinput"] = rawdata
+
+        return self.blocks[blocknum]
+
+    def read_sync(self, begin, length):
+        """Return only the demodulated sync path for a contiguous input range."""
+
+        end = begin + length
+        blocknums = list(range(begin // self.blocksize, (end // self.blocksize) + 1))
+
+        for blocknum in blocknums:
+            if self._load_raw_block(blocknum) is None:
+                return None
+
+        with self.lock:
+            for blocknum in blocknums:
+                block = self.blocks[blocknum]
+                if "sync" not in block and blocknum not in self.sync_waiting:
+                    self.sync_waiting.add(blocknum)
+                    self.q_in.put(("SYNC", blocknum, block))
+
+        while True:
+            if self.num_worker_threads == 0:
+                self.worker(return_on_empty=True)
+
+            with self.q_out_cv:
+                if not any(blocknum in self.sync_waiting for blocknum in blocknums):
+                    break
+                self.q_out_cv.wait()
+
+        with self.lock:
+            sync = [self.blocks[blocknum]["sync"] for blocknum in blocknums]
+
+        self.prune_cache()
+        return {
+            "sync": np.concatenate(sync),
+            "startloc": (begin // self.blocksize) * self.blocksize,
+        }
+
     def flush_demod(self):
         """ Flush all demodulation data.  This is called by the field class after calibration (i.e. MTF) is determined to be off """
         blocks_toredo = []
@@ -1331,6 +1455,13 @@ class DemodCache:
                 blocknum, item = rv
 
                 if blocknum not in self.blocks:
+                    continue
+
+                if "sync" in item:
+                    for key, value in item.items():
+                        self.blocks[blocknum][key] = value
+                    self.sync_waiting.discard(blocknum)
+                    self.q_out_cv.notify_all()
                     continue
 
                 if "MTF" not in item or "demod" not in item:
@@ -1419,7 +1550,7 @@ class DemodCache:
 
         rv = {}
         for k in t.keys():
-            rv[k] = np.concatenate(t[k]) if len(t[k]) else None
+            rv[k] = concatenate_blocks(t[k]) if len(t[k]) else None
 
         if rv["audio"] is not None:
             rv["audio_phase1"] = rv["audio"]
@@ -2651,7 +2782,7 @@ class Field:
         audio=0,
         final=False,
         lastfieldwritten=None,
-        shift=0
+        shift: float = 0.0
     ):
         if lineinfo is None:
             lineinfo = self.linelocs
@@ -3589,7 +3720,9 @@ class LDdecode:
         self.outfile_audio = None
         self.outfile_efm = None
         self.outfile_pre_efm = None
-        self.outfile_ac3 = None
+        self.outfile_ac3sym = None
+        self.ac3_demodulator = None
+        self.ac3_processed_samples = 0
         self.ffmpeg_rftbc, self.outfile_rftbc = None, None
         self.do_rftbc = False
 
@@ -3605,10 +3738,6 @@ class LDdecode:
                     self.outfile_pre_efm = open(fname_out + ".prefm", "wb")
             if self.write_rf_tbc:
                 self.ffmpeg_rftbc, self.outfile_rftbc = ldf_pipe(fname_out + ".tbc.ldf")
-                self.do_rftbc = True
-            if self.ac3:
-                self.AC3Collector = StridedCollector(cut_begin=1024, cut_end=0)
-                self.ac3_processes, self.outfile_ac3 = ac3_pipe(fname_out + ".ac3")
                 self.do_rftbc = True
 
             if os.path.exists(fname_out + '.tbc.db'):
@@ -3638,6 +3767,12 @@ class LDdecode:
         }
 
         self.rf = RFDecode(**self.rf_opts)
+
+        if fname_out is not None and self.ac3:
+            self.ac3_demodulator = ac3rf.Ac3RfDemodulator(
+                self.rf.freq_hz, logger=self.logger
+            )
+            self.outfile_ac3sym = open(fname_out + ".ac3sym", "wb")
 
         if system == "PAL":
             self.FieldClass = FieldPAL
@@ -3706,7 +3841,7 @@ class LDdecode:
             "outfile_json",
             "outfile_efm",
             "outfile_rftbc",
-            "outfile_ac3",
+            "outfile_ac3sym",
         ]:
             setattr(self, outfiles, None)
 
@@ -3776,6 +3911,7 @@ class LDdecode:
                 ntsc_is_video_id_data_valid INTEGER CHECK (ntsc_is_video_id_data_valid IN (0,1)),
                 ntsc_video_id_data INTEGER,
                 ntsc_white_flag INTEGER CHECK (ntsc_white_flag IN (0,1)),
+                ac3_symbols INTEGER,
                 PRIMARY KEY (capture_id, field_id)
             );
 
@@ -3913,19 +4049,23 @@ class LDdecode:
 
         return m_synchz, m_ire0hz, m_ire100hz
 
-    def AC3filter(self, rftbc):
-        self.AC3Collector.add(rftbc)
+    def AC3demodulate(self, f):
+        # f.rawdata covers the file sample range [block_start, block_start
+        # + len(raw)); successive fields overlap, so skip what has already
+        # been fed to the demodulator.
+        raw = f.rawdata
+        block_start = (f.readloc // self.demodcache.blocksize) * self.demodcache.blocksize
+        new_start = max(0, self.ac3_processed_samples - block_start)
+        self.ac3_processed_samples = block_start + len(raw)
 
-        blk = self.AC3Collector.get_block()
-        while blk is not None:
-            fftdata = np.fft.fft(blk)
-            filtdata = np.fft.ifft(fftdata * self.rf.Filters['AC3']).real
-            odata = self.AC3Collector.cut(filtdata)
-            odata = np.clip(odata / 64, -100, 100)
+        if new_start >= len(raw):
+            return 0
 
-            self.outfile_ac3.write(np.int8(odata))
-
-            blk = self.AC3Collector.get_block()
+        symbols = self.ac3_demodulator.demodulate_to_symbols(
+            raw[new_start:].astype(np.float32)
+        )
+        self.outfile_ac3sym.write(symbols)
+        return len(symbols)
 
     def writeout(self, dataset):
         f, fi, picture, audio, efm = dataset
@@ -3939,12 +4079,18 @@ class LDdecode:
         fi["audioSamples"] = 0 if audio is None else int(len(audio) / 2)
         fi["efmTValues"] = len(efm_out) if self.digital_audio else 0
 
+        # Per-field symbol count, analogous to efmTValues
+        if self.outfile_ac3sym is not None:
+            fi["ac3Symbols"] = self.AC3demodulate(f)
+        else:
+            fi["ac3Symbols"] = 0
+
         self.fieldinfo.append(fi)
 
         if not self.capture_id:
             self.build_sqlite_metadata()
 
-        c_id = self.capture_id 
+        c_id = self.capture_id
         f_id = self.fields_written
 
         decodeFaults = None if fi.get('decodeFaults') == 0 else fi.get('decodeFaults')
@@ -3953,13 +4099,13 @@ class LDdecode:
         # We cast booleans to int because of the CHECK (val IN (0,1)) constraint
         self.dbconn.execute('''
             INSERT INTO field_record (
-                capture_id, field_id, is_first_field, sync_conf, disk_loc, 
-                file_loc, median_burst_ire, field_phase_id, decode_faults, 
-                audio_samples, efm_t_values, pad
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-            (c_id, f_id, int(fi['isFirstField']), fi['syncConf'], fi['diskLoc'], 
-                fi['fileLoc'], fi['medianBurstIRE'], fi['fieldPhaseID'], decodeFaults, 
-                fi['audioSamples'], fi['efmTValues'], 0))
+                capture_id, field_id, is_first_field, sync_conf, disk_loc,
+                file_loc, median_burst_ire, field_phase_id, decode_faults,
+                audio_samples, efm_t_values, ac3_symbols, pad
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (c_id, f_id, int(fi['isFirstField']), fi['syncConf'], fi['diskLoc'],
+                fi['fileLoc'], fi['medianBurstIRE'], fi['fieldPhaseID'], decodeFaults,
+                fi['audioSamples'], fi['efmTValues'], fi['ac3Symbols'], 0))
 
         if vitsMetrics := fi.get('vitsMetrics'):
             w_snr  = vitsMetrics.get('wSNR', 0)
@@ -4014,14 +4160,49 @@ class LDdecode:
             if self.outfile_rftbc is not None:
                 self.outfile_rftbc.write(rftbc)
 
-            if self.outfile_ac3 is not None:
-                self.AC3filter(rftbc)
-
             if self.pipe_rftbc is not None:
                 self.pipe_rftbc.send(rftbc)
 
         if audio is not None and self.outfile_audio is not None:
             self.outfile_audio.write(audio)
+
+    def has_sync(self, start):
+        """Return whether a lightweight probe sees a possible field sync.
+
+        This is a conservative preamble gate.  It does not validate a field or
+        alter the decoder state; callers must still use :meth:`decodefield`
+        before treating a position as video.
+        """
+
+        readloc = max(0, int(start - self.rf.blockcut))
+        readloc_block = readloc // self.blocksize
+        numblocks = (self.readlen // self.blocksize) + 2
+        rawdecode = self.demodcache.read_sync(
+            readloc_block * self.blocksize,
+            numblocks * self.blocksize,
+        )
+        if rawdecode is None:
+            return None
+
+        probe_decode = {
+            "input": np.empty(0, dtype=np.int16),
+            "video": np.rec.array(
+                [rawdecode["sync"]], names=["demod_05"]
+            ),
+        }
+        field = self.FieldClass(
+            self.rf,
+            probe_decode,
+            fields_written=0,
+            readloc=rawdecode["startloc"],
+        )
+        original_ire0 = self.rf.DecoderParams["ire0"]
+        try:
+            pulses = field.getpulses()
+        finally:
+            self.rf.DecoderParams["ire0"] = original_ire0
+
+        return bool(pulses is not None and len(pulses))
 
     @profile
     def decodefield(self, start, mtf_level, prevfield=None, initphase=False, redo=False, rv=None):
@@ -4032,6 +4213,9 @@ class LDdecode:
 
         rv['field'] = None
         rv['offset'] = None
+        # Always present so readfield() can test it without a .get() dance; see
+        # the handler around lpf_wrapper() below for why it exists.
+        rv['exception'] = None
 
         readloc = int(start - self.rf.blockcut)
         if readloc < 0:
@@ -4082,7 +4266,16 @@ class LDdecode:
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as e:
-            raise e
+            # When decodefield() runs on a worker thread (see readfield), raising
+            # only unwinds that thread -- the exception never reaches the main one.
+            # rv is then left holding the field/offset None sentinels set above,
+            # which is exactly what a genuine end-of-input returns (see the
+            # `rawdecode is None` early return), so readfield() cannot tell a dead
+            # worker from EOF and the decode ends early, successfully, with a
+            # truncated .tbc.json. Hand the exception back on rv so readfield() can
+            # re-raise it on the main thread.
+            rv['exception'] = e
+            raise
 
         rv['field'] = f
         rv['offset'] = f.nextfieldoffset - (readloc - rawdecode["startloc"])
@@ -4148,6 +4341,14 @@ class LDdecode:
                 # In non-threaded mode self.threadreturn was filled earlier...
                 # ... but if the first call, this is empty
                 if len(self.threadreturn) > 0:
+                    # A decode thread that died left field/offset as None, which is
+                    # indistinguishable from the EOF sentinel and would be mistaken
+                    # for one below ("if f is None and offset is None"), ending the
+                    # decode early with a zero exit code. Re-raise on the main thread
+                    # instead, where main()'s handler can report it and exit non-zero.
+                    if self.threadreturn['exception'] is not None:
+                        raise self.threadreturn['exception']
+
                     f, offset = self.threadreturn['field'], self.threadreturn['offset']
 
             # Start new thread

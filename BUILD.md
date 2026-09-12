@@ -227,6 +227,8 @@ The build produces `./result` with the installed package and CLI tools.
   - `nix run`
 - Or run a specific tool:
   - `nix run .#ld-decode`
+  - `nix run .#ld-cut`
+  - `nix run .#ld-compress`
   - `nix run .#ld-ldf-reader-py`
 
 ## Development shell
