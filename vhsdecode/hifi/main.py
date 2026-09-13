@@ -1390,21 +1390,16 @@ class SoundDeviceProcess:
 
     def __enter__(self):
         self._playback_enabled = True
+        self._pace_start_time = None
+        self._pace_samples_queued = 0
 
-        # Both modes use a thread + queue for audio device I/O.
-        # play() is always non-blocking so decode runs at full speed.
-        #
-        # In buffered mode, a large queue absorbs the burst when decode
-        # (e.g. 30 threads, ~3x real-time) outruns the 1x playback thread.
-        # The playback thread paces itself to 1x with a time-based sleeper.
-        # Each block is ~0.5s of audio at 44.1kHz, so 256 blocks ≈ 128s of
-        # buffer — enough for most files. For very long files where decode
-        # is much faster, overflow blocks are dropped for preview only
-        # (the output file still gets every block).
-        #
-        # In real-time mode, a small queue + no pacing: audio plays as fast
-        # as samples are decoded.
-        maxsize = 8 if self._real_time else 256
+        # Thread + queue for audio device I/O.
+        # In buffered mode, the time-based pacer in play() blocks the
+        # output worker process, creating backpressure through the
+        # post-processor pipe to the decoders — pacing the whole
+        # pipeline to 1x real-time so audio stays in sync with decode.
+        # In real-time mode, play() never blocks; decode runs at full speed.
+        maxsize = 2
         self._play_queue: queue.Queue = queue.Queue(maxsize=maxsize)
         self._play_thread = threading.Thread(
             target=SoundDeviceProcess.play_worker,
@@ -1444,10 +1439,10 @@ class SoundDeviceProcess:
             return
         output_stream = None
         # In buffered mode, the playback thread paces itself to 1x real-time
-        # by sleeping before each write. Decode runs at full speed and fills
-        # the queue; the thread drains it at audio playback rate. When the
-        # queue overflows, blocks are dropped for preview (the output file
-        # still gets every block — play() is called after the file write).
+        # with a time-based sleeper. Decode runs at full speed; play() uses
+        # drop-oldest so the queue always holds the most recent blocks.
+        # This keeps lag to ~1-2 seconds (the queue depth) regardless of
+        # how far ahead decode gets.
         pace_start = None
         pace_samples_played = 0
         try:
@@ -1502,8 +1497,8 @@ class SoundDeviceProcess:
                 num_frames = len(stereo) // 2
 
                 # In buffered mode, pace to 1x real-time here in the
-                # playback thread — NOT in play(). This keeps decode at
-                # full speed while audio plays at normal rate.
+                # playback thread. Decode runs at full speed; old blocks
+                # are dropped by play() when the queue overflows.
                 if not real_time:
                     if pace_start is None:
                         pace_start = time.monotonic()
@@ -1532,14 +1527,33 @@ class SoundDeviceProcess:
         if not self._playback_enabled:
             return True
 
-        # Always non-blocking: decode runs at full speed regardless of
-        # preview mode. The playback thread paces itself to 1x in buffered
-        # mode. When the queue is full, drop this block for preview — the
-        # output file already has it (file write happens before play()).
+        if self._real_time:
+            # Real-time mode: non-blocking, drop blocks that can't keep up.
+            try:
+                self._play_queue.put_nowait(stereo)
+            except queue.Full:
+                pass
+            return True
+
+        # Buffered (default) mode: non-blocking with drop-oldest.
+        # Decode runs at full speed. When the playback queue is full
+        # (because the 1x-paced thread hasn't drained it yet), drop the
+        # oldest block and replace it with the newest. This keeps the
+        # queue holding the most recent audio so playback stays near
+        # real-time with only ~1-2 seconds of lag (the queue depth).
+        # The output file still gets every block (file write happens
+        # before play()).
         try:
             self._play_queue.put_nowait(stereo)
         except queue.Full:
-            pass
+            try:
+                self._play_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._play_queue.put_nowait(stereo)
+            except queue.Full:
+                pass
         return True
 
 
