@@ -60,11 +60,6 @@ def _computefilters_dummy(self):
     self.Filters["F05_offset"] = 32
 
 
-# HACK - override this in a hacky way for now to skip generating some filters we don't use.
-# including one that requires > 20 mhz sample rate.
-ldd.RFDecode.computefilters = _computefilters_dummy
-
-
 def _demodcache_dummy(self, *args, **kwargs):
     self.ended = True
     pass
@@ -100,6 +95,11 @@ class VHSDecode(ldd.LDdecode):
         temp_init = ldd.DemodCache.__init__
         ldd.DemodCache.__init__ = _demodcache_dummy
         self._processing_thread_pool = ThreadPoolExecutor(max_workers=threads + 1)
+
+        # HACK - override this in a hacky way for now to skip generating some filters we don't use.
+        # including one that requires > 20 mhz sample rate.
+        # Have to this inside this class do avoid test issues.
+        ldd.RFDecode.computefilters = _computefilters_dummy
 
         if system == "405":
             sys_params_pal_temp = ldd.SysParams_PAL.copy()
@@ -1026,6 +1026,7 @@ class VHSRFDecode(ldd.RFDecode):
 
     def computefilters(self):
         # Override the stuff used in lddecode to skip generating filters we don't use.
+        self.setupcount += 1
         self.computevideofilters()
         self.computedelays()
 
