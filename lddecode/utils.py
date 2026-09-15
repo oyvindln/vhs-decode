@@ -23,7 +23,7 @@ import scipy.signal as sps
 # Try to make sure ffmpeg is available
 try:
     import static_ffmpeg
-    static_ffmpeg.add_paths()  # adds static ffmpeg/ffprobe binaries to PATH
+    static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
 except ImportError:
     pass
 
