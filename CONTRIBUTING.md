@@ -42,8 +42,8 @@ See [BUILD.md](BUILD.md) for complete build instructions. Quick reference:
 
 ```bash
 # Clone the repository with submodules
-git clone --recurse-submodules https://github.com/happycube/ld-decode.git
-cd ld-decode
+git clone --recurse-submodules https://github.com/oyvindln/vhs-decode.git
+cd vhs-decode
 
 # Create virtual environment
 python3 -m venv venv
@@ -63,8 +63,8 @@ For Python development, see the virtual environment section in [INSTALL.md](INST
 Quick reference:
 
 ```bash
-python3 -m venv ~/ld-decode-venv
-source ~/ld-decode-venv/bin/activate
+python3 -m venv ~/vhs-decode-venv
+source ~/vhs-decode-venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -78,7 +78,7 @@ Before creating a bug report:
 1. Check the [existing issues](https://github.com/oyvindln/vhs-decode/issues) to avoid duplicates
 2. Gather information about the bug:
    - Operating system and version
-   - ld-decode version (git commit hash)
+   - vhs-decode version (git commit hash)
    - Steps to reproduce
    - Expected vs. actual behavior
    - Relevant logs or error messages
@@ -88,11 +88,11 @@ Create a detailed bug report including:
 ```markdown
 **Environment:**
 - OS: Ubuntu 22.04
-- ld-decode commit: abc123def
+- vhs-decode commit: abc123def
 - Qt version: 6.x.x
 
 **Steps to Reproduce:**
-1. Run `ld-decode myfile.ldf`
+1. Run `vhs-decode myfile.flac`
 2. Click on X
 3. Observe Y
 
@@ -135,7 +135,7 @@ Areas where contributions are particularly welcome:
 ```bash
 # Fork the repository on GitHub, then clone your fork
 git clone --recurse-submodules https://github.com/YOUR_USERNAME/vhs-decode.git
-cd ld-decode
+cd vhs-decode
 
 # Add upstream remote
 git remote add upstream https://github.com/oyvindln/vhs-decode.git
@@ -181,10 +181,10 @@ pytest --output-on-failure
 pytest tests/test_chroma.py --output-on-failure
 
 # Run with coverage
-pytest --cov=lddecode
+pytest --cov=vhsdecode
 
 # Test manually with your changes
-python -c "import lddecode; print('Import successful')"
+python -c "import vhsdecode; print('Import successful')"
 ```
 
 ### 5. Commit Your Changes
@@ -293,16 +293,16 @@ def decode_video(input_file, output_file, system='pal'):
 
 Example:
 ```cmake
-add_executable(ld-analyse
+add_executable(tbc-analyse
     main.cpp
     mainwindow.cpp
 )
 
-target_link_libraries(ld-analyse
+target_link_libraries(tbc-analyse
     PRIVATE
         Qt6::Core
         Qt6::Widgets
-        lddecode-library
+        tbc-library
 )
 ```
 
