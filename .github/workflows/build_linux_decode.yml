@@ -68,9 +68,23 @@ jobs:
           cp "${PORTAUDIO_LIB_PATH}" _build_appimage/libportaudio.so.2
           ln -sf libportaudio.so.2 _build_appimage/libportaudio.so
 
+          # Pre-download ffmpeg/ffprobe via static_ffmpeg so they are
+          # bundled in the AppImage instead of downloaded at runtime.
+          pip3 install static-ffmpeg
+          FFMPEG_DIR="$(python3 -c 'import static_ffmpeg; from static_ffmpeg import run as r; p,_=r.get_or_fetch(); import os; print(os.path.dirname(p))')"
+          if [ -z "${FFMPEG_DIR}" ] || [ ! -d "${FFMPEG_DIR}" ]; then
+            echo "WARN: could not pre-download ffmpeg via static_ffmpeg"
+          else
+            echo "Bundling ffmpeg from ${FFMPEG_DIR}"
+            cp "${FFMPEG_DIR}"/ffmpeg _build_appimage/ 2>/dev/null || true
+            cp "${FFMPEG_DIR}"/ffprobe _build_appimage/ 2>/dev/null || true
+          fi
+
           python-appimage build app -p 3.12 \
             -x _build_appimage/libportaudio.so.2 \
             -x _build_appimage/libportaudio.so \
+            -x _build_appimage/ffmpeg \
+            -x _build_appimage/ffprobe \
             -- \
             _build_appimage
           APPIMAGE_SRC="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"

@@ -20,12 +20,62 @@ import numba
 import numpy as np
 import scipy.signal as sps
 
-# Try to make sure ffmpeg is available
-try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
-except ImportError:
-    pass
+
+def _find_bundled_ffmpeg() -> bool:
+    """Look for ffmpeg/ffprobe bundled alongside the executable.
+
+    In PyInstaller --onefile/--onedir builds, binaries added via
+    --add-binary are extracted to sys._MEIPASS.  In AppImage builds,
+    they sit beside the interpreter in the AppDir.  In source/dev mode
+    the executable directory is the repo root or venv bin.
+
+    Returns True if bundled ffmpeg was found and added to PATH.
+    """
+    search_dirs: list[str] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        search_dirs.append(meipass)
+        search_dirs.append(os.path.join(meipass, "static_ffmpeg"))
+
+    exec_dir = os.path.dirname(os.path.abspath(sys.executable))
+    if exec_dir:
+        search_dirs.append(exec_dir)
+        search_dirs.append(os.path.join(exec_dir, "static_ffmpeg"))
+
+    # AppImage sets APPDIR; bundled tools live under usr/bin.
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        search_dirs.append(os.path.join(appdir, "usr", "bin"))
+
+    ffmpeg_names = ("ffmpeg", "ffmpeg.exe")
+    ffprobe_names = ("ffprobe", "ffprobe.exe")
+
+    for directory in search_dirs:
+        for name in ffmpeg_names:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate):
+                # Found bundled ffmpeg — add its directory to PATH so
+                # subprocess calls find it, and skip the runtime download.
+                abs_dir = os.path.abspath(directory)
+                current_path = os.environ.get("PATH", "")
+                if abs_dir not in current_path.split(os.pathsep):
+                    os.environ["PATH"] = abs_dir + os.pathsep + current_path
+                print(f"Using bundled ffmpeg from {abs_dir}")
+                return True
+
+    return False
+
+
+# Try to make sure ffmpeg is available.
+# Prefer bundled ffmpeg (shipped with the binary/AppImage) over
+# static_ffmpeg.add_paths(), which downloads binaries at runtime.
+if not _find_bundled_ffmpeg():
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
+    except ImportError:
+        pass
 
 # If profiling is not enabled, make it a pass-through wrapper
 try:

@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 import PyInstaller.__main__
 import PyQt6
@@ -21,6 +22,32 @@ create_versionfile(
     file_description="Software defined decoder",
     # version=version,
 )
+
+
+def _collect_static_ffmpeg_binaries() -> list[str]:
+    """Pre-download ffmpeg/ffprobe via static_ffmpeg and return
+    PyInstaller --add-binary args to bundle them.
+
+    static_ffmpeg downloads ffmpeg/ffprobe to a cache directory on first
+    use. Without this, the bundled decode.exe would try to download them
+    at runtime (which fails in offline/sandboxed environments).
+    """
+    extra_args: list[str] = []
+    try:
+        import static_ffmpeg
+        # Trigger the download so the binaries are cached locally.
+        static_ffmpeg.add_paths()
+        from static_ffmpeg import run as sff_run
+        ffmpeg_path, ffprobe_path = sff_run.get_or_fetch()
+        print(f"static_ffmpeg ffmpeg: {ffmpeg_path}")
+        print(f"static_ffmpeg ffprobe: {ffprobe_path}")
+        if ffmpeg_path and os.path.isfile(ffmpeg_path):
+            extra_args += ["--add-binary", f"{ffmpeg_path};static_ffmpeg"]
+        if ffprobe_path and os.path.isfile(ffprobe_path):
+            extra_args += ["--add-binary", f"{ffprobe_path};static_ffmpeg"]
+    except Exception as exc:
+        print(f"WARN: could not pre-download static_ffmpeg binaries: {exc}")
+    return extra_args
 
 
 def _pyqt_runtime_binaries() -> list[str]:
@@ -78,7 +105,10 @@ PyInstaller.__main__.run(
         "sounddevice",
         "--collect-all",
         "_sounddevice_data",
+        "--collect-all",
+        "static_ffmpeg",
         *_pyqt_runtime_binaries(),
+        *_collect_static_ffmpeg_binaries(),
         "--hidden-import",
         "vhsdecode.decode_launcher",
         "--hidden-import",

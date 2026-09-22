@@ -39,6 +39,31 @@ def _ensure_lddecode_version_file() -> None:
 print("Building macOS binary version")
 _ensure_lddecode_version_file()
 
+
+def _collect_static_ffmpeg_binaries() -> list[str]:
+    """Pre-download ffmpeg/ffprobe via static_ffmpeg and return
+    PyInstaller --add-binary args to bundle them.
+
+    Without this, the bundled decode.app would try to download ffmpeg
+    at runtime (which fails in offline/sandboxed environments).
+    """
+    extra_args: list[str] = []
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+        from static_ffmpeg import run as sff_run
+        ffmpeg_path, ffprobe_path = sff_run.get_or_fetch()
+        print(f"static_ffmpeg ffmpeg: {ffmpeg_path}")
+        print(f"static_ffmpeg ffprobe: {ffprobe_path}")
+        if ffmpeg_path and os.path.isfile(ffmpeg_path):
+            extra_args += ["--add-binary", f"{ffmpeg_path}:static_ffmpeg"]
+        if ffprobe_path and os.path.isfile(ffprobe_path):
+            extra_args += ["--add-binary", f"{ffprobe_path}:static_ffmpeg"]
+    except Exception as exc:
+        print(f"WARN: could not pre-download static_ffmpeg binaries: {exc}")
+    return extra_args
+
+
 PyInstaller.__main__.run(
     [
         "decode.py",
@@ -54,12 +79,15 @@ PyInstaller.__main__.run(
         "sounddevice",
         "--collect-all",
         "_sounddevice_data",
+        "--collect-all",
+        "static_ffmpeg",
         "--add-data",
         "vhsdecode/format_defs:vhsdecode/format_defs",
         "--collect-data",
         "lddecode",
         "--add-data",
         "assets:assets",
+        *_collect_static_ffmpeg_binaries(),
         "--hidden-import",
         "vhsdecode.windows_bootstrap",
         "--hidden-import",
