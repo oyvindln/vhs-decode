@@ -1,144 +1,257 @@
-See build instructions in main README first, or go to the releases tab for self-contained binarys.
+# Dependencies & Installation
 
-# Building and installing vhs-decode from source using pipx
 
-## Install all dependencies required by LD-Decode and VHS-Decode:
+## Build and install from source
 
-Ubuntu/debian based (debian 12/Ubuntu 24.04 or newer base required):
+This document is the canonical source/manual installation guide for `vhs-decode`, `hifi-decode`, `cvbs-decode`, and `ld-decode` across all supported platforms.
 
-    sudo apt install git python3-dev pipx ffmpeg
+`vhs-decode` is actively developed and tested on recent Ubuntu, Debian, Linux Mint, Windows, and macOS systems (x86 and ARM where supported). Other distributions should also work with equivalent package versions.
 
-For Arch Linux
+There is also a [Linux compatibility document](https://docs.google.com/document/d/132ycIMMNvdKvrNZSzbckXVEPQVLTnH_YX0Oh3lqtkkQ) with distro-specific notes.
 
-    pacman -S base-devel git qt5-base qwt fftw ffmpeg pv cmake sox python python-pipx
-    
-NixOS Linux has pre-made [nur-packages](https://github.com/JuniorIsAJitterbug/nur-packages) for vhs-decode, cxadc and outer tools within the projects.
+If you want portable self-contained binaries instead of source installs which is the recommended user workflow, see the wiki guides:
 
-Install [Rust Compiler](https://www.rust-lang.org/tools/install) (required for decode v0.3.5 onwards)
+- [Linux](https://github.com/oyvindln/vhs-decode/wiki/Linux-Build)
+- [Windows](https://github.com/oyvindln/vhs-decode/wiki/Windows-Build)
+- [macOS](https://github.com/oyvindln/vhs-decode/wiki/MacOS-Build)
 
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-Verify Rust Compiler 
+## Common requirements (all platforms)
 
-    source "$HOME/.cargo/env" && echo "Rust version: $(rustc --version)" && echo "Cargo version: $(cargo --version)"
 
-Set up pipx
+- Git
+- Python 3.11+
+- Rust toolchain (required for decode v0.3.5+)
+- FFmpeg
 
-    pipx ensurepath
+Core Python/runtime dependencies include NumPy, SciPy, Cython, Numba, Pandas, Qt (5/6), Qwt, and CMake build tooling.
 
-Install TBC-Video-Export
+Install Rust (Unix shell example):
 
-    pipx install tbc-video-export
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
+```
 
-(There is also [self-contained builds](https://github.com/JuniorIsAJitterbug/tbc-video-export/releases) if install issues arise)
+## Linux
 
-Optional dependencies for GPU (Nvidia Cards) FLAC compression support:
 
-    sudo apt install make ocl-icd-opencl-dev mono-runtime
+### Install dependencies
 
-Also Requires FlaLDF [Download & Install via .deb for Linux](https://github.com/TokugawaHeavyIndustries/FlaLDF/releases/tag/v0.1b)
+Ubuntu/Debian (adjust package names for your distro):
 
+```bash
+sudo apt install curl git qtbase5-dev libqwt-qt5-dev libfftw3-dev libavformat-dev libavcodec-dev libavutil-dev ffmpeg pv pkg-config make cmake sox pipx g++ python3-dev python3-pip
+```
 
-### NOTES!!
+Arch Linux:
 
-HiFi-Decode preview function - the python library sounddevice requires portaudio (libportaudio2 on Ubuntu). This is not included in the self-contained binaries and has to be installed locally if not already installed. (Included with most desktop environments.)
+```bash
+sudo pacman -S base-devel git qt5-base qwt fftw ffmpeg pv cmake sox python python-pipx
+```
 
+Optional/conditional dependencies:
 
-## Build and install VHS-Decode system-wide using pipx
+- HiFi preview mode runtime (`sounddevice`): install PortAudio (`libportaudio2` on Debian/Ubuntu).
+- Some Ubuntu 22.04 / Linux Mint 21 systems may also need `libxcb-cursor0` for Qt GUI support.
 
-The vhs-decode repository also has hifi-decode, cvbs-decode, ld-decode included.
 
-Download VHS-Decode:
+### Build and install with pipx (recommended)
 
-    git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
 
-Install VHS-Decode:
+```bash
+pipx ensurepath
+git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
+cd vhs-decode
+pipx install .
+```
 
-    cd vhs-decode
+Optional install variants:
 
-Build and install vhs-decode via pipx, using **one** of the below scripts.
+```bash
+pipx install .[hifi_gui_qt6]
+pipx install .[intel]
+pipx install --force '.[intel,hifi_gui_qt6]'
+```
 
-### Base installation
 
-    pipx install .
+### Update an existing pipx install
 
-### With hifi-decode gui
 
-    pipx install .[hifi_gui_qt6]
+From inside your `vhs-decode` clone:
 
-### With Intel specific cpu optimizations
+```bash
+git pull
+pipx install --force '.[hifi_gui_qt6]'
+```
 
-    pipx install .[intel]
+If you use Intel-specific optimizations:
 
-### If updating or reinstalling, use the `--force` flag to overwrite/update the previous installation.
+```bash
+pipx install --force '.[intel,hifi_gui_qt6]'
+```
 
-    pipx install --force '.[intel,hifi_gui_qt6]'
+If activation scripts in the pipx venv are not writable:
 
-Go back to the main directory with 
+```bash
+chmod u+w ~/.local/pipx/venvs/vhs-decode/bin/activate ~/.local/pipx/venvs/vhs-decode/bin/activate.csh ~/.local/pipx/venvs/vhs-decode/bin/activate.fish ~/.local/pipx/venvs/vhs-decode/bin/Activate.ps1
+pipx reinstall vhs_decode --python python3
+```
 
-    cd .. 
 
+### Build and install in a Python virtual environment
 
-## How to Update
 
+```bash
+python3 -m venv vhs_decode_venv
+source ./vhs_decode_venv/bin/activate
+git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
+cd vhs-decode
+python -m pip install --upgrade pip
+python -m pip install .[hifi_gui_qt6]
+```
 
-From inside the `vhs-decode` directory:
 
-    git pull
-    pipx install --force '.[hifi_gui_qt6]'
+## Windows
 
-If you use Intel-specific optimizations, run this instead:
 
-    pipx install --force '.[intel,hifi_gui_qt6]'
+Windows setup/usage wiki:
+<https://github.com/oyvindln/vhs-decode/wiki/Windows-Build>
 
-If `pipx install --force` fails with a permission error on one or more activation scripts in `~/.local/pipx/venvs/vhs-decode/bin/`, fix permissions and reinstall:
+### Install dependencies
 
-    chmod u+w ~/.local/pipx/venvs/vhs-decode/bin/activate ~/.local/pipx/venvs/vhs-decode/bin/activate.csh ~/.local/pipx/venvs/vhs-decode/bin/activate.fish ~/.local/pipx/venvs/vhs-decode/bin/Activate.ps1
-    pipx reinstall vhs_decode --python python3
+1. Install Python 3.11+ from <https://www.python.org/downloads/>.
+   - Check the box to add Python to `PATH`.
+   - If a new major Python release is not yet supported by `numba`, use the latest supported version.
+2. Install Visual Studio Build Tools 2022 (Desktop development with C++).
+3. Install Rust from <https://www.rust-lang.org/tools/install>.
 
-Verify the installed package and commands:
+### Manual quick build notes (Windows native)
 
-    pipx list | sed -n '/package vhs_decode/,+12p'
-    ld-decode --version
-    ld-ldf-reader-py --version
+This keeps the original quick manual path in one place:
 
-## Usage
+1. Install Python 3.13 (or the latest `numba`-supported Python release).
+2. Install Visual Studio Build Tools 2022.
+3. Install Rust.
+4. Clone `vhs-decode`, enter the repo folder, then install:
 
+```powershell
+pip install .[hifi_gui_qt6]
+```
 
-Note with WSL2 & Ubuntu, `./` in front of applications and scripts may be needed to run them or to run scripts within the folder.
+5. Example source-tree launch:
 
+```powershell
+python C:\path\to\vhs-decode\decode.py hifi --gui
+```
 
-### Decode Launcher (Qt6)
 
+### Build and install in a Python virtual environment
 
-For a basic click-to-open launcher that lets you select common tools and open them in a terminal (or start native GUI tools), use:
 
-    decode-launcher
+PowerShell:
 
-or from source checkout:
+```powershell
+py -m venv vhs_decode_venv
+.\vhs_decode_venv\Scripts\Activate.ps1
+git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
+cd vhs-decode
+py -m pip install --upgrade pip
+py -m pip install .[hifi_gui_qt6]
+```
 
-    ./decode-launcher
-You can drag and drop RF input files onto the launcher window or input field, and drop `.json` files to auto-fill the params JSON field.
+CMD activation command:
 
-Current native GUI launch targets include:
+```cmd
+.\vhs_decode_venv\Scripts\activate.bat
+```
 
-* `hifi-decode --gui`
-* `filter-tune`
 
-Use `cd vhs-decode` to enter into the directory to run commands, `cd ..` to go back a directory.
+### Update a virtualenv install
 
-Use <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop the current process.
 
-You don't actually type `<` and `>` on your input & output files.
+```powershell
+cd vhs-decode
+git pull
+py -m pip install --upgrade --force-reinstall .[hifi_gui_qt6]
+```
 
-# Build and install in a isolated python virtual environment
 
+## macOS
 
-## Install all dependencies required by LD-Decode and VHS-Decode:
+macOS setup/usage wiki:
+<https://github.com/oyvindln/vhs-decode/wiki/MacOS-Build>
 
+### Install dependencies (Homebrew)
 
-### Linux
+```bash
+brew install cmake pkg-config qt qwt ffmpeg fftw python pipx rust portaudio
+```
 
+### Build and install with pipx
+
+```bash
+pipx ensurepath
+git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
+cd vhs-decode
+pipx install .
+pipx install tbc-video-export
+```
+
+Optional install variants:
+
+```bash
+pipx install .[hifi_gui_qt6]
+pipx install .[intel]
+pipx install --force '.[intel,hifi_gui_qt6]'
+```
+
+
+### Build and install in a Python virtual environment
+
+
+```bash
+python3 -m venv vhs_decode_venv
+source ./vhs_decode_venv/bin/activate
+git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
+cd vhs-decode
+python -m pip install --upgrade pip
+python -m pip install .[hifi_gui_qt6]
+```
+
+
+## HiFi decode notes (important)
+
+
+- HiFi preview mode requires PortAudio available on the system for source installs.
+- Standard FLAC inputs with correct header/context should decode directly without `--raw_format` overrides.
+- For long RF FLAC captures where FLAC STREAMINFO sample count metadata is truncated/wrapped, `hifi-decode` falls back to external decoders for full-length reads.
+- Keep at least one external decoder available in `PATH`:
+  - `flac` (preferred fallback)
+  - `ffmpeg` (fallback when `flac` is unavailable)
+- Use overrides only when needed:
+  - `--frequency` when your RF input rate is not the default 40 MHz.
+  - `--raw_format` for stdin (`-`) or when you intentionally need precision override behavior.
+
+Standard FLAC decode example:
+
+```bash
+hifi-decode <input.flac> <output.flac>
+```
+
+
+## Verify installation
+
+
+Run in your normal shell (or activated venv):
+
+```bash
+vhs-decode --version
+hifi-decode --version
+decode-launcher --help
+```
 
   Ubuntu/debian based (debian 12/Ubuntu 24.04 or newer base required):
 
@@ -152,12 +265,13 @@ You don't actually type `<` and `>` on your input & output files.
 
       curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-  Verify Rust Compiler 
+  Verify Rust Compiler
 
       source "$HOME/.cargo/env" && echo "Rust version: $(rustc --version)" && echo "Cargo version: $(cargo --version)"
-      
+
 
 ### Windows
+
 
   1. Install Python 3.13
    * Download the [python installer](https://www.python.org/downloads/)
@@ -171,48 +285,49 @@ You don't actually type `<` and `>` on your input & output files.
      * If there are multiple versions, select the latest year
    * Click on the `Desktop Development with C++` and a list of default components will be selected
    * Click `Install` to install them
-  
+
 ## Create a virtual python environment
 
 open a termial where you want to put the source code
 
     python -m venv vhs_decode_venv
-    
-    
+
 ## Enter the virtual environment
 
-
 ### windows (powershell)
-    
+
     .\vhs_decode_venv\Scripts\Activate.ps1
-        
+
 ### windows (cmd)
 
     .\vhs_decode_venv\Scripts\activate.bat
-    
+
 ### linux/macos
 
     source ./vhs_decode_venv/bin/activate
-    
+
 ### download source and build
-    
+
     git clone https://github.com/oyvindln/vhs-decode.git vhs-decode
-     
+
     python -m pip install .[hifi_gui_qt6]
-    
+
 
 You should now be able to run `vhs-decode`, `decode`, and `decode-launcher` , `hifi-decode --gui` etc
 
 You have to re-enter the command under "enter the virtual environent" to enter the python virtual environment and be able to access vhs-decode when you start a new session.
-     
-     
+
+
 # Using nix, needs full testing (Nix)
 
+
 This project is built with [Nix](https://nixos.org/). The flake provides a reproducible build and generates the version file automatically.
+
 
 ## Requirements
 
 - [Nix](https://nixos.org/) — a purely functional package manager that provides reproducible, declarative builds. Flakes must be enabled.
+
 
 ## Build
 
@@ -220,6 +335,7 @@ This project is built with [Nix](https://nixos.org/). The flake provides a repro
   - `nix build`
 
 The build produces `./result` with the installed package and CLI tools.
+
 
 ## Run
 
@@ -231,11 +347,13 @@ The build produces `./result` with the installed package and CLI tools.
   - `nix run .#ld-compress`
   - `nix run .#ld-ldf-reader-py`
 
+
 ## Development shell
 
 - Enter a dev shell with dependencies:
   - `nix develop`
-  
+
+
 ## Building tools (no longer hosted in this repo)
 
 Please see [tbc-tools](https://github.com/harrypm/tbc-tools) or [decode orc](github.com/simoninns/decode-orc/) for ld-decode only users.

@@ -1,6 +1,7 @@
-# Contributing to ld-decode
+# Contributing to vhs-decode
 
-Thank you for your interest in contributing to ld-decode! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to vhs-decode! This document provides guidelines and information for contributors.
+
 
 ## Table of Contents
 
@@ -13,6 +14,7 @@ Thank you for your interest in contributing to ld-decode! This document provides
 - [Submitting Changes](#submitting-changes)
 - [Community](#community)
 
+
 ## Code of Conduct
 
 This project is run by volunteers and we expect all contributors to be respectful and constructive. Please:
@@ -20,7 +22,7 @@ This project is run by volunteers and we expect all contributors to be respectfu
 - Be welcoming and inclusive
 - Be respectful of differing viewpoints and experiences
 - Accept constructive criticism gracefully
-- Focus on what is best for the community
+- Focus on what is best for the tape community
 - Show empathy towards other community members
 
 ## Getting Started
@@ -73,7 +75,7 @@ pip install -e .
 
 Before creating a bug report:
 
-1. Check the [existing issues](https://github.com/happycube/ld-decode/issues) to avoid duplicates
+1. Check the [existing issues](https://github.com/oyvindln/vhs-decode/issues) to avoid duplicates
 2. Gather information about the bug:
    - Operating system and version
    - ld-decode version (git commit hash)
@@ -132,11 +134,11 @@ Areas where contributions are particularly welcome:
 
 ```bash
 # Fork the repository on GitHub, then clone your fork
-git clone --recurse-submodules https://github.com/YOUR_USERNAME/ld-decode.git
+git clone --recurse-submodules https://github.com/YOUR_USERNAME/vhs-decode.git
 cd ld-decode
 
 # Add upstream remote
-git remote add upstream https://github.com/happycube/ld-decode.git
+git remote add upstream https://github.com/oyvindln/vhs-decode.git
 
 # If you already cloned without --recurse-submodules, initialize testdata:
 git submodule update --init --recursive
@@ -415,30 +417,39 @@ A good pull request:
 
 PR Description Template:
 ```markdown
+
+
 ## Description
+
 Brief description of changes
 
 ## Motivation
+
 Why is this change needed?
 
 ## Related Issues
+
 Fixes #123
 Related to #456
 
 ## Changes Made
+
 - Added X
 - Modified Y
 - Removed Z
 
 ## Testing
+
 - [ ] All tests pass
 - [ ] Tested manually with [describe test case]
 - [ ] Added new tests for [feature]
 
 ## Screenshots (if applicable)
+
 [Add screenshots here]
 
 ## Checklist
+
 - [ ] Code follows project style guidelines
 - [ ] Documentation updated
 - [ ] Tests added/updated
@@ -455,15 +466,14 @@ Related to #456
 
 ## License
 
-By contributing to ld-decode, you agree that your contributions will be licensed under the GPL-3.0 license.
+By contributing to vhs-decode, you agree that your contributions will be licensed under the GPL-3.0 license.
 
 ## Questions?
 
 If you have questions about contributing:
 
-1. Check the [ld-decode documentation](https://happycube.github.io/ld-decode/)
-2. Search [existing issues](https://github.com/happycube/ld-decode/issues)
-3. Ask in the [Discord server](https://discord.gg/pVVrrxd)
+1. Check the [vhs-decode documentation](https://github.com/oyvindln/vhs-decode/wiki)
+2. Search [existing issues](https://github.com/happycube/vhs-decode/issues)
 4. Open a new issue with your question
 
-Thank you for contributing to ld-decode! 🎉
+Thank you for contributing to vhs-decode! 🎉
