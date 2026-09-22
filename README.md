@@ -27,7 +27,7 @@ VHS-Decode and HiFi-Decode handles FM RF signals captured directly from colour-u
 # [Supported Tape Formats](https://github.com/oyvindln/vhs-decode/wiki/Tape-Support-List)
 
 
-**VHS** 625-line and 525-line - NTSC, NTSC-J, PAL and PAL-M. **Generally well supported** (Video & HiFi)
+**VHS** 625-line and 525-line - NTSC, NTSC-J, PAL, PAL-M, MESECAM **Generally well supported** (Video & HiFi)
 
 **SVHS** 625-line and 525-line - NTSC, NTSC-J, PAL and PAL-M. **Supported**
 
