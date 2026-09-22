@@ -52,7 +52,7 @@ def _collect_static_ffmpeg_binaries() -> list[str]:
         import static_ffmpeg
         static_ffmpeg.add_paths()
         from static_ffmpeg import run as sff_run
-        ffmpeg_path, ffprobe_path = sff_run.get_or_fetch()
+        ffmpeg_path, ffprobe_path = sff_run.get_or_fetch_platform_executables_else_raise()
         print(f"static_ffmpeg ffmpeg: {ffmpeg_path}")
         print(f"static_ffmpeg ffprobe: {ffprobe_path}")
         if ffmpeg_path and os.path.isfile(ffmpeg_path):

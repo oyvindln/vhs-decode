@@ -71,7 +71,7 @@ jobs:
           # Pre-download ffmpeg/ffprobe via static_ffmpeg so they are
           # bundled in the AppImage instead of downloaded at runtime.
           pip3 install static-ffmpeg
-          FFMPEG_DIR="$(python3 -c 'import static_ffmpeg; from static_ffmpeg import run as r; p,_=r.get_or_fetch(); import os; print(os.path.dirname(p))')"
+          FFMPEG_DIR="$(python3 -c 'from static_ffmpeg.run import get_or_fetch_platform_executables_else_raise as g; p,_=g(); import os; print(os.path.dirname(p))' 2>/dev/null || true)"
           if [ -z "${FFMPEG_DIR}" ] || [ ! -d "${FFMPEG_DIR}" ]; then
             echo "WARN: could not pre-download ffmpeg via static_ffmpeg"
           else
