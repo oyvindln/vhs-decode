@@ -126,7 +126,7 @@ jobs:
         shell: pwsh
         timeout-minutes: ${{ matrix.smoke_timeout_minutes }}
         run: |
-          $sampleUrl = "https://raw.githubusercontent.com/harrypm/decode-test-data/master/decode-orc-testdata-vhs/flac/pal/yc/SuperBeta_PAL_AndyB_Bars_Sweep_Zone_28p6msps_8bit_5sec_effective.flac"
+          $sampleUrl = "https://github.com/harrypm/decode-test-data/raw/refs/heads/master/tape/betamax/pal/SuperBeta_PAL_AndyB_Bars_Sweep_Zone_28p6msps_8bit_5sec_effective.flac"
           $sampleDir = Join-Path $env:RUNNER_TEMP "windows-vhs-crash-sample"
           New-Item -ItemType Directory -Path $sampleDir -Force | Out-Null
           $samplePath = Join-Path $sampleDir "SuperBeta_PAL_AndyB_Bars_Sweep_Zone_28p6msps_8bit_5sec_effective.flac"
