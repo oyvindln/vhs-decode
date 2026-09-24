@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Setup environment
         run: |
-          dnf install --assumeyes git python3.12-pip gcc-c++ file
+          dnf install --assumeyes git python3.12-pip gcc-c++ file fuse fuse-libs
           if ! dnf install --assumeyes portaudio; then
             dnf install --assumeyes oracle-epel-release-el8 || \
               dnf install --assumeyes https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
@@ -118,8 +118,16 @@ jobs:
 
       - name: Smoke test AppImage hifi preview dependency bundle
         run: |
+          set -euo pipefail
           APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
-          "${APPIMAGE_PATH}" --appimage-extract
+          # Extract the AppImage contents. --appimage-extract needs fuse;
+          # fall back to unsquashfs if fuse isn't working in the container.
+          rm -rf squashfs-root
+          if ! "${APPIMAGE_PATH}" --appimage-extract 2>/dev/null; then
+            echo "--appimage-extract failed, trying unsquashfs..."
+            dnf install --assumeyes squashfs-tools 2>/dev/null || true
+            unsquashfs -d squashfs-root "${APPIMAGE_PATH}" || { echo "ERROR: could not extract AppImage"; exit 1; }
+          fi
           APPDIR_PATH="${PWD}/squashfs-root"
           BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
           BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" \( -type f -o -type l \) \( -name 'libportaudio.so.2' -o -name 'libportaudio.so' \) | head -n 1)"
@@ -137,6 +145,7 @@ jobs:
             exit 1
           fi
           echo "Found bundled ffmpeg: ${BUNDLED_FFMPEG}"
+          echo "Found bundled portaudio: ${BUNDLED_PORTAUDIO}"
           APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path; assert 'portaudio' in os.path.basename(lib_path).lower(), lib_path"
           rm -rf squashfs-root
 
