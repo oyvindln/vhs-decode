@@ -71,27 +71,31 @@ jobs:
           # Pre-download ffmpeg/ffprobe directly via curl so they are
           # bundled in the AppImage instead of downloaded at runtime.
           # This is REQUIRED — self-contained binaries must include ffmpeg.
-          # We download directly from the static_ffmpeg bin repo to avoid
-          # Python dependency issues in the OracleLinux 8 container.
-          FFMPEG_ZIP_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux.zip"
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            FFMPEG_ZIP_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux-aarch64.zip"
-          fi
-          FFMPEG_ZIP="$(mktemp /tmp/ffmpeg-XXXXXX.zip)"
+          # x86_64: use zackees/ffmpeg_bins (zip format)
+          # arm64: use BtbN/FFmpeg-Builds (tar.xz format, zackees has no arm64)
           FFMPEG_EXTRACT="$(mktemp -d /tmp/ffmpeg-extract-XXXXXX)"
-          curl -fsSL "${FFMPEG_ZIP_URL}" -o "${FFMPEG_ZIP}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_ZIP_URL}"; exit 1; }
-          python3 -c "import zipfile; zipfile.ZipFile('${FFMPEG_ZIP}').extractall('${FFMPEG_EXTRACT}')" || { echo "ERROR: failed to extract ffmpeg zip"; exit 1; }
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
+            FFMPEG_ARCHIVE="$(mktemp /tmp/ffmpeg-XXXXXX.tar.xz)"
+            curl -fsSL "${FFMPEG_URL}" -o "${FFMPEG_ARCHIVE}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_URL}"; exit 1; }
+            tar -xf "${FFMPEG_ARCHIVE}" -C "${FFMPEG_EXTRACT}" --strip-components=1 || { echo "ERROR: failed to extract ffmpeg tar.xz"; exit 1; }
+          else
+            FFMPEG_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux.zip"
+            FFMPEG_ARCHIVE="$(mktemp /tmp/ffmpeg-XXXXXX.zip)"
+            curl -fsSL "${FFMPEG_URL}" -o "${FFMPEG_ARCHIVE}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_URL}"; exit 1; }
+            python3 -c "import zipfile; zipfile.ZipFile('${FFMPEG_ARCHIVE}').extractall('${FFMPEG_EXTRACT}')" || { echo "ERROR: failed to extract ffmpeg zip"; exit 1; }
+          fi
           FFMPEG_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffmpeg' | head -n 1)"
           FFPROBE_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffprobe' | head -n 1)"
           if [ -z "${FFMPEG_BIN}" ] || [ ! -f "${FFMPEG_BIN}" ]; then
-            echo "ERROR: ffmpeg binary not found in extracted zip. Self-contained binaries require bundled ffmpeg."
+            echo "ERROR: ffmpeg binary not found in extracted archive. Self-contained binaries require bundled ffmpeg."
             exit 1
           fi
           echo "Bundling ffmpeg from ${FFMPEG_BIN}"
           cp "${FFMPEG_BIN}" _build_appimage/ffmpeg
           [ -n "${FFPROBE_BIN}" ] && [ -f "${FFPROBE_BIN}" ] && cp "${FFPROBE_BIN}" _build_appimage/ffprobe || touch _build_appimage/ffprobe
           EXTRA_FLAGS=" -x _build_appimage/ffmpeg -x _build_appimage/ffprobe"
-          rm -f "${FFMPEG_ZIP}"
+          rm -f "${FFMPEG_ARCHIVE}"
           rm -rf "${FFMPEG_EXTRACT}"
 
           python-appimage build app -p 3.12 \
