@@ -70,18 +70,19 @@ jobs:
 
           # Pre-download ffmpeg/ffprobe via static_ffmpeg so they are
           # bundled in the AppImage instead of downloaded at runtime.
+          # This is REQUIRED — self-contained binaries must include ffmpeg.
           pip3 install static-ffmpeg
-          FFMPEG_DIR="$(python3 -c 'from static_ffmpeg.run import get_or_fetch_platform_executables_else_raise as g; p,_=g(); import os; print(os.path.dirname(p))' 2>/dev/null || true)"
-          EXTRA_FLAGS=""
+          FFMPEG_DIR="$(python3 -c 'from static_ffmpeg.run import get_or_fetch_platform_executables_else_raise as g; p,_=g(); import os; print(os.path.dirname(p))' 2>&1)"
           if [ -z "${FFMPEG_DIR}" ] || [ ! -d "${FFMPEG_DIR}" ]; then
-            echo "WARN: could not pre-download ffmpeg via static_ffmpeg"
-          else
-            echo "Bundling ffmpeg from ${FFMPEG_DIR}"
-            cp "${FFMPEG_DIR}"/ffmpeg _build_appimage/ 2>/dev/null || true
-            cp "${FFMPEG_DIR}"/ffprobe _build_appimage/ 2>/dev/null || true
-            [ -f _build_appimage/ffmpeg ]  && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffmpeg"
-            [ -f _build_appimage/ffprobe ] && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffprobe"
+            echo "ERROR: could not pre-download ffmpeg via static_ffmpeg. Self-contained binaries require bundled ffmpeg."
+            exit 1
           fi
+          echo "Bundling ffmpeg from ${FFMPEG_DIR}"
+          cp "${FFMPEG_DIR}"/ffmpeg _build_appimage/ 2>/dev/null || true
+          cp "${FFMPEG_DIR}"/ffprobe _build_appimage/ 2>/dev/null || true
+          EXTRA_FLAGS=""
+          [ -f _build_appimage/ffmpeg ]  && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffmpeg" || { echo "ERROR: ffmpeg binary not found after copy"; exit 1; }
+          [ -f _build_appimage/ffprobe ] && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffprobe" || { echo "ERROR: ffprobe binary not found after copy"; exit 1; }
 
           python-appimage build app -p 3.12 \
             -x _build_appimage/libportaudio.so.2 \
@@ -96,6 +97,15 @@ jobs:
           fi
           mv "${APPIMAGE_SRC}" "./decode-${{ matrix.arch }}.AppImage"
 
+      - name: Smoke test AppImage binary startup (crash regression)
+        run: |
+          set -euo pipefail
+          APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
+          # The binary MUST start without crashing. This catches import
+          # errors (e.g. static_ffmpeg.add_paths() downloading/locking
+          # on a read-only mount) before the binary reaches users.
+          "${APPIMAGE_PATH}" ld --version
+
       - name: Smoke test AppImage hifi preview dependency bundle
         run: |
           APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
@@ -103,6 +113,7 @@ jobs:
           APPDIR_PATH="${PWD}/squashfs-root"
           BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
           BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" \( -type f -o -type l \) \( -name 'libportaudio.so.2' -o -name 'libportaudio.so' \) | head -n 1)"
+          BUNDLED_FFMPEG="$(find "${APPDIR_PATH}" -type f -name 'ffmpeg' | head -n 1)"
           if [ -z "${BUNDLED_PYTHON}" ] || [ ! -x "${BUNDLED_PYTHON}" ]; then
             echo "Failed to locate bundled Python interpreter in AppImage."
             exit 1
@@ -111,6 +122,11 @@ jobs:
             echo "Failed to locate bundled libportaudio shared library inside AppImage."
             exit 1
           fi
+          if [ -z "${BUNDLED_FFMPEG}" ]; then
+            echo "ERROR: ffmpeg is not bundled in the AppImage. Self-contained binaries must include ffmpeg."
+            exit 1
+          fi
+          echo "Found bundled ffmpeg: ${BUNDLED_FFMPEG}"
           APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path; assert 'portaudio' in os.path.basename(lib_path).lower(), lib_path"
           rm -rf squashfs-root
 

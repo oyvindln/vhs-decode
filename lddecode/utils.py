@@ -70,12 +70,25 @@ def _find_bundled_ffmpeg() -> bool:
 # Try to make sure ffmpeg is available.
 # Prefer bundled ffmpeg (shipped with the binary/AppImage) over
 # static_ffmpeg.add_paths(), which downloads binaries at runtime.
+# In a self-contained binary the download MUST NEVER happen — if
+# bundled ffmpeg is missing, warn and continue rather than crash.
 if not _find_bundled_ffmpeg():
+    # Detect bundled modes where downloads are not acceptable.
+    _is_bundled = bool(getattr(sys, "_MEIPASS", None)) or bool(os.environ.get("APPDIR"))
     try:
         import static_ffmpeg
-        static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
+        if _is_bundled:
+            # Self-contained binary without bundled ffmpeg — do NOT
+            # attempt a runtime download (which can crash on read-only
+            # mounts or in offline environments). Warn instead.
+            print("WARN: bundled ffmpeg not found; decode may lack ffmpeg/ffprobe. Rebuild with ffmpeg bundled.")
+        else:
+            static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
     except ImportError:
         pass
+    except Exception as exc:
+        # Never let a ffmpeg download/lock failure crash startup.
+        print(f"WARN: could not make ffmpeg available via static_ffmpeg: {exc}")
 
 # If profiling is not enabled, make it a pass-through wrapper
 try:
