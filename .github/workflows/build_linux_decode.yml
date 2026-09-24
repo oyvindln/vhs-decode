@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Setup environment
         run: |
-          dnf install --assumeyes git python3.12-pip gcc-c++ file fuse fuse-libs
+          dnf install --assumeyes git python3.12-pip gcc-c++ file fuse fuse-libs xz tar
           if ! dnf install --assumeyes portaudio; then
             dnf install --assumeyes oracle-epel-release-el8 || \
               dnf install --assumeyes https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
@@ -133,6 +133,15 @@ jobs:
             unsquashfs -d squashfs-root "${APPIMAGE_PATH}" || { echo "ERROR: could not extract AppImage"; exit 1; }
           fi
           APPDIR_PATH="${PWD}/squashfs-root"
+          # Debug: list top-level contents of extracted AppImage
+          echo "=== AppImage root contents ==="
+          ls -la "${APPDIR_PATH}/" || true
+          echo "=== Searching for portaudio ==="
+          find "${APPDIR_PATH}" \( -type f -o -type l \) -iname '*portaudio*' || true
+          echo "=== Searching for ffmpeg ==="
+          find "${APPDIR_PATH}" -type f -name 'ffmpeg' || true
+          echo "=== Searching for python ==="
+          find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' || true
           BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
           BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" \( -type f -o -type l \) \( -name 'libportaudio.so.2' -o -name 'libportaudio.so' \) | head -n 1)"
           BUNDLED_FFMPEG="$(find "${APPDIR_PATH}" -type f -name 'ffmpeg' | head -n 1)"
