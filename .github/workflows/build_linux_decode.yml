@@ -65,14 +65,6 @@ jobs:
             echo "Failed to locate libportaudio.so.2 from the portaudio package."
             exit 1
           fi
-          # Create proper subdirectories in the AppDir template for
-          # bundled binaries and libraries. python-appimage -x flags are
-          # unreliable for multiple files; placing them in the template
-          # directory structure ensures they're included.
-          mkdir -p _build_appimage/usr/bin _build_appimage/usr/lib
-          cp "${PORTAUDIO_LIB_PATH}" _build_appimage/usr/lib/libportaudio.so.2
-          ln -sf libportaudio.so.2 _build_appimage/usr/lib/libportaudio.so
-
           # Pre-download ffmpeg/ffprobe directly via curl so they are
           # bundled in the AppImage instead of downloaded at runtime.
           # This is REQUIRED — self-contained binaries must include ffmpeg.
@@ -96,13 +88,16 @@ jobs:
             echo "ERROR: ffmpeg binary not found in extracted archive. Self-contained binaries require bundled ffmpeg."
             exit 1
           fi
-          echo "Bundling ffmpeg from ${FFMPEG_BIN}"
-          cp "${FFMPEG_BIN}" _build_appimage/usr/bin/ffmpeg
-          chmod +x _build_appimage/usr/bin/ffmpeg
-          [ -n "${FFPROBE_BIN}" ] && [ -f "${FFPROBE_BIN}" ] && cp "${FFPROBE_BIN}" _build_appimage/usr/bin/ffprobe || touch _build_appimage/usr/bin/ffprobe
+          echo "Downloaded ffmpeg: ${FFMPEG_BIN}"
+          # Save paths for post-build patching
+          cp "${FFMPEG_BIN}" /tmp/ffmpeg-bundled
+          chmod +x /tmp/ffmpeg-bundled
+          [ -n "${FFPROBE_BIN}" ] && [ -f "${FFPROBE_BIN}" ] && cp "${FFPROBE_BIN}" /tmp/ffprobe-bundled || touch /tmp/ffprobe-bundled
+          cp "${PORTAUDIO_LIB_PATH}" /tmp/libportaudio.so.2
           rm -f "${FFMPEG_ARCHIVE}"
           rm -rf "${FFMPEG_EXTRACT}"
 
+          # Build the AppImage normally (without -x flags, which are unreliable)
           python-appimage build app -p 3.12 \
             -- \
             _build_appimage
@@ -111,6 +106,31 @@ jobs:
             echo "Failed to locate generated AppImage."
             exit 1
           fi
+
+          # Post-build patching: extract the AppImage, add ffmpeg/portaudio,
+          # and repackage with appimagetool. python-appimage doesn't reliably
+          # bundle extra files via -x flags or template subdirectories.
+          echo "Patching AppImage with ffmpeg/portaudio..."
+          rm -rf squashfs-root
+          "${APPIMAGE_SRC}" --appimage-extract 2>/dev/null || {
+            dnf install --assumeyes squashfs-tools 2>/dev/null || true
+            unsquashfs -d squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: could not extract AppImage for patching"; exit 1; }
+          }
+          mkdir -p squashfs-root/usr/bin squashfs-root/usr/lib
+          cp /tmp/ffmpeg-bundled squashfs-root/usr/bin/ffmpeg
+          cp /tmp/ffprobe-bundled squashfs-root/usr/bin/ffprobe
+          cp /tmp/libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so.2
+          ln -sf libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so
+          chmod +x squashfs-root/usr/bin/ffmpeg squashfs-root/usr/bin/ffprobe
+          # Download appimagetool for repackaging
+          AIT_ARCH="x86_64"
+          [ "${{ matrix.arch }}" = "arm64" ] && AIT_ARCH="aarch64"
+          curl -fsSL "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${AIT_ARCH}.AppImage" -o /tmp/appimagetool || { echo "ERROR: failed to download appimagetool"; exit 1; }
+          chmod +x /tmp/appimagetool
+          rm -f "${APPIMAGE_SRC}"
+          ARCH=${AIT_ARCH} /tmp/appimagetool squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: failed to repackage AppImage"; exit 1; }
+          rm -rf squashfs-root /tmp/appimagetool
+
           mv "${APPIMAGE_SRC}" "./decode-${{ matrix.arch }}.AppImage"
 
       - name: Smoke test AppImage binary startup (crash regression)
