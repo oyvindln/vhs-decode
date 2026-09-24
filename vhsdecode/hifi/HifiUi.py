@@ -522,11 +522,30 @@ class HifiUi(QMainWindow):
             if app_icon is not None and not app_icon.isNull():
                 return app_icon
 
-        repo_icon = Path(__file__).resolve().parents[2] / "assets" / "icons" / "vhs-decode.png"
-        if repo_icon.is_file():
-            file_icon = QIcon(str(repo_icon))
-            if not file_icon.isNull():
-                return file_icon
+        # In PyInstaller builds, bundled data is in sys._MEIPASS.
+        # In source mode, assets are relative to the package.
+        icon_dirs = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if isinstance(meipass, str) and meipass:
+            icon_dirs.append(Path(meipass) / "assets" / "icons")
+        icon_dirs.append(Path(__file__).resolve().parents[2] / "assets" / "icons")
+        exec_dir = Path(sys.executable).resolve().parent
+        icon_dirs.append(exec_dir / "assets" / "icons")
+
+        if sys.platform == "darwin":
+            icon_names = ("vhs-decode.icns", "vhs-decode.png")
+        elif os.name == "nt":
+            icon_names = ("vhs-decode.ico", "vhs-decode.png")
+        else:
+            icon_names = ("vhs-decode.png", "vhs-decode.ico")
+
+        for icon_dir in icon_dirs:
+            for name in icon_names:
+                candidate = icon_dir / name
+                if candidate.is_file():
+                    file_icon = QIcon(str(candidate))
+                    if not file_icon.isNull():
+                        return file_icon
 
         return QIcon()
 

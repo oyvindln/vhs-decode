@@ -217,29 +217,36 @@ HIFI_AUDIO_OUTPUT_EXTENSIONS = {".flac", ".wav"}
 
 
 def _load_app_icon() -> QIcon:
-    icon_dir = Path(__file__).resolve().parents[1] / "assets" / "icons"
+    # In PyInstaller --onefile/--onedir builds, bundled data is extracted
+    # to sys._MEIPASS.  In source/dev mode, assets live relative to the
+    # package directory.  Check both locations.
+    icon_dirs: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        icon_dirs.append(Path(meipass) / "assets" / "icons")
+
+    # Source/dev mode: assets/ is two levels up from vhsdecode/
+    icon_dirs.append(Path(__file__).resolve().parents[1] / "assets" / "icons")
+
+    # Fallback: beside the executable (e.g. portable installs)
+    exec_dir = Path(sys.executable).resolve().parent
+    icon_dirs.append(exec_dir / "assets" / "icons")
 
     if sys.platform == "darwin":
-        candidates = (
-            icon_dir / "vhs-decode.icns",
-            icon_dir / "vhs-decode.png",
-        )
+        icon_names = ("vhs-decode.icns", "vhs-decode.png")
     elif os.name == "nt":
-        candidates = (
-            icon_dir / "vhs-decode.ico",
-            icon_dir / "vhs-decode.png",
-        )
+        icon_names = ("vhs-decode.ico", "vhs-decode.png")
     else:
-        candidates = (
-            icon_dir / "vhs-decode.png",
-            icon_dir / "vhs-decode.ico",
-        )
+        icon_names = ("vhs-decode.png", "vhs-decode.ico")
 
-    for candidate in candidates:
-        if candidate.is_file():
-            icon = QIcon(str(candidate))
-            if not icon.isNull():
-                return icon
+    for icon_dir in icon_dirs:
+        for name in icon_names:
+            candidate = icon_dir / name
+            if candidate.is_file():
+                icon = QIcon(str(candidate))
+                if not icon.isNull():
+                    return icon
 
     return QIcon()
 

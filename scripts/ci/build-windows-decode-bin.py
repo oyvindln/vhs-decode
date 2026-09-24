@@ -93,6 +93,8 @@ PyInstaller.__main__.run(
         "vhsd_rust",
         "--add-data",
         "vhsdecode/format_defs;vhsdecode/format_defs",
+        "--add-data",
+        "assets/icons;assets/icons",
         "--collect-data",
         "lddecode",
         "--collect-all",
