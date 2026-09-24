@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - arch: arm64
             os: ubuntu-24.04-arm
     name: Build decode (${{ matrix.arch }})
@@ -68,21 +68,31 @@ jobs:
           cp "${PORTAUDIO_LIB_PATH}" _build_appimage/libportaudio.so.2
           ln -sf libportaudio.so.2 _build_appimage/libportaudio.so
 
-          # Pre-download ffmpeg/ffprobe via static_ffmpeg so they are
+          # Pre-download ffmpeg/ffprobe directly via curl so they are
           # bundled in the AppImage instead of downloaded at runtime.
           # This is REQUIRED — self-contained binaries must include ffmpeg.
-          pip3 install static-ffmpeg
-          FFMPEG_DIR="$(python3 -c 'from static_ffmpeg.run import get_or_fetch_platform_executables_else_raise as g; p,_=g(); import os; print(os.path.dirname(p))' 2>&1)"
-          if [ -z "${FFMPEG_DIR}" ] || [ ! -d "${FFMPEG_DIR}" ]; then
-            echo "ERROR: could not pre-download ffmpeg via static_ffmpeg. Self-contained binaries require bundled ffmpeg."
+          # We download directly from the static_ffmpeg bin repo to avoid
+          # Python dependency issues in the OracleLinux 8 container.
+          FFMPEG_ZIP_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux.zip"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            FFMPEG_ZIP_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux-aarch64.zip"
+          fi
+          FFMPEG_ZIP="$(mktemp /tmp/ffmpeg-XXXXXX.zip)"
+          FFMPEG_EXTRACT="$(mktemp -d /tmp/ffmpeg-extract-XXXXXX)"
+          curl -fsSL "${FFMPEG_ZIP_URL}" -o "${FFMPEG_ZIP}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_ZIP_URL}"; exit 1; }
+          python3 -c "import zipfile; zipfile.ZipFile('${FFMPEG_ZIP}').extractall('${FFMPEG_EXTRACT}')" || { echo "ERROR: failed to extract ffmpeg zip"; exit 1; }
+          FFMPEG_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffmpeg' | head -n 1)"
+          FFPROBE_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffprobe' | head -n 1)"
+          if [ -z "${FFMPEG_BIN}" ] || [ ! -f "${FFMPEG_BIN}" ]; then
+            echo "ERROR: ffmpeg binary not found in extracted zip. Self-contained binaries require bundled ffmpeg."
             exit 1
           fi
-          echo "Bundling ffmpeg from ${FFMPEG_DIR}"
-          cp "${FFMPEG_DIR}"/ffmpeg _build_appimage/ 2>/dev/null || true
-          cp "${FFMPEG_DIR}"/ffprobe _build_appimage/ 2>/dev/null || true
-          EXTRA_FLAGS=""
-          [ -f _build_appimage/ffmpeg ]  && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffmpeg" || { echo "ERROR: ffmpeg binary not found after copy"; exit 1; }
-          [ -f _build_appimage/ffprobe ] && EXTRA_FLAGS="${EXTRA_FLAGS} -x _build_appimage/ffprobe" || { echo "ERROR: ffprobe binary not found after copy"; exit 1; }
+          echo "Bundling ffmpeg from ${FFMPEG_BIN}"
+          cp "${FFMPEG_BIN}" _build_appimage/ffmpeg
+          [ -n "${FFPROBE_BIN}" ] && [ -f "${FFPROBE_BIN}" ] && cp "${FFPROBE_BIN}" _build_appimage/ffprobe || touch _build_appimage/ffprobe
+          EXTRA_FLAGS=" -x _build_appimage/ffmpeg -x _build_appimage/ffprobe"
+          rm -f "${FFMPEG_ZIP}"
+          rm -rf "${FFMPEG_EXTRACT}"
 
           python-appimage build app -p 3.12 \
             -x _build_appimage/libportaudio.so.2 \

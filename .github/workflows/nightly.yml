@@ -38,7 +38,7 @@ jobs:
     # repository's default branch. Skipped (closed-without-merge) PRs and PRs
     # targeting other branches produce no nightly.
     if: ${{ (github.event_name == 'workflow_dispatch') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == github.event.repository.default_branch) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       nightly_date: ${{ steps.resolve.outputs.nightly_date }}
       nightly_tag: ${{ steps.resolve.outputs.nightly_tag }}
@@ -110,7 +110,7 @@ jobs:
   publish-nightly:
     name: Publish pre-production nightly release
     needs: [resolve-nightly, build-linux, build-windows, build-macos]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       NIGHTLY_TAG: ${{ needs.resolve-nightly.outputs.nightly_tag }}
       RELEASE_TITLE: ${{ needs.resolve-nightly.outputs.release_title }}
