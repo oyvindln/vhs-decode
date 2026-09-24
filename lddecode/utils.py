@@ -43,10 +43,15 @@ def _find_bundled_ffmpeg() -> bool:
         search_dirs.append(exec_dir)
         search_dirs.append(os.path.join(exec_dir, "static_ffmpeg"))
 
-    # AppImage sets APPDIR; bundled tools live under usr/bin.
+    # AppImage sets APPDIR; bundled tools can be at the root, usr/bin,
+    # or opt/ depending on how python-appimage places -x extra files.
     appdir = os.environ.get("APPDIR")
     if appdir:
+        search_dirs.append(appdir)
         search_dirs.append(os.path.join(appdir, "usr", "bin"))
+        search_dirs.append(os.path.join(appdir, "opt"))
+        # python-appimage puts extra files relative to the AppDir root
+        search_dirs.append(os.path.join(appdir, "opt", "python3.12", "bin"))
 
     ffmpeg_names = ("ffmpeg", "ffmpeg.exe")
     ffprobe_names = ("ffprobe", "ffprobe.exe")
