@@ -102,6 +102,42 @@ except NameError:
     def profile(fn):
         return fn
 
+
+# os.replace() can intermittently fail with PermissionError (WinError 5:
+# "Access is denied") when the destination is on an SMB/CIFS network share.
+# The SMB redirector briefly holds an oplock or handle on the file, and the
+# atomic replace races with it.  Local filesystems (NTFS, ext4, etc.) are
+# not affected.  Retrying with a short delay resolves the race without data
+# loss — the source file is always intact until the replace succeeds.
+_ATOMIC_REPLACE_MAX_RETRIES = 10
+_ATOMIC_REPLACE_DELAY = 0.1  # 100 ms
+
+
+def _atomic_replace_with_retry(src, dst):
+    """os.replace() with retry for SMB share PermissionError (WinError 5)."""
+    last_error = None
+    for attempt in range(_ATOMIC_REPLACE_MAX_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            # WinError 5 — "Access is denied" — is the SMB race condition.
+            # Other PermissionErrors (e.g. actual ACL denial) will also
+            # retry, but will exhaust retries quickly and re-raise.
+            last_error = exc
+            time.sleep(_ATOMIC_REPLACE_DELAY)
+        except OSError as exc:
+            # On Windows, WinError 5 surfaces as PermissionError (a subclass
+            # of OSError).  Some SMB drivers report it as a plain OSError
+            # with winerror 5, so catch that too.
+            if getattr(exc, "winerror", None) == 5:
+                last_error = exc
+                time.sleep(_ATOMIC_REPLACE_DELAY)
+            else:
+                raise
+    # All retries exhausted — re-raise the last error.
+    raise last_error
+
 # This runs a cubic scaler on a line.
 # originally from https://www.paulinternet.nl/?page=bicubic
 @njit(nogil=True, cache=True)
@@ -1601,7 +1637,7 @@ class JSONDumper:
 
             f.write('\n')
             f.close()
-            os.replace(outname + ".tbc.json.tmp", outname + ".tbc.json")
+            _atomic_replace_with_retry(outname + ".tbc.json.tmp", outname + ".tbc.json")
 
             ready.clear()
 

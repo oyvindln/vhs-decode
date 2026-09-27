@@ -41,6 +41,7 @@ import numpy as np
 
 from lddecode import __version__
 from lddecode.lds import S16, LdsWriter, unpack_stream
+from lddecode.utils import _atomic_replace_with_retry
 
 # flac gained -j, and with it a usable encoding speed for 30 GB captures, in
 # 1.5.0.  Nothing older is worth falling back to.
@@ -469,7 +470,7 @@ def compress(path, flac, level, extension, show_progress):
         return False
 
     try:
-        os.replace(partial, outfile)
+        _atomic_replace_with_retry(partial, outfile)
     except OSError as e:
         _err("Error: could not move '%s' into place: %s" % (outfile, e))
         _discard_partial(partial)
@@ -493,7 +494,7 @@ def uncompress(path, show_progress):
                 decode_ldf(source, writer.write)
         finally:
             writer.close()
-        os.replace(partial, outfile)
+        _atomic_replace_with_retry(partial, outfile)
     except Exception as e:
         # Broad on purpose: PyAV raises whichever builtin matches the FFmpeg
         # error, and a partly written .lds must never reach outfile.
