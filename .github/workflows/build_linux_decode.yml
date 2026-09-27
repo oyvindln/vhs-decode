@@ -122,6 +122,24 @@ jobs:
           cp /tmp/libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so.2
           ln -sf libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so
           chmod +x squashfs-root/usr/bin/ffmpeg squashfs-root/usr/bin/ffprobe
+          # Install hicolor icons for taskbar/launcher integration.
+          # Linux desktop environments (GNOME, KDE, Cinnamon/Mint, etc.)
+          # look for icons in usr/share/icons/hicolor/<size>/apps/.
+          ICON_SIZES="16 22 32 48 64 128 256"
+          for size in ${ICON_SIZES}; do
+            mkdir -p "squashfs-root/usr/share/icons/hicolor/${size}x${size}/apps"
+            cp "assets/icons/hicolor/${size}x${size}/apps/vhs-decode.png" \
+               "squashfs-root/usr/share/icons/hicolor/${size}x${size}/apps/vhs-decode.png"
+          done
+          # Also install the 256x256 icon as .DirIcon and the root icon
+          cp assets/icons/vhs-decode.png squashfs-root/.DirIcon
+          cp assets/icons/vhs-decode.png squashfs-root/vhs-decode.png
+          # Install the desktop file with correct Exec and Icon fields
+          mkdir -p squashfs-root/usr/share/applications
+          cp resources/appimage/decode/vhs-decode.desktop \
+             squashfs-root/usr/share/applications/vhs-decode.desktop
+          ln -sf usr/share/applications/vhs-decode.desktop squashfs-root/vhs-decode.desktop
+          ln -sf usr/share/icons/hicolor/256x256/apps/vhs-decode.png squashfs-root/vhs-decode.png
           # Download appimagetool for repackaging
           AIT_ARCH="x86_64"
           [ "${{ matrix.arch }}" = "arm64" ] && AIT_ARCH="aarch64"
