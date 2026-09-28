@@ -134,6 +134,56 @@ jobs:
           cp resources/appimage/decode/vhs-decode.desktop \
              squashfs-root/usr/share/applications/vhs-decode.desktop
           ln -sf usr/share/applications/vhs-decode.desktop squashfs-root/vhs-decode.desktop
+          # Replace AppRun with one that does desktop integration on first
+          # run. python-appimage generates a bare AppRun that just calls
+          # python directly — it never registers the .desktop file or icon
+          # with the user's desktop environment, so the taskbar shows a
+          # generic icon and pinning doesn't work. This AppRun installs the
+          # .desktop file and icon to ~/.local/share on first run, then
+          # launches the actual decode binary.
+          cat > squashfs-root/AppRun << 'APPRUN'
+#!/bin/bash
+# AppRun — entry point with desktop integration.
+# On first run, installs .desktop file and icon to ~/.local/share so
+# GNOME/KDE/Cinnamon/Mint taskbars show the correct icon and allow pinning.
+
+if [ -z "${APPIMAGE}" ]; then
+    self="$(readlink -f -- "$0")"
+    export APPDIR="${self%/*}"
+else
+    export APPDIR="${APPIMAGE}"
+fi
+
+# Desktop integration — runs once per AppImage path.
+MARKER="${HOME}/.local/share/applications/.vhs-decode-$(echo "${APPIMAGE:-${APPDIR}}" | md5sum | cut -c1-8)"
+if [ ! -f "${MARKER}" ]; then
+    APPS_DIR="${HOME}/.local/share/applications"
+    ICONS_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+    mkdir -p "${APPS_DIR}" "${ICONS_DIR}" 2>/dev/null || true
+    # Install icon
+    [ -f "${APPDIR}/vhs-decode.png" ] && cp "${APPDIR}/vhs-decode.png" "${ICONS_DIR}/vhs-decode.png" 2>/dev/null || true
+    # Generate .desktop file with absolute AppImage path in Exec
+    cat > "${APPS_DIR}/vhs-decode.desktop" << EOF
+[Desktop Entry]
+Name=vhs-decode
+Comment=Software defined VHS/LaserDisc/CVBS decoder
+Exec=${APPIMAGE:-${APPDIR}} %f
+Terminal=false
+Icon=vhs-decode
+Type=Application
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=vhs;laserdisc;ld;cvbs;rf;decode;video;tape;
+TryExec=${APPIMAGE:-${APPDIR}}
+EOF
+    update-desktop-database "${APPS_DIR}" 2>/dev/null || true
+    gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
+    echo "${APPIMAGE:-${APPDIR}}" > "${MARKER}" 2>/dev/null || true
+fi
+
+# Launch the actual decode binary
+exec "${APPDIR}/usr/bin/python3.12" -u "${APPDIR}/opt/python3.12/bin/decode.py" "$@"
+APPRUN
+          chmod +x squashfs-root/AppRun
           # Download appimagetool for repackaging
           AIT_ARCH="x86_64"
           [ "${{ matrix.arch }}" = "arm64" ] && AIT_ARCH="aarch64"
