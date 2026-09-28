@@ -3,15 +3,19 @@
 # On first run, installs .desktop file and icon to ~/.local/share so
 # GNOME/KDE/Cinnamon/Mint taskbars show the correct icon and allow pinning.
 
-if [ -z "${APPIMAGE}" ]; then
-    self="$(readlink -f -- "$0")"
-    export APPDIR="${self%/*}"
-else
-    export APPDIR="${APPIMAGE}"
-fi
+# Always derive APPDIR from $0 — when mounted, $0 is inside the mount
+# point (e.g. /tmp/.mount_decodeXXXX/AppRun), so its dirname is the
+# correct APPDIR. APPIMAGE is the *file path* of the AppImage, which
+# is only useful for the .desktop Exec= line, not for finding bundled
+# binaries.
+self="$(readlink -f -- "$0")"
+export APPDIR="${self%/*}"
 
 # Desktop integration — runs once per AppImage path.
-MARKER="${HOME}/.local/share/applications/.vhs-decode-$(echo "${APPIMAGE:-${APPDIR}}" | md5sum | cut -c1-8)"
+# Use APPIMAGE (the file path) for the marker and .desktop Exec= so
+# the taskbar launches the AppImage file, not the mount point.
+APPIMAGE_REF="${APPIMAGE:-${APPDIR}}"
+MARKER="${HOME}/.local/share/applications/.vhs-decode-$(echo "${APPIMAGE_REF}" | md5sum | cut -c1-8)"
 if [ ! -f "${MARKER}" ]; then
     APPS_DIR="${HOME}/.local/share/applications"
     ICONS_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
@@ -23,18 +27,18 @@ if [ ! -f "${MARKER}" ]; then
 [Desktop Entry]
 Name=vhs-decode
 Comment=Software defined VHS/LaserDisc/CVBS decoder
-Exec=${APPIMAGE:-${APPDIR}} %f
+Exec=${APPIMAGE_REF} %f
 Terminal=false
 Icon=vhs-decode
 Type=Application
 Categories=AudioVideo;Video;AudioVideoEditing;
 Keywords=vhs;laserdisc;ld;cvbs;rf;decode;video;tape;
-TryExec=${APPIMAGE:-${APPDIR}}
+TryExec=${APPIMAGE_REF}
 EOF
     update-desktop-database "${APPS_DIR}" 2>/dev/null || true
     gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true
-    echo "${APPIMAGE:-${APPDIR}}" > "${MARKER}" 2>/dev/null || true
+    echo "${APPIMAGE_REF}" > "${MARKER}" 2>/dev/null || true
 fi
 
-# Launch the actual decode binary
+# Launch the actual decode binary (APPDIR is the mount point, not the file)
 exec "${APPDIR}/usr/bin/python3.12" -u "${APPDIR}/opt/python3.12/bin/decode.py" "$@"
