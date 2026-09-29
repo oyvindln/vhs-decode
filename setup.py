@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 
 from setuptools import setup
-import os
-
-# Release/performance safety: default Rust extension builds to cargo's
-# release profile unless a caller explicitly overrides it.
-os.environ.setdefault("SETUPTOOLS_RUST_CARGO_PROFILE", "release")
 
 setup(
     packages=[

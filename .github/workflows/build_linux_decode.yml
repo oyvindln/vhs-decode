@@ -38,14 +38,10 @@ jobs:
       - name: Mark workspace as safe for git
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: dtolnay/rust-toolchain@stable
-
       - name: Generate version metadata
         run: python3.12 scripts/generate_version.py > lddecode/version
 
       - name: Create AppImage
-        env:
-          SETUPTOOLS_RUST_CARGO_PROFILE: release
         run: |
           pip3 install python-appimage
           mkdir _build_appimage

@@ -3,9 +3,6 @@ from pathlib import Path
 import PyInstaller.__main__
 import PyQt6
 from pyinstaller_versionfile import create_versionfile
-# Release/performance safety: never default Windows release artifacts to a
-# debug Rust profile when invoked locally outside CI.
-os.environ.setdefault("SETUPTOOLS_RUST_CARGO_PROFILE", "release")
 
 print("Building Windows binary")
 
@@ -62,8 +59,6 @@ def _pyqt_runtime_binaries() -> list[str]:
 PyInstaller.__main__.run(
     [
         "decode.py",
-        "--collect-all",
-        "vhsd_rust",
         "--add-data",
         "vhsdecode/format_defs;vhsdecode/format_defs",
         "--collect-data",

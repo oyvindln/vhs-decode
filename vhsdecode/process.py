@@ -20,7 +20,7 @@ import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.addons.chromaAFC import ChromaAFC
 
-from vhsdecode.demod import replace_spikes, unwrap_hilbert
+from vhsdecode.demod import replace_spikes
 
 from vhsdecode.field import field_class_from_formats
 from vhsdecode.video_eq import VideoEQ
@@ -40,7 +40,6 @@ from vhsdecode.compute_video_filters import (
     CHROMA_AUDIO_NOTCH_Q,
 )
 from vhsdecode import compute_video_filters as cvf
-from vhsdecode.rust_utils import sosfiltfilt_rust
 
 
 def is_secam(system: str):
@@ -987,7 +986,7 @@ class VHSRFDecode(ldd.RFDecode):
         del raw_filtered
         # Downconvert to single precision for some possible speedup since we don't need
         # super high accuracy for the dropout detection.
-        env = sosfiltfilt_rust(self.Filters["FEnvPost"], raw_env)
+        env = sps.sosfiltfilt(self.Filters["FEnvPost"], raw_env)
 
         del raw_env
         env_mean = np.mean(env)
@@ -997,7 +996,7 @@ class VHSRFDecode(ldd.RFDecode):
         if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
             if self._high_boost is not None:
                 data_filtered = npfft.ifft(indata_fft).real
-                high_part = sosfiltfilt_rust(self.Filters["RFTop"], data_filtered) * (
+                high_part = sps.sosfiltfilt(self.Filters["RFTop"], data_filtered) * (
                     (env_mean * 0.9) / env
                 )
                 del data_filtered
@@ -1011,7 +1010,7 @@ class VHSRFDecode(ldd.RFDecode):
             del indata_fft
 
         # FM demodulator
-        demod = unwrap_hilbert(hilbert, self.freq_hz)
+        demod = lddu.unwrap_hilbert(hilbert, self.freq_hz)
 
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
         # replace the spikes with data from the diffed demod. (Which in practice is an extra EQed signal)
@@ -1019,7 +1018,7 @@ class VHSRFDecode(ldd.RFDecode):
             check_value = self.options.diff_demod_check_value
 
             if np.max(demod[20:-20]) > check_value:
-                demod_b = unwrap_hilbert(
+                demod_b = lddu.unwrap_hilbert(
                     np.ediff1d(hilbert, to_begin=0), self.freq_hz
                 ).real
 

@@ -52,27 +52,17 @@
           ps.mkdocs-awesome-nav
         ]);
 
-        cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
-          inherit pname version;
-          src = ./.;
-          hash = "sha256-yryE7R0A95Uok6Pv6/UBsIG8p9pvaP3Nv8AGQugrEOc=";
-        };
-
         vhs-decode = pythonPackages.buildPythonPackage {
-          inherit pname version cargoDeps;
+          inherit pname version;
           
           src = ./.;
           
           pyproject = true;
           
           nativeBuildInputs = with pythonPackages; [
-            pkgs.cargo
-            pkgs.rustPlatform.cargoSetupHook
             setuptools
-            setuptools-rust
             setuptools-scm
             wheel
-            pkgs.rustc
           ];
           
           propagatedBuildInputs = with pythonPackages; [

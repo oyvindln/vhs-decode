@@ -7,7 +7,6 @@ from scipy.fftpack import fft, fftfreq
 from numpy.fft import rfft, rfftfreq
 import lddecode.core as ldd
 from scipy.signal import argrelextrema
-from vhsdecode.rust_utils import sosfiltfilt_rust
 
 twopi = 2 * np.pi
 
@@ -119,7 +118,7 @@ class ChromaAFC:
         ):
             fdc_wave = utils.gen_wave_at_frequency(freq, self.samp_rate, sample_size)
             self.setCC(freq)
-            mean = self.measureCenterFreq(sosfiltfilt_rust(self.get_chroma_bandpass(), fdc_wave))
+            mean = self.measureCenterFreq(sps.sosfiltfilt(self.get_chroma_bandpass(), fdc_wave))
             # print(ix, "%.02f %.02f" % (freq / 1e3, mean / 1e3))
             means = np.append(means, [[freq, mean]], axis=0)
 

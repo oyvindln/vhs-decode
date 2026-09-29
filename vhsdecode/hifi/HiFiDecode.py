@@ -11,7 +11,6 @@ from setproctitle import setproctitle
 from multiprocessing import current_process
 from copy import deepcopy
 
-from vhsdecode.rust_utils import sosfiltfilt_rust
 import string
 from random import SystemRandom
 
@@ -19,6 +18,7 @@ import numpy as np
 import numba
 from numba import njit
 from scipy.signal import (
+    sosfiltfilt,
     lfilter_zi,
     filtfilt,
     lfilter,
@@ -250,7 +250,8 @@ class AFEFilterable:
         )
 
     def work(self, data):
-        return sosfiltfilt_rust(self.bandpass, data)
+        # The numba stages downstream only accept float32.
+        return sosfiltfilt(self.bandpass, data).astype(np.float32)
 
 class FMDiscriminator:
     def __init__(
@@ -1586,9 +1587,7 @@ class HiFiDecode:
         audio_process_params: HiFiAudioParams,
     ) -> Tuple[list[Tuple[float, float, float, float]], np.array, np.array]:
         # remove audible frequencies to avoid detecting them as peaks
-        filtered_signal = sosfiltfilt_rust(
-            audio_process_params.hs_sos, audio
-        )
+        filtered_signal = sosfiltfilt(audio_process_params.hs_sos, audio).astype(np.float32)
         filtered_signal_abs = abs(filtered_signal)
         filtered_signal_mean, filtered_signal_std_dev = HiFiDecode.mean_stddev(
             filtered_signal

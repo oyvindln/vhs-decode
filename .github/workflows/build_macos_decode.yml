@@ -62,8 +62,6 @@ jobs:
           # PyInstaller's pyi_rth_pkgres runtime hook in the bundled binary.
           python3 -m pip install --upgrade pip "setuptools<82" wheel
 
-      - uses: dtolnay/rust-toolchain@stable
-
       - name: Install dependencies
         run: brew install create-dmg libsndfile libomp
 
@@ -81,8 +79,6 @@ jobs:
 
       - name: Build Python module
         shell: bash
-        env:
-          SETUPTOOLS_RUST_CARGO_PROFILE: release
         run: |
           set -euxo pipefail
 

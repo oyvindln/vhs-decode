@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "setuptools-rust", "setuptools_scm>=6.2", "wheel"]
+requires = ["setuptools>=61", "setuptools_scm>=6.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,7 +24,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Rust",
     "Topic :: Multimedia :: Video",
     "Topic :: Multimedia :: Video :: Capture",
 ]
@@ -101,17 +100,9 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 
-[[tool.setuptools-rust.ext-modules]]
-# Private Rust extension module to be nested into the Python package
-target = "vhsd_rust"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib"]
 markers = [
     "integration: end-to-end decode tests requiring real RF data",
 ]
-
-# Needed to prevent building for older macos versions not supported by rust - see https://cibuildwheel.pypa.io/en/stable/faq/#building-rust-wheels
-[tool.cibuildwheel.macos.environment]
-MACOSX_DEPLOYMENT_TARGET = "10.12"

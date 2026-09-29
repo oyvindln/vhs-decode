@@ -1,8 +1,6 @@
 from numba import njit
 import numpy as np
 
-import vhsd_rust
-
 
 @njit(cache=True, nogil=True)
 def replace_spikes(demod, demod_diffed, max_value, replace_start=8, replace_end=30):
@@ -23,8 +21,3 @@ def replace_spikes(demod, demod_diffed, max_value, replace_start=8, replace_end=
 
     return demod
 
-
-
-def unwrap_hilbert(hilbert, freq_hz):
-    # return hilbert_test.unwrap_hilbert(hilbert, freq_hz)
-    return vhsd_rust.unwrap_hilbert(hilbert, freq_hz)

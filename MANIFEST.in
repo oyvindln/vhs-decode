@@ -1,6 +1,4 @@
-include Cargo.toml
 build/versionfile.txt
-recursive-include rust *.rs
 exclude CMake*
 exclude gen_*
 exclude compile.bat*

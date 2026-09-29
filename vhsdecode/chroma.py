@@ -3,7 +3,6 @@ import numpy as np
 import lddecode.core as ldd
 import scipy.signal as sps
 import scipy.fft as sps_fft
-from vhsdecode.rust_utils import sosfiltfilt_rust
 
 import numba
 from numba import njit
@@ -480,7 +479,7 @@ def _get_upconverted_burst(
     )
 
     # filter out noise so only the color burst is present
-    filtered_padded = sosfiltfilt_rust(chroma_filter, upconverted_burst)
+    filtered_padded = sps.sosfiltfilt(chroma_filter, upconverted_burst)
     filtered = filtered_padded[burst_filter_padding:-burst_filter_padding]
 
     burst_len = len(filtered)
@@ -929,7 +928,8 @@ def shift_chroma_and_remove_dc(out_chroma, move):
 def chroma_color_under_filter(
     data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None
 ):
-    out_chroma = sosfiltfilt_rust(filter, data[:blocklen])
+    # The raw block is int16, which would overflow in sosfiltfilt's edge padding.
+    out_chroma = sps.sosfiltfilt(filter, data[:blocklen].astype(float))
 
     if audio_notch is not None:
         out_chroma = sps.filtfilt(
@@ -1138,7 +1138,7 @@ def upconvert_secam_method1(
     band-passed under-carrier envelope is returned as a third element (used
     by regenerate_secam_blanking for local amplitude matching).
     """
-    filtered = sosfiltfilt_rust(under_bpf, chroma)
+    filtered = sps.sosfiltfilt(under_bpf, chroma)
 
     # Analytic signal over the whole field so short-window edge effects don't
     # bias the phase.
@@ -1701,7 +1701,7 @@ def _process_chroma_secam_method1(field, chroma, linesout, outwidth):
     uphet = restored[: linesout * outwidth]
 
     # Block-anchored final band-pass (same band as ME-SECAM).
-    uphet = sosfiltfilt_rust(field.rf.Filters["FChromaFinal"], uphet)
+    uphet = sps.sosfiltfilt(field.rf.Filters["FChromaFinal"], uphet)
 
     # No per-line chroma AGC here: the amplitude envelope was synthesised
     # from the BT.470 bell above, and normalizing every line to its porch
@@ -1972,7 +1972,7 @@ def process_chroma(
         # sits ~106 kHz high on it and loses the tight top edge that
         # suppresses high-side FM splatter from saturated transitions. Keep
         # the block-anchored Butterworth here.
-        uphet = sosfiltfilt_rust(field.rf.Filters["FChromaFinal"], uphet)
+        uphet = sps.sosfiltfilt(field.rf.Filters["FChromaFinal"], uphet)
     else:
         uphet = filter_chroma_fft(
             uphet,

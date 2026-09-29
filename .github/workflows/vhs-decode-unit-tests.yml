@@ -19,8 +19,7 @@ jobs:
 
     - name: Run unit tests
       timeout-minutes: 5
-      # Run from /tmp so Python imports the installed package (with compiled
-      # Cython/Rust extensions) rather than the source tree.
+      # Run from /tmp so Python imports the installed package rather than the source tree.
       shell: bash
       run: |
         cd /tmp

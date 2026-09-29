@@ -27,7 +27,6 @@ from vhsdecode.cmdcommons import (
     test_output_file,
 )
 from vhsdecode.formats import TAPE_SPEEDS
-from vhsd_rust import check_debug
 
 supported_tape_formats = {
     "VHS",
@@ -755,9 +754,6 @@ def main(args=None, use_gui=False):
         debug_plot=debug_plot,
         field_order_action=args.field_order_action,
     )
-
-    if check_debug():
-        logger.warning("Rust modules are compiled in debug mode! vhs-decode will run slower.")
 
     signal.signal(signal.SIGINT, original_sigint_handler)
 
