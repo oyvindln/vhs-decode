@@ -40,7 +40,6 @@ from vhsdecode.compute_video_filters import (
     CHROMA_AUDIO_NOTCH_Q,
 )
 from vhsdecode import compute_video_filters as cvf
-from vhsdecode.demodcache import DemodCacheTape
 from vhsdecode.rust_utils import sosfiltfilt_rust
 from vhsdecode.dbwriter import DBWriter
 
@@ -149,7 +148,7 @@ class VHSDecode(ldd.LDdecode):
         # Restore init functino now that superclass constructor is finished.
         ldd.DemodCache.__init__ = temp_init
 
-        self.demodcache = DemodCacheTape(
+        self.demodcache = ldd.DemodCache(
             self.rf,
             self.infile,
             self.freader,
@@ -791,6 +790,20 @@ class VHSRFDecode(ldd.RFDecode):
             rf_options.get("secam_carrier_servo", True),
         )
 
+        if self._options.gnrc_afe:
+            from vhsdecode.addons.gnuradioZMQ import ZMQSend, ZMQReceive
+
+            self.zmqsend = ZMQSend()
+            self.zmqreceive = ZMQReceive()
+            print(
+                "Open GNURadio with ZMQ REQ source set at tcp://localhost:%d and ZMQ REP sink set at tcp://*:%d\n"
+                "The data stream will be of the float type at 40MSPS (40MHz sample rate)\n"
+                "It will send the raw RF for further processing prior to demodulation (useful for RF EQ discovery "
+                "and group delay compensation)\n"
+                "You might want to do this in single threaded decode mode (-t 1 parameter) - TODO: might not work correctly with --no_resample yet."
+                % (self.zmqsend.port, self.zmqreceive.port)
+            )
+
         # As agc can alter these sysParams values, store a copy to then
         # initial value for reference.
         self._sysparams_const = namedtuple(
@@ -1206,15 +1219,13 @@ class VHSRFDecode(ldd.RFDecode):
         rv = {}
         demod_block_debug = False
         demod_start_time = time.time()
-        if fftdata is not None:
-            indata_fft = fftdata
-        elif data is not None:
-            indata_fft = npfft.fft(data[: self.blocklen])
-        else:
-            raise Exception("demodblock called without raw or FFT data")
+        if self._options.gnrc_afe:
+            self.zmqsend.send(data)
+            data = self.zmqreceive.receive(data.size)
 
-        if data is None:
-            data = npfft.ifft(indata_fft).real
+        # The cached fft the demod cache passes in is not used since the filters
+        # below are applied in place, which would corrupt it for a re-decode.
+        indata_fft = npfft.fft(data[: self.blocklen])
 
         if self.debug_plot and self.debug_plot.is_plot_requested("demodblock"):
             demod_block_debug = True
