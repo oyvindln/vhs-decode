@@ -857,17 +857,10 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         if self.options.chroma_deemphasis_filter:
-            from vhsdecode.addons.biquad import peaking
-
             out_freq_half = self._chroma_afc.getOutFreqHalf()
-
-            b, a = peaking(
-                self.sys_params["fsc_mhz"] / out_freq_half,
-                3.4,
-                BW=0.5 / out_freq_half,
-                type="constantq",
+            self.Filters["chroma_deemphasis"] = cvf.gen_peaking_constq(
+                self.sys_params["fsc_mhz"] / out_freq_half, 3.4, 0.5 / out_freq_half
             )
-            self.Filters["chroma_deemphasis"] = (b, a)
 
         if self._notch is not None:
             video_notch_filter = sps.iirnotch(
@@ -1082,14 +1075,11 @@ class VHSRFDecode(ldd.RFDecode):
 
         if DP.get("video_rf_peak_freq", False):
             # Add optional rf peaking filter
-            from vhsdecode.addons.biquad import peaking
-
             peaking_filter = utils.filtfft(
-                peaking(
+                cvf.gen_peaking_constq(
                     DP["video_rf_peak_freq"] / self.freq_hz_half,
                     DP.get("video_rf_peak_gain", 3),
-                    BW=DP.get("video_rf_peak_bandwidth", 2.5e6) / self.freq_hz_half,
-                    type="constantq",
+                    DP.get("video_rf_peak_bandwidth", 2.5e6) / self.freq_hz_half,
                 ),
                 self.blocklen,
             )

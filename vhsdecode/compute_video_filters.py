@@ -90,6 +90,20 @@ def gen_custom_video_filters(filter_list, freq_hz, block_len):
     return ret
 
 
+def gen_peaking_constq(wn, dbgain, bw):
+    """Constant-Q peaking biquad, wn and bw normalized to nyquist (bw as octaves of that)."""
+    a = 10.0 ** (dbgain / 20.0)
+    q = 1 / (2 * math.sinh(math.log(2) / 2 * bw))
+    return sps.bilinear(
+        *sps.lp2lp(
+            np.array([1, a / q, 1]),
+            np.array([1, 1 / q, 1]),
+            wo=4 * math.tan(math.pi * wn / 2),
+        ),
+        fs=2.0,
+    )
+
+
 def gen_video_lpf(corner_freq, order, nyquist_hz, block_len):
     """Generate real-value fir and fft post-demodulation low pass filters from parameters"""
     video_lpf_b = sps.butter(order, corner_freq / nyquist_hz, "lowpass", output="sos")
