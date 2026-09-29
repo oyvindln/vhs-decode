@@ -20,22 +20,6 @@ NO_PULSES_FOUND = 1
 
 Pulse = namedtuple('Pulse', ['start', 'len', 'transition', 'level_low', 'level_high'])
 
-# def ynr(data, hpfdata, line_len):
-#     """Dumb vcr-line ynr
-#     """
-
-#     numlines = len(data) // line_len
-#     hpfdata = np.clip(hpfdata, -7000, 7000)
-#     for line_num in range(16, numlines - 2):
-#         delayed1h = hpfdata[(line_num - 1) * line_len : (line_num) * line_len]
-#         line_slice = hpfdata[line_num * line_len : (line_num + 1) * line_len]
-#         adv1h = hpfdata[(line_num + 1) * line_len : (line_num + 2) * line_len]
-#         # Let the delayed signal contribute 1/3.
-#         # Could probably make the filtering configurable later.
-#         data[line_num * line_len : (line_num + 1) * line_len] -= line_slice
-#         data[line_num * line_len : (line_num + 1) * line_len] += (((delayed1h + line_slice + adv1h) / 3) - line_slice)
-#     return data
-
 
 # Can't use numba here due to clip being a recent addition.
 # @njit(cache=True)
@@ -1141,8 +1125,6 @@ class FieldShared:
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldShared, self).downscale(final=False, *args, **kwargs)
 
-        # hpf = utils.filter_simple(dsout, self.rf.Filters["NLHighPass"])
-        # dsout = ynr(dsout, hpf, self.outlinelen)
         y_comb_value = self.rf.options.y_comb
         if y_comb_value != 0:
             dsout = y_comb(dsout, self.outlinelen, y_comb_value)
@@ -1608,8 +1590,6 @@ class FieldShared:
         self.rf.prev_first_field = self.isFirstField
         self.rf.prev_progressive_field = self.isProgressiveField
 
-        # self.getLine0(validpulses, meanlinelen)
-
         return (
             line0loc,
             self.first_hsync_loc,
@@ -1818,8 +1798,6 @@ class FieldShared:
         )
 
         self.linelocs0 = linelocs.copy()
-
-        # ldd.logger.info("line0loc %s %s", int(line0loc), int(self.meanlinelen))
 
         if self.vblank_next is None:
             nextfield = linelocs[self.outlinecount - 7]

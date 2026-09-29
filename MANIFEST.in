@@ -3,9 +3,6 @@ include Cargo.toml
 build/versionfile.txt
 recursive-include rust *.rs
 exclude CMake*
-exclude PAL_*
-exclude tests.py
-exclude hilbert_data.npz
 exclude gen_*
 exclude compile.bat*
 exclude README_*
@@ -18,7 +15,6 @@ prune tools
 prune notebooks
 prune scripts
 include scripts/cx-expander
-prune vhs_scripts
 prune cmake_modules
 prune docs
 prune assets

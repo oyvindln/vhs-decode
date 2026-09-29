@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import lddecode.core as ldd
 
-# from lddecode.core import npfft
 # Use numpy fft rather than scipy fft as is imported in lddecode core as it seems to be slightly faster.
 import numpy.fft as npfft
 
@@ -23,7 +22,7 @@ import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.addons.chromaAFC import ChromaAFC
 
-from vhsdecode.demod import replace_spikes, unwrap_hilbert, smooth_spikes
+from vhsdecode.demod import replace_spikes, unwrap_hilbert
 
 from vhsdecode.field import field_class_from_formats
 from vhsdecode.video_eq import VideoEQ
@@ -128,8 +127,6 @@ class VHSDecode(ldd.LDdecode):
             # We need a larger buffer for 819-line input
             # TODO: Is this useful for normal formats too?
             self.readlen = self.rf.linelen * 500
-        # else:
-        #    self.readlen = int(self.readlen * 1.1)
 
         # Adjustment for output to avoid clipping.
         self.level_adjust = level_adjust
@@ -170,8 +167,6 @@ class VHSDecode(ldd.LDdecode):
             self.dbconn = self._db_writer.db_connection
             self.create_db_schema()
 
-        # self._io_thread_pool = ThreadPoolExecutor(2)
-
         self.outfile_chroma = None
 
         self.fname_out = fname_out
@@ -197,11 +192,6 @@ class VHSDecode(ldd.LDdecode):
         # This method usually gives false positives for noisy signals, so smooth the correction out by an entire field to avoid banding
         if self.wow_level_adjust_smoothing is None:
             self.wow_level_adjust_smoothing = self.rf.SysParams["frame_lines"] / 2
-
-        # Needs to be overridden since this is overwritten for 405-line.
-        # self.output_lines = (self.rf.SysParams["frame_lines"] // 2) + 1
-        # Not modified as of now but may be tweaked for 405-line later
-        # self.outwidth = self.rf.SysParams["outlinelen"]
 
     # Override to avoid NaN in JSON.
     def calcsnr(self, f, snrslice, psnr=False):
@@ -415,18 +405,12 @@ class VHSDecode(ldd.LDdecode):
 
     def build_json(self):
         try:
-            # if not f:
-            #    # Make sure we don't fail if the last attempted field failed to decode
-            #    # Might be better to fix this elsewhere.
-            #    f = self.prevfield
             jout = super(VHSDecode, self).build_json()
 
             black = jout["videoParameters"]["black16bIre"]
             white = jout["videoParameters"]["white16bIre"]
 
             if self.rf.color_system == "PAL_M" or self.rf.color_system == "NLINHA":
-                # jout["videoParameters"]["isSourcePal"] = True
-                # jout["videoParameters"]["isSourcePalM"] = True
                 jout["videoParameters"]["system"] = "PAL-M"
 
             jout["videoParameters"]["black16bIre"] = black * (1 - self.level_adjust)
@@ -452,11 +436,6 @@ class VHSDecode(ldd.LDdecode):
         offset = 0
 
         if len(self.fieldstack) >= 2:
-            ## Done in main files
-            # XXX: Need to cut off the previous field here, since otherwise
-            # it'll leak for now.
-            # if self.fieldstack[-1]:
-            #    self.fieldstack[-1].prevfield = None
             self.fieldstack.pop(-1)
 
         while done is False:
@@ -530,10 +509,6 @@ class VHSDecode(ldd.LDdecode):
                 )
 
                 _ = self.computeMetrics(f, None, verbose=True)
-                # if "blackToWhiteRFRatio" in metrics and adjusted is False:
-                #    keep = 900 if self.isCLV else 30
-                #    self.bw_ratios.append(metrics["blackToWhiteRFRatio"])
-                #    self.bw_ratios = self.bw_ratios[-keep:]
 
                 redo = f.needrerun
                 if redo:
@@ -1120,13 +1095,6 @@ class VHSRFDecode(ldd.RFDecode):
             )
             self.Filters["RFVideo"] *= abs(peaking_filter)
 
-        # b, a = ([1, -1], [1])
-        # rf_eq = filtfft((b, a), self.blocklen)
-        # self.Filters["rf_eq"] = b, a
-        # self.Filters["rf_eq_fft"] = abs(rf_eq)
-
-        # self.Filters["RFVideo"] *= abs(rf_eq)
-
         # Make sure this is an int in case it could be passed in as a string via the gui.
         if int(self.options.fm_audio_notch) > 0:
             if "fm_audio_channel_0_freq" in DP and "fm_audio_channel_1_freq" in DP:
@@ -1195,10 +1163,6 @@ class VHSRFDecode(ldd.RFDecode):
         F0_5 = sps.firwin(65, [0.5 / self.freq_half], pass_zero=True)
         filter_05 = filtfft((F0_5, [1.0]), self.blocklen, False)
 
-        # SF["F05"] = utils.filtfft((F0_5, [1.0]), self.blocklen)
-        # Defined earlier
-        # SF["F05_offset"] = 32
-
         # This filter is simple enough that we can get away with single precision
         # sections and thus do the filtering in sngle precision.
         # On higher order filters this is not viable as it tends to alter the filter too much.
@@ -1223,13 +1187,6 @@ class VHSRFDecode(ldd.RFDecode):
         )
 
         SF["FVideo05"] = filter_video_lpf * filter_deemp * filter_05
-
-        # SF["YNRHighPass"] = sps.butter(
-        #     1,
-        #     (0.5e6) / self.freq_hz_half,
-        #     btype="highpass",
-        #     output="sos",
-        # )
 
         if self.options.nldeemp or self.options.subdeemp:
             SF["NLHighPassF"] = gen_nonlinear_bandpass_params(
@@ -1335,11 +1292,6 @@ class VHSRFDecode(ldd.RFDecode):
             del indata_fft
 
         # FM demodulator
-        # test1 = np.angle(hilbert)
-        # from vhsd_rust import complex_angle_py
-        # test2 = hilbert
-        # print(test1 - test2)
-        # np.savez_compressed("hilbert_data", data=hilbert)
         demod = unwrap_hilbert(hilbert, self.freq_hz)
 
         # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
@@ -1354,11 +1306,6 @@ class VHSRFDecode(ldd.RFDecode):
 
                 demod = replace_spikes(demod, demod_b, check_value)
                 del demod_b
-                # Not used yet, needs more testing.
-                # 2.2 seems to be a sweet spot between reducing spikes and not causing
-                # more
-                if False:
-                    demod = smooth_spikes(demod, check_value * 2.2)
 
         # Disabled if sharpness level is zero (default).
         # TODO: This should be done after the deemphasis steps

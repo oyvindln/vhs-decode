@@ -444,7 +444,7 @@ The decode projects tool suite has built-in tools for this `tbc-process-vbi` sup
 
 [Tape-based Arcade Games!](https://vhs.thenvm.org/resources/)
 
-[Ruxpin TV Teddy](https://github.com/oyvindln/vhs-decode/blob/vhs_decode/tools/ruxpin-decode/readme.pdf) (Extra audio in visible frame)
+[Ruxpin TV Teddy](https://github.com/oyvindln/vhs-decode/blob/695d7d7afff524883c71c5d3ebedd0765fab6de8/tools/ruxpin-decode/readme.pdf) (Extra audio in visible frame)
 
 
 # Terminal Arguments

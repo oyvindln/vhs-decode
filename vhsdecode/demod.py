@@ -24,19 +24,6 @@ def replace_spikes(demod, demod_diffed, max_value, replace_start=8, replace_end=
     return demod
 
 
-@njit(cache=True, nogil=True)
-def smooth_spikes(demod, max_value):
-    """Go through spikes above max value and replace with the average of the neighbours."""
-    too_high = max_value
-    # Note - optimization, avoid first/last value so we don't have to check
-    # array bounds later.
-    to_fix = np.where(demod[1:-1] > too_high)[0]
-
-    for i in to_fix:
-        demod[i + 1] = (demod[i] + demod[i + 2]) / 2
-
-    return demod
-
 
 def unwrap_hilbert(hilbert, freq_hz):
     # return hilbert_test.unwrap_hilbert(hilbert, freq_hz)
