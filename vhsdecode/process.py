@@ -1,11 +1,10 @@
 import os
 import time
 import numpy as np
-import traceback
 import scipy.signal as sps
-import threading
 from collections import namedtuple, deque
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import lddecode.core as ldd
 
@@ -48,17 +47,6 @@ def is_secam(system: str):
     return system == "SECAM" or system == "MESECAM"
 
 
-def _computefilters_dummy(self):
-    self.Filters = {}
-    # Needs to be defined here as it's referenced in constructor.
-    self.Filters["F05_offset"] = 32
-
-
-def _demodcache_dummy(self, *args, **kwargs):
-    self.ended = True
-    pass
-
-
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
 #
 # We do this simply by using inheritance and overriding functions. This results in some redundant
@@ -82,51 +70,8 @@ class VHSDecode(ldd.LDdecode):
         debug_plot=None,
         field_order_action="detect",
     ):
-
-        # monkey patch init with a dummy to prevent calling set_start_method twice on macos
-        # and not create extra threads.
-        # This is kinda hacky and should be sorted in a better way ideally.
-        temp_init = ldd.DemodCache.__init__
-        ldd.DemodCache.__init__ = _demodcache_dummy
         self._processing_thread_pool = ThreadPoolExecutor(max_workers=threads + 1)
-
-        # HACK - override this in a hacky way for now to skip generating some filters we don't use.
-        # including one that requires > 20 mhz sample rate.
-        # Have to this inside this class do avoid test issues.
-        ldd.RFDecode.computefilters = _computefilters_dummy
-
-        if system == "405":
-            sys_params_pal_temp = ldd.SysParams_PAL.copy()
-            # If we are using 405-line we need to override this so the superclasses are initialized with the right values.
-            ldd.SysParams_PAL = vhs_formats.get_sys_params_405()
-        elif system == "819":
-            sys_params_pal_temp = ldd.SysParams_PAL.copy()
-            # If we are using 819-line we need to override this so the superclasses are initialized with the right values.
-            ldd.SysParams_PAL = vhs_formats.get_sys_params_819()
-
-        # We pass None as output filename to avoid superclass creating output file and database here.
-        super(VHSDecode, self).__init__(
-            fname_in,
-            None,
-            freader,
-            logger,
-            analog_audio=False,
-            system=vhs_formats.parent_system(system),
-            doDOD=doDOD,
-            threads=threads,
-            inputfreq=inputfreq,
-            extra_options=extra_options,
-        )
-
-        if system == "819":
-            # We need a larger buffer for 819-line input
-            # TODO: Is this useful for normal formats too?
-            self.readlen = self.rf.linelen * 500
-
-        # Adjustment for output to avoid clipping.
-        self.level_adjust = level_adjust
-        # Overwrite the rf  with the VHS-altered one
-        self.rf = VHSRFDecode(
+        rf = VHSRFDecode(
             processing_thread_pool=self._processing_thread_pool,
             system=system,
             tape_format=tape_format,
@@ -136,25 +81,33 @@ class VHSDecode(ldd.LDdecode):
             debug_plot=debug_plot,
         )
 
-        if system == "405":
-            # TODO: oln 18/03/2026 This wasn't reset correctly, not sure if it's relevant or not.
-            ldd.SysParams_PAL = sys_params_pal_temp
+        # The superclass constructs its own laserdisc RFDecode (and the demod cache around it),
+        # so hand it the tape decoder instead. No output filename so it opens no files.
+        with mock.patch.object(ldd, "RFDecode", lambda **_: rf):
+            super(VHSDecode, self).__init__(
+                fname_in,
+                None,
+                freader,
+                logger,
+                analog_audio=False,
+                system=vhs_formats.parent_system(system),
+                doDOD=doDOD,
+                threads=threads,
+                inputfreq=inputfreq,
+                extra_options=extra_options,
+            )
 
+        if system == "819":
+            # We need a larger buffer for 819-line input
+            # TODO: Is this useful for normal formats too?
+            self.readlen = self.rf.linelen * 500
+
+        # Adjustment for output to avoid clipping.
+        self.level_adjust = level_adjust
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
         self.rf.decoder = self
         self.FieldClass = field_class_from_formats(system, tape_format)
-
-        # Restore init functino now that superclass constructor is finished.
-        ldd.DemodCache.__init__ = temp_init
-
-        self.demodcache = ldd.DemodCache(
-            self.rf,
-            self.infile,
-            self.freader,
-            self.rf_opts,
-            num_worker_threads=self.numthreads,
-        )
 
         self._db_writer = DBWriter(fname_out) if extra_options.get("write_db") else None
         self.dbconn = None
@@ -182,31 +135,15 @@ class VHSDecode(ldd.LDdecode):
             # Since typec usually lacks vsync set this to none to avoid dropping fields.
             self.field_order_action = "none"
         self.duplicate_prev_field = True
+        self._dropped = None
 
         # For tape, it is recommended to use `--ire0_adjust` to fix brightness variations between lines
         # This method usually gives false positives for noisy signals, so smooth the correction out by an entire field to avoid banding
         if self.wow_level_adjust_smoothing is None:
             self.wow_level_adjust_smoothing = self.rf.SysParams["frame_lines"] / 2
 
-    # Override to avoid NaN in JSON.
-    def calcsnr(self, f, snrslice, psnr=False):
-        # if dspicture isn't converted to float, this underflows at -40IRE
-        data = f.output_to_ire(f.dspicture[snrslice].astype(float))
-
-        signal = np.mean(data) if not psnr else 100
-        noise = np.std(data)
-        # Make sure signal is positive so we don't try to do log on a negative value.
-        if signal < 0.0:
-            ldd.logger.info(
-                "WARNING: Negative mean for SNR, changing to absolute value."
-            )
-            signal = abs(signal)
-        if noise == 0:
-            return 0
-        return 20 * np.log10(signal / noise)
-
     def buildmetadata(self, f, check_phase=False):
-        """returns field information JSON and whether to duplicate or drop the field"""
+        """returns field information JSON and whether to duplicate the previous field"""
         prevfi_1 = self.fieldinfo[-1] if len(self.fieldinfo) else None
         prevfi_2 = self.fieldinfo[-2] if len(self.fieldinfo) > 1 else None
 
@@ -238,8 +175,6 @@ class VHSDecode(ldd.LDdecode):
             }[(fi["isFirstField"], (fi["seqNo"] // 2) % 2)]
         else:
             fi["fieldPhaseID"] = f.fieldPhaseID
-
-        write_field = True
 
         if self.doDOD:
             dropout_lines, dropout_starts, dropout_ends = f.dropout_detect()
@@ -316,43 +251,25 @@ class VHSDecode(ldd.LDdecode):
                         "Possibly skipped field (Two fields with same isFirstField in a row), dropping the last field to compensate..."
                     )
                     decode_faults |= 4
-                    write_field = False
                     fi["syncConf"] = 0
+                    # readfield() stores and writes every field it gets metadata for, so
+                    # remember what to put back when writeout() skips this one.
+                    self._dropped = (fi, self.lastvalidfield[f.isFirstField])
 
             if decode_faults != 0:
                 # Only write this if it's anything else than 0, to save a little space in the json,
                 # since it's not used for anything atm anyhow.
                 fi["decodeFaults"] = decode_faults
 
-            return fi, fi["isDuplicateField"], write_field
+            return fi, fi["isDuplicateField"]
 
-        self.frameNumber = None
         if f.isFirstField:
             self.firstfield = f
-        else:
-            # use a stored first field, in case we start with a second field
-            if self.firstfield is not None:
-                # process VBI frame info data
-                self.frameNumber = None
+        elif self.firstfield is not None:
+            rawloc = int(np.floor((f.readloc / self.bytes_per_field) / 2))
+            self.logger.status(f"File Frame {rawloc}: {self.rf.options.tape_format} ")
 
-                rawloc = np.floor((f.readloc / self.bytes_per_field) / 2)
-
-                tape_format = (
-                    self.rf.options.tape_format
-                )  # "CLV" if self.isCLV else "CAV"
-
-                try:
-                    if self.est_frames is not None:
-                        outstr = f"Frame {(self.fields_written//2)+1}/{int(self.est_frames)}: File Frame {int(rawloc)}: {tape_format} "
-                    else:
-                        outstr = f"File Frame {int(rawloc)}: {tape_format} "
-
-                    self.logger.status(outstr)
-                except Exception:
-                    ldd.logger.warning("file frame %d : VBI decoding error", rawloc)
-                    traceback.print_exc()
-
-        return fi, fi["isDuplicateField"], write_field
+        return fi, fi["isDuplicateField"]
 
     # Again ignored for tapes
     def checkMTF(self, field, pfield=None):
@@ -360,6 +277,11 @@ class VHSDecode(ldd.LDdecode):
 
     def writeout(self, dataset):
         f, fi, (picturey, picturec), audio, efm = dataset
+
+        if self._dropped and fi is self._dropped[0]:
+            self.lastvalidfield[f.isFirstField] = self._dropped[1]
+            self._dropped = None
+            return
 
         # Remove fields that are currently not used to cut down on space usage.
         # the qt tools will load them as 0 with the current code
@@ -392,197 +314,22 @@ class VHSDecode(ldd.LDdecode):
             self._processing_thread_pool.shutdown(wait=True)
         super(VHSDecode, self).close()
 
-    def computeMetricsPAL(self, metrics, f, fp=None):
-        return None
-
-    def computeMetricsNTSC(self, metrics, f, fp=None):
-        return None
-
     def build_json(self):
-        try:
-            jout = super(VHSDecode, self).build_json()
-
-            black = jout["videoParameters"]["black16bIre"]
-            white = jout["videoParameters"]["white16bIre"]
-
-            if self.rf.color_system == "PAL_M" or self.rf.color_system == "NLINHA":
-                jout["videoParameters"]["system"] = "PAL-M"
-
-            jout["videoParameters"]["black16bIre"] = black * (1 - self.level_adjust)
-            jout["videoParameters"]["white16bIre"] = white * (1 + self.level_adjust)
-
-            jout["videoParameters"]["tapeFormat"] = self.rf.options.tape_format
-            return jout
-        except TypeError as e:
-            if self.rf.debug:
-                traceback.print_exc()
-                ldd.logger.error("Error! Cannot build json: %s" % e)
-            ldd.logger.error(
-                "Error! Something went wrong when decoding or building json!"
-            )
+        jout = super(VHSDecode, self).build_json()
+        if jout is None:
             return None
 
-    def readfield(self, initphase=False):
-        done = False
-        adjusted = False
-        redo = None
-        df_args = None
-        f = None
-        offset = 0
+        black = jout["videoParameters"]["black16bIre"]
+        white = jout["videoParameters"]["white16bIre"]
 
-        if len(self.fieldstack) >= 2:
-            self.fieldstack.pop(-1)
+        if self.rf.color_system == "PAL_M" or self.rf.color_system == "NLINHA":
+            jout["videoParameters"]["system"] = "PAL-M"
 
-        while done is False:
-            if self.second_decode is None and self.fields_written:
-                self.second_decode = time.time()
+        jout["videoParameters"]["black16bIre"] = black * (1 - self.level_adjust)
+        jout["videoParameters"]["white16bIre"] = white * (1 + self.level_adjust)
 
-            if redo:
-                # Drop existing thread
-                self.decodethread = None
-
-                f, offset = self.decodefield(
-                    redo, self.mtf_level, self.fieldstack[0], initphase, redo
-                )
-                # Only allow one redo, no matter what
-                done = True
-                redo = None
-
-            else:
-                if self.decodethread and self.decodethread.ident:
-                    self.decodethread.join()
-                    self.decodethread = None
-
-                # In non-threaded mode self.threadreturn was filled earlier...
-                # ... but if the first call, this is empty
-                if len(self.threadreturn) > 0:
-                    f, offset = self.threadreturn["field"], self.threadreturn["offset"]
-
-            # Start new thread
-            self.threadreturn = {}
-            if f and f.valid:
-                prevfield = f
-                toffset = self.fdoffset + offset
-            else:
-                prevfield = None
-                toffset = self.fdoffset
-
-                if offset:
-                    toffset += offset
-
-            df_args = (
-                toffset,
-                self.mtf_level,
-                prevfield,
-                initphase,
-                False,
-                self.threadreturn,
-            )
-
-            # decode the next field in a thread so the result is ready for the next iteration
-            if self.numthreads != 0:
-                self.decodethread = threading.Thread(
-                    target=self.decodefield, args=df_args
-                )
-                self.decodethread.start()
-            else:
-                self.decodefield(*df_args)
-
-            # process previous run
-            if f:
-                self.fdoffset += offset
-            elif offset is None:
-                # Probable end, so push an empty field
-                self.fieldstack.insert(0, None)
-
-            if f and f.valid:
-                picture, audio, efm = f.downscale(
-                    linesout=self.output_lines,
-                    final=True,
-                    audio=self.analog_audio,
-                    lastfieldwritten=self.lastFieldWritten,
-                )
-
-                _ = self.computeMetrics(f, None, verbose=True)
-
-                redo = f.needrerun
-                if redo:
-                    redo = self.fdoffset - offset
-
-                # Perform AGC changes on first fields only to prevent luma mismatch intra-field
-                if self.useAGC and f.isFirstField and f.sync_confidence > 80:
-                    # TODO: actuall test this after changes
-                    sync_hz, ire0_hz, ire100_hz = self.detectLevels(f)
-
-                    actualwhiteIRE = f.rf.hztoire(ire100_hz)
-
-                    sync_ire_diff = lddu.nb_abs(
-                        self.rf.hztoire(sync_hz) - self.rf.DecoderParams["vsync_ire"]
-                    )
-                    whitediff = lddu.nb_abs(self.rf.hztoire(ire100_hz) - actualwhiteIRE)
-                    ire0_diff = lddu.nb_abs(self.rf.hztoire(ire0_hz))
-
-                    acceptable_diff = 2 if self.fields_written else 0.5
-
-                    if max((whitediff, ire0_diff, sync_ire_diff)) > acceptable_diff:
-                        hz_ire = (ire100_hz - ire0_hz) / 100
-                        vsync_ire = (sync_hz - ire0_hz) / hz_ire
-
-                        if vsync_ire > -20:
-                            ldd.logger.warning(
-                                "At field #{0}, Auto-level detection malfunction (vsync IRE computed at {1}, nominal ~= -40), possible disk skipping".format(
-                                    len(self.fieldinfo), np.round(vsync_ire, 2)
-                                )
-                            )
-                        else:
-                            redo = self.fdoffset - offset
-
-                            self.rf.DecoderParams["ire0"] = ire0_hz
-                            # Note that vsync_ire is a negative number, so (sync_hz - ire0_hz) is correct
-                            self.rf.DecoderParams["hz_ire"] = hz_ire
-                            self.rf.DecoderParams["vsync_ire"] = vsync_ire
-
-                if adjusted is False and redo:
-                    self.demodcache.flush_demod()
-                    adjusted = True
-                    self.fdoffset = redo
-                else:
-                    done = True
-                    self.fieldstack.insert(0, f)
-
-            if f is None and offset is None:
-                # EOF, probably
-                return None
-
-            if self.decodethread and not self.decodethread.ident and not redo:
-                self.decodethread.start()
-
-        if f is None or f.valid is False:
-            return None
-
-        if f is not None and self.fname_out is not None:
-            # Only write a FirstField first
-            if len(self.fieldinfo) == 0 and not f.isFirstField:
-                return f
-
-            fi, duplicateField, writeField = self.buildmetadata(f)
-
-            if writeField:
-                self.lastvalidfield[f.isFirstField] = (f, fi, picture, audio, efm)
-
-            if duplicateField:
-                if self.lastvalidfield[not f.isFirstField] is not None:
-                    self.writeout(self.lastvalidfield[not f.isFirstField])
-                    self.writeout(self.lastvalidfield[f.isFirstField])
-
-                # If this is the first field to be written, don't write anything
-                return f
-
-            if writeField:
-                self.lastFieldWritten = (self.fields_written, f.readloc)
-                self.writeout(self.lastvalidfield[f.isFirstField])
-
-        return f
+        jout["videoParameters"]["tapeFormat"] = self.rf.options.tape_format
+        return jout
 
 
 class VHSRFDecode(ldd.RFDecode):
@@ -671,6 +418,9 @@ class VHSRFDecode(ldd.RFDecode):
             vhs_formats.parse_tape_speed(rf_options.get("tape_speed", "sp")),
             ldd.logger,
         )
+        # The superclass computed these from the parent system, which is wrong for 405/819-line.
+        self.linelen = int(np.round(self.freq_hz / (1000000.0 / self.SysParams["line_period"])))
+        self.samplesperline = self.freq / self.linelen
 
         params_file = extra_options.get("params_file", None)
         if params_file:
@@ -989,12 +739,6 @@ class VHSRFDecode(ldd.RFDecode):
     @compute_linelocs_issues.setter
     def compute_linelocs_issues(self, value):
         self._compute_linelocs_issues = value
-
-    def computefilters(self):
-        # Override the stuff used in lddecode to skip generating filters we don't use.
-        self.setupcount += 1
-        self.computevideofilters()
-        self.computedelays()
 
     def computevideofilters(self):
         self.Filters = {}
