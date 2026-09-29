@@ -1,14 +1,7 @@
 import math
 import numpy as np
 import scipy.signal as sps
-import sys
 from collections import namedtuple
-
-if sys.version_info[1] < 10:
-    from importlib_resources import files
-else:
-    # Need Python 3.10 for using namespace in files
-    from importlib.resources import files
 
 from vhsdecode.utils import filtfft
 from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_shelf
@@ -60,22 +53,30 @@ def gen_video_main_deemp_fft(gain, mid, Q, freq_hz, block_len):
     return filter_deemp
 
 
+def gen_analog_filter(zeros_tau, poles_tau, freq_hz, block_len):
+    """Generate real-value fft filter from an analog transfer function built from
+    first-order real zeros and poles given as time constants in seconds:
+        H(s) = prod(1 + s * tz) / prod(1 + s * tp)
+    """
+    # Evaluated on the analog frequency axis rather than through a bilinear transform,
+    # so there is no warping near nyquist and the response is the same at any sample rate.
+    s = 2j * np.pi * np.linspace(0, freq_hz / 2.0, block_len // 2 + 1)
+    ret = np.ones(len(s), dtype=np.complex128)
+    for tau in zeros_tau:
+        ret *= 1 + s * tau
+    for tau in poles_tau:
+        ret /= 1 + s * tau
+    return ret
+
+
 def gen_custom_video_filters(filter_list, freq_hz, block_len):
     ret = 1
     for f in filter_list:
         match f["type"]:
-            case "file":
-                try:
-                    file_path = files("vhsdecode.format_defs").joinpath(
-                        f["filename"] + "-" + str(int(freq_hz)) + ".txt"
-                    )
-                    # file_path = osp.join(osp.dirname(__file__), "format_defs", f["filename"]+"-"+str(int(freq_hz))+".txt")
-                    ret *= np.loadtxt(file_path, dtype=np.complex128)
-                except FileNotFoundError:
-                    print(
-                        f"Warning: Cannot load filter from file for samplerate of {freq_hz} Hz! Output will likely not look correct!",
-                        file=sys.stderr,
-                    )
+            case "analog":
+                ret *= gen_analog_filter(
+                    f["zeros_tau"], f["poles_tau"], freq_hz, block_len
+                )
             case "highshelf":
                 db, da = gen_shelf(
                     f["midfreq"], f["gain"], "high", freq_hz / 2.0, qfactor=f["q"]
