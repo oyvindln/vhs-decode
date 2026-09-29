@@ -1,3 +1,5 @@
+from collections import deque
+
 from vhsdecode import utils
 import numpy as np
 import scipy.signal as sps
@@ -80,9 +82,7 @@ class ChromaAFC:
 
         if do_cafc:
             self.narrowband = self._get_narrowband_bandpass()
-            self.meas_stack = utils.StackableMA(min_watermark=0, window_average=8192)
-            self.chroma_log_drift = utils.StackableMA(min_watermark=0, window_average=8192)
-            self.chroma_bias_drift = utils.StackableMA(min_watermark=0, window_average=6)
+            self.chroma_log_drift = deque(maxlen=8192)
 
             self.corrector = [1, 0]
             self.on_linearization = linearize
@@ -472,18 +472,17 @@ class ChromaAFC:
             )
 
         if adjustf:
-            self.meas_stack.push(freq_cc_x)
-            freq_cc = freq_cc_x  # if len(self.meas_stack) < 2 else self.meas_stack[-2:][0]
-            # print(self.meas_stack[-2:])
+            freq_cc = freq_cc_x
         else:
             freq_cc = self.cc_freq_mhz * 1e6
 
         self.setCC(freq_cc)
         # utils.dualplot_scope(chroma[1000:1128], self.cc_wave[1000:1128])
+        self.chroma_log_drift.append(freq_cc - self.color_under)
         return (
             self.color_under,
             freq_cc,
-            self.chroma_log_drift.work(freq_cc - self.color_under),
+            np.mean(self.chroma_log_drift),
             self.cc_phase,
         )
 
@@ -590,12 +589,15 @@ class ChromaAFC:
             max_f - 1
         ), self.color_under * self.transition_expand * (1 - min_f)
 
-        iir_narrow_lo = utils.firdes_highpass(
-            self.samp_rate, self.color_under, trans_lo, order_limit=200
+        iir_narrow_lo = sps.butter(
+            *sps.buttord(self.color_under, self.color_under + trans_lo, 3, 30, fs=self.samp_rate),
+            "highpass",
+            fs=self.samp_rate,
         )
-
-        iir_narrow_hi = utils.firdes_lowpass(
-            self.samp_rate, self.color_under, trans_hi, order_limit=200
+        iir_narrow_hi = sps.butter(
+            *sps.buttord(self.color_under, self.color_under + trans_hi, 3, 30, fs=self.samp_rate),
+            "lowpass",
+            fs=self.samp_rate,
         )
 
         return [

@@ -4,7 +4,7 @@ import numpy as np
 import traceback
 import scipy.signal as sps
 import threading
-from collections import namedtuple
+from collections import namedtuple, deque
 from concurrent.futures import ThreadPoolExecutor
 
 import lddecode.core as ldd
@@ -13,8 +13,6 @@ import lddecode.core as ldd
 import numpy.fft as npfft
 
 import lddecode.utils as lddu
-import vhsdecode.utils as utils
-from vhsdecode.utils import StackableMA
 from vhsdecode.chroma import chroma_color_under_filter
 
 import vhsdecode.formats as vhs_formats
@@ -27,7 +25,6 @@ from vhsdecode.demod import replace_spikes, unwrap_hilbert
 from vhsdecode.field import field_class_from_formats
 from vhsdecode.video_eq import VideoEQ
 from vhsdecode.doc import DodOptions
-from vhsdecode.field_averages import FieldAverage
 from vhsdecode.load_params_json import override_params
 from vhsdecode.nonlinear_filter import sub_deemphasis
 from vhsdecode.compute_video_filters import (
@@ -919,14 +916,14 @@ class VHSRFDecode(ldd.RFDecode):
 
         # Long-term average of the measured ME-SECAM rest carrier pair offset,
         # used to trim the chroma up-conversion LO.
-        self.secam_servo_avg = utils.StackableMA(min_watermark=2, window_average=60)
+        self.secam_servo_avg = deque(maxlen=60)
         lo_trim_seed = rf_options.get("secam_lo_trim", None)
         if lo_trim_seed is not None and system == "MESECAM":
             # Seed with a known trim (e.g. from a two-pass calibration decode)
             # so it applies from the first field. With the servo enabled it
             # keeps adapting from here; with it disabled this is a fixed trim.
             for _ in range(3):
-                self.secam_servo_avg.push(float(lo_trim_seed))
+                self.secam_servo_avg.append(float(lo_trim_seed))
 
         # Increase the cutoff at the end of blocks to avoid edge distortion from filters
         # making it through.
@@ -936,13 +933,6 @@ class VHSRFDecode(ldd.RFDecode):
             self.chromaTrap = ChromaSepClass(
                 self.freq_hz, self.SysParams["fsc_mhz"], ldd.logger
             )
-
-        if self.useAGC:
-            self.AGClevels = StackableMA(
-                window_average=self.SysParams["FPS"] / 2
-            ), StackableMA(window_average=self.SysParams["FPS"] / 2)
-
-        self._field_averages = FieldAverage()
 
         # TODO: This should be managed elsewhere.
         self._compute_linelocs_issues = False
@@ -978,10 +968,6 @@ class VHSRFDecode(ldd.RFDecode):
     @property
     def dod_options(self):
         return self._dod_options
-
-    @property
-    def field_averages(self):
-        return self._field_averages
 
     @property
     def compute_linelocs_issues(self):

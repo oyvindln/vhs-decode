@@ -1,5 +1,5 @@
 import numpy as np
-import vhsdecode.utils as utils
+import scipy.signal as sps
 from vhsdecode.linear_filter import FiltersClass
 
 
@@ -8,11 +8,10 @@ class VideoEQ:
 
     def __init__(self, decoder_params, sharpness_level, freq_hz):
         # sharpness filter / video EQ
-        iir_eq_loband = utils.firdes_highpass(
-            freq_hz,
-            decoder_params["video_eq"]["loband"]["corner"],
-            decoder_params["video_eq"]["loband"]["transition"],
-            decoder_params["video_eq"]["loband"]["order_limit"],
+        corner = decoder_params["video_eq"]["loband"]["corner"]
+        transition = decoder_params["video_eq"]["loband"]["transition"]
+        iir_eq_loband = sps.butter(
+            *sps.buttord(corner, corner + transition, 3, 30, fs=freq_hz), "highpass", fs=freq_hz
         )
 
         self._video_eq_filter = {

@@ -1,5 +1,4 @@
 from fractions import Fraction
-import vhsdecode.utils as utils
 import numpy as np
 from scipy import signal
 from soxr import resample
@@ -69,7 +68,12 @@ class ChromaSepClass:
             self.quality,
         )
 
-        result = utils.pad_or_truncate(result, luminance)
+        # Pad or truncate to the luminance length.
+        if len(luminance) > len(result):
+            err = len(luminance) - len(result)
+            result = np.append(result, luminance[len(result) - err : len(result)])
+        else:
+            result = result[len(result) - len(luminance) :]
         assert len(luminance) == len(result), (
             "Something wrong happened during the comb filtering stage. Expected samples %d, got %d"
             % (len(luminance), len(result))

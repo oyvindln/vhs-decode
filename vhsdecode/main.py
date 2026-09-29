@@ -719,7 +719,8 @@ def main(args=None, use_gui=False):
                     break
                 f.prevfield = None
 
-            lo_trim = calib.rf.secam_servo_avg.pull()
+            servo = calib.rf.secam_servo_avg
+            lo_trim = numpy.mean(servo) if servo else None
             calib.close()
 
             if lo_trim is not None:

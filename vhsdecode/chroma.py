@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import lddecode.utils as lddu
 import lddecode.core as ldd
 import scipy.signal as sps
 import scipy.fft as sps_fft
@@ -1621,7 +1620,7 @@ def _secam_method_diagnostic(field, chroma, linesout, outwidth):
             )
 
 
-def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
+def _process_chroma_secam_method1(field, chroma, linesout, outwidth):
     """SECAM method 1 chroma restoration: x4 phase multiplication instead of
     a heterodyne mix, plus BT.470 bell amplitude regeneration."""
     _secam_method_diagnostic(field, chroma, linesout, outwidth)
@@ -1707,19 +1706,8 @@ def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
     # No per-line chroma AGC here: the amplitude envelope was synthesised
     # from the BT.470 bell above, and normalizing every line to its porch
     # level would flatten the intended foR/foB rest amplitude difference.
-    # Just blank the vertical interval / colour-killed lines and log the
-    # porch level like acc() does for the other formats.
+    # Just blank the vertical interval / colour-killed lines.
     uphet[: first_line * outwidth] = 0
-
-    porch_rms_total = 0.0
-    for linenumber in range(STARTING_LINE, linesout):
-        linestart = linenumber * outwidth
-        porch_rms_total += lddu.rms(
-            uphet[linestart + burstarea[0] : linestart + burstarea[1]]
-        )
-    field.rf.field_averages.chroma_level.push(
-        porch_rms_total / (linesout - STARTING_LINE)
-    )
 
     return uphet
 
@@ -1877,7 +1865,7 @@ def process_chroma(
                 field.rf.DecoderParams["color_under_carrier"],
             )
             if carrier_offset is not None:
-                field.rf.secam_servo_avg.push(carrier_offset)
+                field.rf.secam_servo_avg.append(carrier_offset)
                 ldd.logger.debug(
                     "SECAM carrier servo: measured offset %.02f Hz" % carrier_offset
                 )
@@ -1893,9 +1881,7 @@ def process_chroma(
         # Method 1 restores the chroma block by phase multiplication rather
         # than by mixing against a heterodyne, so it skips the shared
         # up-conversion path below entirely.
-        return _process_chroma_secam_method1(
-            field, chroma, linesout, outwidth, burstarea
-        )
+        return _process_chroma_secam_method1(field, chroma, linesout, outwidth)
 
     # For NTSC, the color burst amplitude is doubled when recording, so we have to undo that.
     if field.rf.color_system == "NTSC":
@@ -1940,10 +1926,10 @@ def process_chroma(
             lo_trim = 0.0
             # Holds either live servo measurements or a seeded/fixed trim
             # (secam_lo_trim); with the servo disabled and no seed it's empty.
-            if field.rf.secam_servo_avg.has_values():
+            if len(field.rf.secam_servo_avg) > 2:
                 # Quantize so measurement noise doesn't dither the LO.
                 lo_trim = np.clip(
-                    round(field.rf.secam_servo_avg.pull() / 10.0) * 10.0,
+                    round(np.mean(field.rf.secam_servo_avg) / 10.0) * 10.0,
                     -10e3,
                     10e3,
                 )
@@ -2007,8 +1993,6 @@ def process_chroma(
         field.burst_detected_line,
         math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"]))
     )
-
-    field.rf.field_averages.chroma_level.push(mean_rms)
 
     if field.rf.options.cti_mix != 0:
         chroma_transient_improvement(

@@ -37,7 +37,6 @@ from soxr import ResampleStream, resample
 from noisereduce.spectralgate.nonstationary import SpectralGateNonStationary
 
 from vhsdecode.addons.gnuradioZMQ import ZMQSend, ZMQ_AVAILABLE
-from vhsdecode.utils import firdes_lowpass, firdes_highpass, StackableMA
 
 from vhsdecode.hifi.TimeProgressBar import TimeProgressBar
 from vhsdecode.hifi.utils import DecoderSharedMemory, NumbaAudioArray
@@ -1435,9 +1434,7 @@ class HiFiDecode:
         )
 
     def guessBiases(self, blocks: list[np.array]) -> Tuple[float, float]:
-        meanL, meanR = StackableMA(window_average=len(blocks)), StackableMA(
-            window_average=len(blocks)
-        )
+        sumL = sumR = 0.0
 
         (
             ifresample_numerator,
@@ -1481,11 +1478,11 @@ class HiFiDecode:
             preL = preL[self.pre_trim : -self.pre_trim]
             preR = preR[self.pre_trim : -self.pre_trim]
 
-            meanL.push(np.mean(preL))
-            meanR.push(np.mean(preR))
+            sumL += float(np.mean(preL))
+            sumR += float(np.mean(preR))
 
-            meanLResult = meanL.pull() * self.standard.LCarrierDeviation + self.standard.LCarrierRef + 1e6
-            meanRResult = meanR.pull() * self.standard.RCarrierDeviation + self.standard.RCarrierRef + 1e6
+            meanLResult = sumL / (i + 1) * self.standard.LCarrierDeviation + self.standard.LCarrierRef + 1e6
+            meanRResult = sumR / (i + 1) * self.standard.RCarrierDeviation + self.standard.RCarrierRef + 1e6
 
             progressB.label = "Carrier L %.06f MHz, R %.06f MHz" % (
                 meanLResult / 10e5,
