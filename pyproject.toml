@@ -58,9 +58,7 @@ test = [ "pytest>=7.0" ]
 
 [project.scripts]
 ld-decode = "lddecode.main:main"
-ld-ldf-reader = "lddecode.ldf_reader:main"
 ld-ldf-reader-py = "lddecode.ldf_reader:main"
-ld-lds-reader = "lddecode.lds_reader:main"
 vhs-decode = "vhsdecode.main:main"
 cvbs-decode = "cvbsdecode.main:main"
 hifi-decode = "vhsdecode.hifi.main:main"

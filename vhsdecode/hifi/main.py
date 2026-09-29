@@ -28,6 +28,7 @@ from contextlib import nullcontext
 import numpy as np
 import soundfile as sf
 
+from lddecode import lds
 from lddecode.utils import parse_frequency
 from vhsdecode.hifi.utils import (
     NUMA,
@@ -636,13 +637,9 @@ class BufferedInputStream(io.RawIOBase):
 
 
 class LDToolFileReader(BufferedInputStream):
-    def __init__(self, ld_tool, file_path, input_argument=""):
-        shell_command = [ld_tool]
-        if input_argument:
-            shell_command.append(input_argument)
-        shell_command.append(file_path)
+    def __init__(self, ld_tool, file_path):
         p = subprocess.Popen(
-            shell_command,
+            [ld_tool, file_path],
             shell=False,
             stdout=subprocess.PIPE,
             universal_newlines=False,
@@ -895,7 +892,7 @@ def as_soundfile(pathR, input_format_override: np.dtype = None):
                 )
     elif "ldf" == extension:
         try:
-            for ldf_reader_tool in ("ld-ldf-reader", "ld-ldf-reader-py"):
+            for ldf_reader_tool in ("ld-ldf-reader-py", "ld-ldf-reader"):
                 if test_ld_tools(ldf_reader_tool):
                     return AsyncReader(
                         LDToolFileReader(ldf_reader_tool, pathR),
@@ -928,23 +925,15 @@ def as_soundfile(pathR, input_format_override: np.dtype = None):
             input_format
         )
     elif "lds" == extension:
-        try:
-            for lds_reader_tool, input_arg in (
-                ("ld-lds-reader", ""),
-                ("ld-lds-converter", "-i"),
-            ):
-                if test_ld_tools(lds_reader_tool):
-                    return AsyncReader(
-                        LDToolFileReader(lds_reader_tool, pathR, input_arg),
-                        input_format
-                    )
-            print(
-                "ERROR: Unable to decode LDS without ld-lds-reader or ld-lds-converter. Please install one of them and try again."
-            )
-        except Exception as e:
-            print(
-                "ERROR: Unexpected error opening LDS reader tool", e
-            )
+        # Unpack the 10-bit samples in a thread and stream them through a pipe.
+        read_fd, write_fd = os.pipe()
+
+        def unpack():
+            with open(pathR, "rb") as infile, os.fdopen(write_fd, "wb") as outfile:
+                lds.unpack_stream(infile, outfile)
+
+        threading.Thread(target=unpack, daemon=True).start()
+        return AsyncReader(os.fdopen(read_fd, "rb"), input_format)
     else:
         print("WARN: Unknown file format.")
         print("WARN: Attempting to decode with ffmpeg")
