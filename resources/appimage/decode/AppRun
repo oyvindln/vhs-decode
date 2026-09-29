@@ -11,11 +11,17 @@
 self="$(readlink -f -- "$0")"
 export APPDIR="${self%/*}"
 
+# X11 window instance name; the class comes from qt_identity.apply_app_identity.
+# Both end up as "vhs-decode" so the window matches vhs-decode.desktop.
+export RESOURCE_NAME="vhs-decode"
+
 # Desktop integration — runs once per AppImage path.
 # Use APPIMAGE (the file path) for the marker and .desktop Exec= so
 # the taskbar launches the AppImage file, not the mount point.
 APPIMAGE_REF="${APPIMAGE:-${APPDIR}}"
-MARKER="${HOME}/.local/share/applications/.vhs-decode-$(echo "${APPIMAGE_REF}" | md5sum | cut -c1-8)"
+# Integration version: bump to force regenerating the .desktop file.
+INTEGRATION_VERSION="v2-wmclass"
+MARKER="${HOME}/.local/share/applications/.vhs-decode-$(echo "${APPIMAGE_REF}|${INTEGRATION_VERSION}" | md5sum | cut -c1-8)"
 if [ ! -f "${MARKER}" ]; then
     APPS_DIR="${HOME}/.local/share/applications"
     ICONS_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
@@ -34,6 +40,7 @@ Type=Application
 Categories=AudioVideo;Video;AudioVideoEditing;
 Keywords=vhs;laserdisc;ld;cvbs;rf;decode;video;tape;
 TryExec=${APPIMAGE_REF}
+StartupWMClass=vhs-decode
 EOF
     update-desktop-database "${APPS_DIR}" 2>/dev/null || true
     gtk-update-icon-cache -f -t "${HOME}/.local/share/icons/hicolor" 2>/dev/null || true

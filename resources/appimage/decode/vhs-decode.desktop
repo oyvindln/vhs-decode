@@ -8,3 +8,4 @@ Type=Application
 Categories=AudioVideo;Video;AudioVideoEditing;
 Keywords=vhs;laserdisc;ld;cvbs;rf;decode;video;tape;
 TryExec=AppRun
+StartupWMClass=vhs-decode

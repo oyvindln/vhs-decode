@@ -1404,6 +1404,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.parse_args(argv)
 
     app = QApplication(sys.argv)
+    try:
+        from vhsdecode.qt_identity import apply_app_identity
+
+        apply_app_identity(app)
+    except Exception:
+        pass
     icon = _load_app_icon()
     if icon is not None and not icon.isNull():
         app.setWindowIcon(icon)

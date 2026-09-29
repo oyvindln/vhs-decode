@@ -1208,6 +1208,12 @@ class AppWindow:
         app = app if app is not None else QApplication.instance()
         if app is None:
             app = QApplication(argv)
+            try:
+                from vhsdecode.qt_identity import apply_app_identity
+
+                apply_app_identity(app)
+            except Exception:
+                pass
         print("Opening hifi-ui...")
         if decode_options["input_file"] == "-":
             window = FileOutputDialogUI(decode_options_to_ui_parameters(decode_options))
@@ -2339,6 +2345,12 @@ def launch_hosted_ui(argv=None, app=None):
     qt_app = app if app is not None else QApplication.instance()
     if qt_app is None:
         qt_app = QApplication([sys.argv[0]] + launch_args)
+        try:
+            from vhsdecode.qt_identity import apply_app_identity
+
+            apply_app_identity(qt_app)
+        except Exception:
+            pass
     return HostedHifiController(
         [sys.argv[0]] + launch_args, args, decode_options, qt_app
     )
