@@ -2,7 +2,6 @@ import numpy.fft as npfft
 
 import scipy.signal as sps
 import numpy as np
-import math
 from vhsdecode.rust_utils import sosfiltfilt_rust
 
 
@@ -138,26 +137,6 @@ def sub_deemphasis(
     return ret
 
 
-def _gen_low_shelf_2(w0, gain, fs, is_db=False):
-    import scipy.signal as sps
-
-    b0 = 10 ** (gain / 20) if is_db else gain
-    w0 = w0 * math.tau
-    filts = sps.lti([1, (w0 * (b0 + 1))], [1, b0])
-    filtz = sps.lti(*sps.bilinear(filts.num, filts.den, fs))
-    return filtz.num, filtz.den
-
-
-def _gen_high_shelf_2(w0, gain, fs, is_db=False):
-    import scipy.signal as sps
-
-    b0 = 10 ** (gain / 20) if is_db else gain
-    w0 = w0 * math.tau
-    filts = sps.lti([1, (w0 * (b0 + 1))], [1, b0])
-    filtz = sps.lti(*sps.bilinear(filts.num, filts.den, fs))
-    return filtz.num, filtz.den
-
-
 class NLFilter:
     def __init__(
         self,
@@ -181,10 +160,6 @@ def to_db(input):
     # Ignore divide by zero errors since filters may have zeroes.
     with np.errstate(divide='ignore'):
         return 20 * np.log10(np.abs(input))
-
-
-def from_db(input):
-    return pow(10, (input / 20))
 
 
 def limiter_filter(

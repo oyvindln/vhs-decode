@@ -322,13 +322,13 @@ def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):
     import matplotlib.pyplot as plt
     import numpy as np
     import scipy.signal as sps
-    from vhsdecode.addons.FMdeemph import FMDeEmphasisB
+    from vhsdecode.addons.FMdeemph import gen_shelf
 
     corner_freq = 1 / (math.pi * 2 * decoder_params["deemph_tau"])
 
-    db, da = FMDeEmphasisB(
-        rf.freq_hz, decoder_params["deemph_gain"], decoder_params["deemph_mid"]
-    ).get()
+    da, db = gen_shelf(
+        decoder_params["deemph_mid"], decoder_params["deemph_gain"], "high", rf.freq_hz, 1 / 2
+    )
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 

@@ -2,7 +2,8 @@ import numpy as np
 import numpy.fft as npfft
 import scipy.signal as sps
 
-from vhsdecode.nonlinear_filter import from_db, to_db, _sub_deemphasis_debug
+from lddecode.utils import db_to_lev
+from vhsdecode.nonlinear_filter import to_db, _sub_deemphasis_debug
 
 
 def _uk(filters, index, use_value_key):
@@ -93,7 +94,7 @@ class SubEmphPlotter:
             self.chirp_fft * self._signal_filter,
             self._filters,
             self.deviation,
-            from_db(amplitude_db),
+            db_to_lev(amplitude_db),
             sub_emphasis_params,
         )
         ax.plot(self.freqs, to_db(npfft.rfft(filtered) / self.chirp_fft), label=f'{amplitude_db} dB', **kwargs)

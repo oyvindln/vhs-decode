@@ -28,6 +28,7 @@ from contextlib import nullcontext
 import numpy as np
 import soundfile as sf
 
+from lddecode.utils import parse_frequency
 from vhsdecode.hifi.utils import (
     NUMA,
     DecoderSharedMemory,
@@ -128,25 +129,6 @@ def _sounddevice_available():
 
     return SOUNDDEVICE_AVAILABLE
 
-
-frequency_suffixes = [
-    ("ghz", 1.0e9),
-    ("mhz", 1.0e6),
-    ("khz", 1.0e3),
-    ("hz", 1.0),
-    ("fsc", 315.0e6 / 88.0),
-    ("fscpal", (283.75 * 15625) + 25),
-]
-
-
-def parse_frequency(string):
-    multiplier = 1.0e6
-    for suffix, mult in frequency_suffixes:
-        if string.lower().endswith(suffix):
-            multiplier = mult
-            string = string[: -len(suffix)]
-            break
-    return (multiplier * float(string)) / 1.0e6
 
 try:
     try:

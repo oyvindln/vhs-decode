@@ -14,7 +14,7 @@ import numpy.fft as npfft
 
 import lddecode.utils as lddu
 import vhsdecode.utils as utils
-from vhsdecode.utils import StackableMA, filtfft
+from vhsdecode.utils import StackableMA
 from vhsdecode.chroma import chroma_color_under_filter
 
 import vhsdecode.formats as vhs_formats
@@ -38,7 +38,6 @@ from vhsdecode.compute_video_filters import (
     gen_custom_video_filters,
     create_sub_emphasis_params,
     gen_video_lpf_supergauss_params,
-    gen_bpf_supergauss,
     gen_fm_audio_notch_params,
     NONLINEAR_AMP_LPF_FREQ_DEFAULT,
     CHROMA_AUDIO_NOTCH_Q,
@@ -877,7 +876,7 @@ class VHSRFDecode(ldd.RFDecode):
 
             # Luma notch filter
             self.Filters["FVideoNotchF"] = abs(
-                utils.filtfft(video_notch_filter, self.blocklen)
+                lddu.filtfft(video_notch_filter, self.blocklen)
             )
         else:
             self.Filters["FVideoNotch"] = None, None
@@ -1011,22 +1010,18 @@ class VHSRFDecode(ldd.RFDecode):
         SF["hilbert"] = lddu.build_hilbert(self.blocklen)
 
         if DP.get("video_bpf_supergauss", False):
-            self.Filters["RFVideo"] = gen_bpf_supergauss(
+            self.Filters["RFVideo"] = lddu.gen_bpf_supergauss(
                 DP["video_bpf_low"],
                 DP["video_bpf_high"],
                 DP["video_bpf_order"],
                 self.freq_hz_half,
                 self.blocklen,
-            )[:-1]
-            # Mirror to negative frequencies
-            self.Filters["RFVideo"] = np.concatenate(
-                (self.Filters["RFVideo"], np.flip(self.Filters["RFVideo"]))
             )
         else:
             # Filter for rf before demodulating.
             # Only use bpf if order defined - otherwise skip
             if DP.get("video_bpf_order", None):
-                y_fm = utils.filtfft(
+                y_fm = lddu.filtfft(
                     sps.butter(
                         DP["video_bpf_order"],
                         [
@@ -1075,7 +1070,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         if DP.get("video_rf_peak_freq", False):
             # Add optional rf peaking filter
-            peaking_filter = utils.filtfft(
+            peaking_filter = lddu.filtfft(
                 cvf.gen_peaking_constq(
                     DP["video_rf_peak_freq"] / self.freq_hz_half,
                     DP.get("video_rf_peak_gain", 3),
@@ -1151,7 +1146,7 @@ class VHSRFDecode(ldd.RFDecode):
         # additional filters:  0.5mhz, used for sync detection.
         # Using an FIR filter here to get a known delay
         F0_5 = sps.firwin(65, [0.5 / self.freq_half], pass_zero=True)
-        filter_05 = filtfft((F0_5, [1.0]), self.blocklen, False)
+        filter_05 = lddu.filtfft((F0_5, [1.0]), self.blocklen)[: self.blocklen // 2 + 1]
 
         # This filter is simple enough that we can get away with single precision
         # sections and thus do the filtering in sngle precision.
