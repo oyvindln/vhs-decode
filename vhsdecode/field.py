@@ -2,7 +2,6 @@ import numpy as np
 import numba as nb
 
 import lddecode.core as ldd
-import lddecode.utils as lddu
 from lddecode.utils import inrange
 from lddecode.utils import hz_to_output_array
 import matplotlib.pyplot as plt
@@ -38,164 +37,14 @@ def y_comb(data, line_len, limit):
 
 
 def field_class_from_formats(system: str, tape_format: str) -> ldd.Field:
-    field_class = None
-    if system == "PAL":
-        if tape_format in ["UMATIC", "UMATIC_HI", "UMATIC_SP", "EIAJ", "VCR", "VCR_LP"]:
-            # These use simple chroma downconversion and filters.
-            field_class = FieldPALUMatic
-        elif tape_format == "TYPEC" or tape_format == "TYPEB" or tape_format == "QUADRUPLEX":
-            field_class = FieldPALTypeC
-        elif tape_format == "SVHS" or tape_format == "SVHS_ET":
-            field_class = FieldPALSVHS
-        elif tape_format == "BETAMAX":
-            field_class = FieldPALBetamax
-        elif tape_format == "VIDEO8" or tape_format == "HI8":
-            field_class = FieldPALVideo8
-        else:
-            if tape_format != "VHS" and tape_format != "VHSHQ" and tape_format != "VIDEO2000":
-                ldd.logger.info("Tape format unimplemented for PAL, using VHS field class.")
-            field_class = FieldPALVHS
-    elif system == "NTSC":
-        if tape_format in ["UMATIC", "UMATIC_HI", "UMATIC_SP", "EIAJ"]:
-            field_class = FieldNTSCUMatic
-        elif tape_format == "TYPEC" or tape_format == "TYPEB" or tape_format == "VHD":
-            field_class = FieldNTSCTypeC
-        elif tape_format == "SVHS" or tape_format == "SVHS_ET":
-            field_class = FieldNTSCSVHS
-        elif (
-            tape_format == "BETAMAX" or tape_format == "BETAMAX_HIFI" or tape_format == "SUPERBETA"
-        ):
-            field_class = FieldNTSCBetamax
-        elif tape_format == "VIDEO8" or tape_format == "HI8":
-            field_class = FieldNTSCVideo8
-        else:
-            if tape_format != "VHS" and tape_format != "VHSHQ":
-                ldd.logger.info("Tape format unimplemented for NTSC, using VHS field class.")
-            field_class = FieldNTSCVHS
-    elif (system == "PAL_M" or system == "NLINHA") and tape_format == "VHS":
-        field_class = FieldPALMVHS
-    elif system == "MESECAM" and tape_format == "VHS":
-        field_class = FieldMESECAMVHS
-    elif system == "SECAM" and tape_format == "VHS":
-        field_class = FieldSECAMVHS
-    elif system == "405":
-        if tape_format == "BETAMAX":
-            field_class = FieldPALTypeC
-        else:
-            raise Exception("405 line not implemented for format!", format)
-    elif system == "819":
-        if tape_format == "QUADRUPLEX":
-            field_class = FieldPALTypeC
-        else:
-            raise Exception("819 line not implemented for format!", format)
-
-    if not field_class:
+    if (
+        (system in ("PAL_M", "NLINHA", "MESECAM", "SECAM") and tape_format != "VHS")
+        or (system == "405" and tape_format != "BETAMAX")
+        or (system == "819" and tape_format != "QUADRUPLEX")
+    ):
         raise Exception("Unknown video system and/or tape format combination!", system)
 
-    return field_class
-
-
-P_HSYNC, P_EQPL1, P_VSYNC, P_EQPL2, P_EQPL, P_OTHER_S, P_OTHER_L = range(7)
-P_NAME = ["HSYNC", "EQPL1", "VSYNC", "EQPL2", "EQPL", "OTHER_S", "OTHER_L"]
-
-
-def print_output_order(n, done, pulses):
-    nums = map(lambda p: P_NAME[p[0]], pulses)
-    print("n:", n, " ", done, " ", list(nums))
-
-
-def print_output_types(pulses):
-    nums = map(lambda p: (P_NAME[p[0]], p[1]), pulses)
-    print(list(nums))
-
-
-def _len_to_type(pulse, lt_hsync, lt_eq, lt_vsync):
-    if inrange(pulse.len, *lt_hsync):
-        return P_HSYNC
-    elif inrange(pulse.len, *lt_eq):
-        return P_EQPL
-    elif inrange(pulse.len, *lt_vsync):
-        return P_VSYNC
-    elif pulse.len < lt_hsync[0]:
-        print("outside", pulse.len)
-        return P_OTHER_S
-    else:
-        return P_OTHER_L
-
-
-def _to_type_list(raw_pulses, lt_hsync, lt_eq, lt_vsync):
-    return list(map(lambda p: _len_to_type(p, lt_hsync, lt_eq, lt_vsync), raw_pulses))
-
-
-def _add_type_to_pulses(raw_pulses, lt_hsync, lt_eq, lt_vsync):
-    return list(map(lambda p: (_len_to_type(p, lt_hsync, lt_eq, lt_vsync), p), raw_pulses))
-
-
-def _to_seq(type_list, num_pulses, skip_bad=True):
-    cur_type = None
-    output = list()
-    for pulse_type in type_list:
-        if not skip_bad or pulse_type <= P_EQPL:
-            if pulse_type == cur_type:
-                cur = output[-1]
-                output[-1] = (cur[0], cur[1] + 1)
-            else:
-                output.append((pulse_type, 1))
-                cur_type = pulse_type
-
-    return output
-
-
-def _is_valid_seq(type_list, num_pulses):
-    return len(type_list) >= 4 and type_list[1:3] == [
-        (P_EQPL, num_pulses),
-        (P_VSYNC, num_pulses),
-        (P_EQPL, num_pulses),
-    ]
-
-
-def debug_plot_line0_fallback(
-    demod_05, long_pulses, valid_pulses, raw_pulses, line_0, last_lineloc
-):
-    if True:
-        # len(validpulses) > 300:
-        import matplotlib.pyplot as plt
-
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
-        ax1.plot(demod_05)
-
-        for raw_pulse in long_pulses:
-            ax2.axvline(raw_pulse.start, color="#910000")
-            ax2.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
-
-        if line_0 is not None:
-            ax2.axvline(line_0, color="#00ff00")
-
-        if last_lineloc is not None:
-            ax2.axvline(last_lineloc, color="#0000ff")
-
-        for raw_pulse in raw_pulses:
-            ax3.axvline(raw_pulse.start, color="#910000")
-            ax3.axvline(raw_pulse.start + raw_pulse.len, color="#090909")
-
-        # print(valid_pulses)
-
-        for valid_pulse in valid_pulses:
-            ax3.axvline(valid_pulse.start, color="#ff0000")
-            ax3.axvline(valid_pulse.start + valid_pulse.len, color="#0000ff")
-
-        # for valid_pulse in long_pulses:
-        #     color = (
-        #         "#FF0000"
-        #         if valid_pulse[0] == 2
-        #         else "#00FF00"
-        #         if valid_pulse[0] == 1
-        #         else "#0F0F0F"
-        #     )
-        #     ax3.axvline(valid_pulse[1][0], color=color)
-        #     ax3.axvline(valid_pulse[1][0] + valid_pulse[1][1], color="#009900")
-
-        plt.show()
+    return FieldPALTape if formats.parent_system(system) == "PAL" else FieldNTSCTape
 
 
 def get_line0_fallback(
@@ -222,9 +71,6 @@ def get_line0_fallback(
      -Just look for the first "long" pulse that could be start of vsync pulses in
       e.g a 240p/280p signal (that is, a pulse that is at least vsync pulse length.)
     """
-    DEBUG_PLOT = False
-    DEBUG_PRINT = False
-
     PULSE_START = 0
     PULSE_LEN = 1
 
@@ -266,10 +112,6 @@ def get_line0_fallback(
     SHORT_PULSE_MAX = 0.2 * linelen
     LONG_PULSE_MIN = 0.35 * linelen
 
-    if DEBUG_PRINT:
-        print(
-            f"get_line0_fallback called. Raw pulses: {len(raw_pulses)}, Filtered: {len(filtered_pulses)} (filtering logic skipped for debug print)"
-        )
 
     # First try: Find end of long sync pulses
     i = 15
@@ -380,10 +222,6 @@ def get_line0_fallback(
             if line_offset is not None:
                 # in case we cannot find a matching pulse, we can still use this prediction
                 line_0_est = filtered_pulses[i - 2].start - line_offset * measured_linelen
-                if DEBUG_PRINT:
-                    print(
-                        f"1. End of long sync pulses, pred: {line_0_est}, First-Field: {first_field}, confidence: {first_field_confidence}"
-                    )
                 if line_0_backup is None:
                     line_0_backup = line_0_est
                     first_field_backup = first_field
@@ -457,10 +295,6 @@ def get_line0_fallback(
             if line_offset is not None:
                 # in case we cannot find a matching pulse, we can still use this prediction
                 line_0_est = filtered_pulses[i - 2].start - line_offset * measured_linelen
-                if DEBUG_PRINT:
-                    print(
-                        f"2. Begin of long sync pulses, pred: {line_0_est}, First-Field: {_first_field}, confidence: {_first_field_confidence}"
-                    )
                 if line_0_backup is None:
                     line_0_backup = line_0_est
                     first_field_backup = _first_field
@@ -489,13 +323,6 @@ def get_line0_fallback(
         disppSPp = (filtered_pulses[i + 1].start - filtered_pulses[i].start) / linelen
         disppsPP = (filtered_pulses[i + 2].start - filtered_pulses[i + 1].start) / linelen
 
-        if DEBUG_PRINT and i < 60:
-            print(
-                f"Try 3 scan i={i}: Pps={disPpspp:.3f} PPs={disPPspp:.3f} pSP={dispPSpp:.3f} ppS={disppSPp:.3f} pps={disppsPP:.3f}"
-            )
-            print(
-                f"  lens: {filtered_pulses[i - 2].len:.1f}, {filtered_pulses[i - 1].len:.1f}, {filtered_pulses[i].len:.1f}"
-            )
 
         # Relaxed check: ignore the first interval (disPpspp) to handle dropouts better
         check_strict = (
@@ -552,23 +379,13 @@ def get_line0_fallback(
             if line_offset is not None:
                 # in case we cannot find a matching pulse, we can still use this prediction
                 line_0_est = filtered_pulses[i - 2].start - line_offset * measured_linelen
-                if DEBUG_PRINT:
-                    print(
-                        f"3. End of blanking, pred: {line_0_est}, First-Field: {_first_field}, confidence: {_first_field_confidence}"
-                    )
                 if line_0_backup is None:
                     line_0_backup = line_0_est
                     first_field_backup = _first_field
                     first_field_confidence_backup = _first_field_confidence
                 # find pulse
-                if DEBUG_PRINT:
-                    print(f"Searching for pulse near {line_0_est} (range {max(0, i - 25)} to {i})")
                 for j in range(max(0, i - 25), i) if relaxed else range(max(0, i - 20), i - 4):
                     diff = abs(filtered_pulses[j].start - line_0_est) / linelen
-                    if DEBUG_PRINT:
-                        print(
-                            f"    Checking pulse {j}: start={filtered_pulses[j].start}, est={line_0_est}, diff_lines={diff:.4f}"
-                        )
 
                     if diff < 0.08:
                         if (
@@ -648,10 +465,6 @@ def get_line0_fallback(
                         else:
                             first_field = 1
                     line_0 = filtered_pulses[i].start
-                if DEBUG_PRINT:
-                    print(
-                        f"4. Start of blanking (pulses): {line_0}, First-Field: {first_field}, confidence: {_first_field_confidence}"
-                    )
 
             # the pulse duration was not clear, we need to check contents
             # the interval between the first pulses half a line apart is either active or not
@@ -729,10 +542,6 @@ def get_line0_fallback(
                             first_field = 1
                         first_field_confidence = 20
                     line_0 = filtered_pulses[i].start
-                if DEBUG_PRINT:
-                    print(
-                        f"4. Start of blanking (content): {line_0}, First-Field: {first_field}, confidence: {first_field_confidence}"
-                    )
         i += 1
 
     if (
@@ -777,8 +586,6 @@ def get_line0_fallback(
     ) and expected_line0 is not None:
         limit = linelen * (frame_lines - 1) / 2
         if expected_line0 < limit and expected_line0 > -5 * linelen:
-            if DEBUG_PRINT:
-                print(f"Attempting to use predicted line0 from previous field: {expected_line0}")
             best_p = None
             min_diff = 1000000
             # Search range: Only snap to a pulse if it is very close to the prediction (0.7 lines).
@@ -793,44 +600,22 @@ def get_line0_fallback(
                         min_diff = diff
                         best_p = p
             if best_p:
-                if DEBUG_PRINT:
-                    print(
-                        f"Found pulse near prediction: {best_p.start} (diff {min_diff/linelen:.2f} lines)"
-                    )
                 line_0 = best_p.start
                 if expected_first_field is not None:
                     first_field = expected_first_field
                     first_field_confidence = 50
             elif relaxed and expected_line0 > 0:
-                if DEBUG_PRINT:
-                    print(
-                        f"No pulse found near prediction, forcing expected location: {expected_line0}"
-                    )
                 line_0 = expected_line0
                 if expected_first_field is not None:
                     first_field = expected_first_field
                     first_field_confidence = 40
             else:
-                if DEBUG_PRINT:
-                    print(
-                        "Prediction available but no matching pulse found and relaxed mode disabled."
-                    )
                 if line_0 is not None and line_0 > (linelen * (frame_lines - 1) / 2):
                     ldd.logger.info(
                         "WARNING, line0 hsync not found for current field, probably skipping one field."
                     )
 
     if line_0 is not None:
-        if DEBUG_PLOT:
-            long_pulses = list(
-                filter(
-                    lambda p: inrange(p[PULSE_LEN], lt_vsync[0], lt_vsync[1] * 10),
-                    raw_pulses,
-                )
-            )
-            debug_plot_line0_fallback(
-                demod_05, long_pulses, filtered_pulses, raw_pulses, line_0, None
-            )
         return line_0, None, True, first_field, first_field_confidence
 
     # 5th try: just find the last hsync in front of a long block
@@ -855,7 +640,7 @@ def get_line0_fallback(
         for p in valid_pulses:
             if p[1][PULSE_START] > first_long_pulse_pos:
                 break
-            if p[0] == P_HSYNC:
+            if p[0] == ldd.HSYNC:
                 line_0 = p[1][PULSE_START]
 
         if line_0 is None:
@@ -876,119 +661,69 @@ def get_line0_fallback(
             and long_pulses[3][PULSE_START] - long_pulses[2][PULSE_START] > (lt_vsync[1] * 10)
             else None
         )
-        if DEBUG_PLOT:
-            debug_plot_line0_fallback(
-                demod_05, long_pulses, filtered_pulses, raw_pulses, line_0, last_lineloc
-            )
         return line_0, last_lineloc, True, -1, -1
     else:
-        if DEBUG_PLOT:
-            debug_plot_line0_fallback(
-                demod_05, long_pulses, filtered_pulses, raw_pulses, None, None
-            )
         return None, None, None, None, None
 
 
-def _run_vblank_state_machine(raw_pulses, line_timings, num_pulses, in_line_len):
-    """Look though raw_pulses for a set valid vertical sync pulse series.
-    num_pulses_half: number of equalization pulses per section / 2
-    """
-    done = False
-    num_pulses_half = num_pulses / 2
+def _median_line_level(data, outlinelen, outlinecount, start, end):
+    """Mean of the middle third of the per-line medians over [start, end) of each line."""
+    levels = np.sort(
+        [np.median(data[i * outlinelen + start : i * outlinelen + end]) for i in range(outlinecount)]
+    )
+    return np.mean(levels[outlinecount // 3 : (outlinecount * 2) // 3])
 
-    vsyncs = []  # VSYNC area (first broad pulse->first EQ after broad pulses)
 
-    validpulses = []
-    vsync_start = None
+def _sync_to_burst(
+    linelocs,
+    outlinelen,
+    fsc,
+    fsc_ratio,
+    even_burst_avg_phase,
+    odd_burst_avg_phase,
+    phase_sequence,
+    burst_detected_line,
+):
+    """Shift the hsync locations so each line's burst phase matches the average for its parity."""
+    burst_tbc_start = max(9, burst_detected_line)
 
-    # state_end tracks the earliest expected phase transition...
-    state_end = 0
-    # ... and state length is set by the phase transition to set above (in H)
-    state_length = None
+    inv_outlinelen = 1.0 / outlinelen
+    inv_fsc = 1.0 / fsc
+    phase_to_samples_factor = fsc_ratio / 360.0
 
-    lt_hsync = line_timings["hsync"]
-    lt_eq = line_timings["eq"]
-    lt_vsync = line_timings["vsync"]
+    for idx in range(burst_tbc_start, len(phase_sequence)):
+        burst = phase_sequence[idx]
 
-    # state order: HSYNC -> EQPUL1 -> VSYNC -> EQPUL2 -> HSYNC
-    HSYNC, EQPL1, VSYNC, EQPL2 = range(4)
+        target_phase = odd_burst_avg_phase if burst.line_number % 2 else even_burst_avg_phase
+        phase_delta = (target_phase - burst.phase_deg + 180.0) % 360.0 - 180.0
 
-    # test_list = _to_seq(_to_type_list(raw_pulses, lt_hsync, lt_eq, lt_vsync), num_pulses)
-    # print_output_types(test_list)
-    # print("Is valid: ", _is_valid_seq(test_list, num_pulses))
+        line_start = linelocs[burst.line_number]
+        line_end = linelocs[burst.line_number + 1]
+        line_length = line_end - line_start
+        scale = line_length * inv_outlinelen
 
-    for p in raw_pulses:
-        spulse = None
+        # Base phase adjustment
+        line_adjust = phase_delta * phase_to_samples_factor
 
-        state = validpulses[-1][0] if len(validpulses) > 0 else -1
+        # Frequency Drift Tracking
+        f_offset = burst.frequency - fsc
+        burst_center_distance = burst.center - line_start
+        accumulated_drift_samples = (f_offset * burst_center_distance) * inv_fsc
 
-        if state == -1:
-            # First valid pulse must be a regular HSYNC
-            if inrange(p.len, *lt_hsync):
-                spulse = (HSYNC, p)
-        elif state == HSYNC:
-            # HSYNC can transition to EQPUL/pre-vsync at the end of a field
-            if inrange(p.len, *lt_hsync):
-                spulse = (HSYNC, p)
-            elif inrange(p.len, *lt_eq):
-                spulse = (EQPL1, p)
-                state_length = num_pulses_half
-            elif inrange(p.len, *lt_vsync):
-                # should not happen(tm)
-                vsync_start = len(validpulses) - 1
-                spulse = (VSYNC, p)
-        elif state == EQPL1:
-            if inrange(p.len, *lt_eq):
-                spulse = (EQPL1, p)
-            elif inrange(p.len, *lt_vsync):
-                # len(validpulses)-1 before appending adds index to first VSYNC pulse
-                vsync_start = len(validpulses) - 1
-                spulse = (VSYNC, p)
-                state_length = num_pulses_half
-            elif inrange(p.len, *lt_hsync):
-                # previous state transition was likely in error!
-                spulse = (HSYNC, p)
-        elif state == VSYNC:
-            if inrange(p.len, *lt_eq):
-                # len(validpulses)-1 before appending adds index to first EQ pulse
-                vsyncs.append((vsync_start, len(validpulses) - 1))
-                spulse = (EQPL2, p)
-                state_length = num_pulses_half
-            elif inrange(p.len, *lt_vsync):
-                spulse = (VSYNC, p)
-            elif p.start > state_end and inrange(p.len, *lt_hsync):
-                spulse = (HSYNC, p)
-        elif state == EQPL2:
-            if inrange(p.len, *lt_eq):
-                spulse = (EQPL2, p)
-            elif inrange(p.len, *lt_hsync):
-                spulse = (HSYNC, p)
-                done = True
+        # Combine phase offset and subcarrier drift adjustments
+        corrected_adjust = line_adjust - accumulated_drift_samples
 
-        if spulse is not None and spulse[0] != state:
-            if spulse[1].start < state_end:
-                spulse = None
-            elif state_length:
-                state_end = spulse[1].start + ((state_length - 0.1) * in_line_len)
-                state_length = None
-
-        # Quality check
-        if spulse is not None:
-            good = (
-                sync.pulse_qualitycheck(validpulses[-1], spulse, in_line_len)
-                if len(validpulses)
-                else False
-            )
-
-            validpulses.append((spulse[0], spulse[1], good))
-
-        if done:
-            return done, validpulses
-
-    return done, validpulses
+        linelocs[burst.line_number] += corrected_adjust * scale
 
 
 class FieldShared:
+    def __init__(self, *args, **kwargs):
+        super(FieldShared, self).__init__(*args, **kwargs)
+        self.track_phase_set = False
+        self.fieldPhaseID = None
+        self.burst_detected_line = 0
+        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
+
     def process(self):
         if self.prevfield:
             if self.readloc > self.prevfield.readloc:
@@ -1008,101 +743,72 @@ class FieldShared:
             self.linecount = 410 if self.isFirstField else 409
 
     def hz_to_output(self, input):
-        if type(input) is np.ndarray:
+        if type(input) is not np.ndarray:
+            # A single value for build_json, so no track compensation.
             if self.rf.options.export_raw_tbc:
-                return input.astype(np.single)
-            else:
-                ire0 = self.rf.DecoderParams["ire0"]
-                hz_ire = self.rf.DecoderParams["hz_ire"]
-
-                if input.size == self.outlinecount * self.outlinelen:
-                    ire0_adjust_padding = 4  # 4fsc, prevents noise around the hsync transitions from interfering with this measurement
-
-                    if "backporch" in self.rf.options.ire0_adjust:
-                        backporch_start = self.ire0_backporch[0] + ire0_adjust_padding
-                        backporch_end = self.ire0_backporch[1] - ire0_adjust_padding
-                        blank_levels = np.sort(
-                            [
-                                np.median(
-                                    input[
-                                        i * self.outlinelen
-                                        + backporch_start : i * self.outlinelen
-                                        + backporch_end
-                                    ]
-                                )
-                                for i in range(0, self.outlinecount)
-                            ]
-                        )
-                        ire0 = np.mean(
-                            blank_levels[self.outlinecount // 3 : (self.outlinecount * 2) // 3]
-                        )
-
-                        ldd.logger.debug("calculated ire0: %.02f", ire0)
-
-                    if "hsync" in self.rf.options.ire0_adjust:
-                        # measure the hsync pulse level
-                        hsync_start = ire0_adjust_padding
-                        hsync_end = self.ire0_backporch[0] - ire0_adjust_padding
-                        hsync_levels = np.sort(
-                            [
-                                np.median(
-                                    input[
-                                        i * self.outlinelen
-                                        + hsync_start : i * self.outlinelen
-                                        + hsync_end
-                                    ]
-                                )
-                                for i in range(0, self.outlinecount)
-                            ]
-                        )
-                        hsync_level = np.mean(
-                            hsync_levels[self.outlinecount // 3 : (self.outlinecount * 2) // 3]
-                        )
-
-                        # calculate scaling based difference between hsync pulse and ire0
-                        hz_ire = (ire0 - hsync_level) / -self.rf.DecoderParams["vsync_ire"]
-
-                        ldd.logger.debug("calculated hz_ire: %.02f", hz_ire)
-
-                        # Guard: on a degenerate field (dropout / sync loss) the
-                        # backporch and hsync measurement windows can read the same
-                        # level, so hz_ire becomes 0 (or non-finite) and
-                        # hz_to_output_array divides out_scale by it -> ZeroDivisionError
-                        # aborts the whole decode. Fall back to the global hz_ire.
-                        if not np.isfinite(hz_ire) or hz_ire == 0:
-                            ldd.logger.warning(
-                                "ire0_adjust(hsync): degenerate hz_ire "
-                                "(ire0=%.2f, hsync_level=%.2f) -> using global hz_ire",
-                                ire0,
-                                hsync_level,
-                            )
-                            hz_ire = self.rf.DecoderParams["hz_ire"]
-
-                if self.rf.track_phase is not None:
-                    ire0 += self.rf.DecoderParams["track_ire0_offset"][
-                        self.rf.track_phase ^ (self.field_number % 2)
-                    ]
-
-                return hz_to_output_array(
-                    input,
-                    ire0,
-                    hz_ire,
-                    self.rf.SysParams["outputZero"],
-                    self.rf.DecoderParams["vsync_ire"],
-                    self.out_scale,
-                )
-
-        # This is reached when it's called with a single value to scale an ire value to an output from build_json
+                return np.single(input)
+            return super(FieldShared, self).hz_to_output(input)
 
         if self.rf.options.export_raw_tbc:
-            return np.single(input)
+            return input.astype(np.single)
 
-        # Since this is just used for converting a value for the whole file don't do the track compensation here.
-        reduced = (input - self.rf.DecoderParams["ire0"]) / self.rf.DecoderParams["hz_ire"]
-        reduced -= self.rf.DecoderParams["vsync_ire"]
+        ire0 = self.rf.DecoderParams["ire0"]
+        hz_ire = self.rf.DecoderParams["hz_ire"]
 
-        return np.uint16(
-            np.clip((reduced * self.out_scale) + self.rf.SysParams["outputZero"], 0, 65535) + 0.5
+        if input.size == self.outlinecount * self.outlinelen:
+            ire0_adjust_padding = 4  # 4fsc, prevents noise around the hsync transitions from interfering with this measurement
+
+            if "backporch" in self.rf.options.ire0_adjust:
+                ire0 = _median_line_level(
+                    input,
+                    self.outlinelen,
+                    self.outlinecount,
+                    self.ire0_backporch[0] + ire0_adjust_padding,
+                    self.ire0_backporch[1] - ire0_adjust_padding,
+                )
+                ldd.logger.debug("calculated ire0: %.02f", ire0)
+
+            if "hsync" in self.rf.options.ire0_adjust:
+                # measure the hsync pulse level
+                hsync_level = _median_line_level(
+                    input,
+                    self.outlinelen,
+                    self.outlinecount,
+                    ire0_adjust_padding,
+                    self.ire0_backporch[0] - ire0_adjust_padding,
+                )
+
+                # calculate scaling based difference between hsync pulse and ire0
+                hz_ire = (ire0 - hsync_level) / -self.rf.DecoderParams["vsync_ire"]
+
+                ldd.logger.debug("calculated hz_ire: %.02f", hz_ire)
+
+                # Guard: on a degenerate field (dropout / sync loss) the
+                # backporch and hsync measurement windows can read the same
+                # level, so hz_ire becomes 0 (or non-finite) and
+                # hz_to_output_array divides out_scale by it -> ZeroDivisionError
+                # aborts the whole decode. Fall back to the global hz_ire.
+                if not np.isfinite(hz_ire) or hz_ire == 0:
+                    ldd.logger.warning(
+                        "ire0_adjust(hsync): degenerate hz_ire "
+                        "(ire0=%.2f, hsync_level=%.2f) -> using global hz_ire",
+                        ire0,
+                        hsync_level,
+                    )
+                    hz_ire = self.rf.DecoderParams["hz_ire"]
+
+        if self.rf.track_phase is not None:
+            ire0 += self.rf.DecoderParams["track_ire0_offset"][
+                self.rf.track_phase ^ (self.field_number % 2)
+            ]
+
+        return hz_to_output_array(
+            input,
+            ire0,
+            hz_ire,
+            self.rf.SysParams["outputZero"],
+            self.rf.DecoderParams["vsync_ire"],
+            self.out_scale,
         )
 
     def lock_to_burst(self):
@@ -1122,6 +828,38 @@ class FieldShared:
         )
         self.track_phase_set = True
 
+    def refine_linelocs_burst(self, linelocs=None):
+        linelocs = (self.linelocs2 if linelocs is None else linelocs).copy()
+
+        # Lock once per field, so the second PAL pilot pass leaves the locations alone.
+        if not self.track_phase_set and self.rf.options.write_chroma:
+            self.lock_to_burst()
+
+            if (
+                not self.rf.options.disable_burst_hsync
+                and self.phase_sequence is not None
+                and self.burst_detected_line != -1  # color killer not active for entire field
+                and self.rf.color_system != "PAL_M"
+            ):
+                if self.rf.color_system == "NTSC":
+                    even_phase = odd_phase = self.burst_phase_avg
+                else:
+                    even_phase, odd_phase = self.even_burst_phase_avg, self.odd_burst_phase_avg
+                _sync_to_burst(
+                    linelocs,
+                    self.outlinelen,
+                    self.rf.SysParams["fsc_mhz"] * 1e6,
+                    self.fsc_ratio,
+                    even_phase,
+                    odd_phase,
+                    self.phase_sequence,
+                    self.burst_detected_line,
+                )
+
+        return linelocs
+
+    refine_linelocs_pilot = refine_linelocs_burst
+
     def downscale(self, final=False, *args, **kwargs):
         dsout, dsaudio, dsefm = super(FieldShared, self).downscale(final=False, *args, **kwargs)
 
@@ -1133,7 +871,10 @@ class FieldShared:
             dsout = self.hz_to_output(dsout)
             self.dspicture = dsout
 
-        return dsout, dsaudio, dsefm
+        dschroma = decode_chroma(
+            self, do_chroma_deemphasis=self.rf.options.chroma_deemphasis_filter
+        )
+        return (dsout, dschroma), dsaudio, dsefm
 
     def _get_line0_fallback(self, valid_pulses):
         expected_line0 = None
@@ -1154,7 +895,7 @@ class FieldShared:
             valid_pulses,
             self.rawpulses,
             self.data["video"]["demod_05"],
-            self.lt_vsync,
+            self.LT["vsync"],
             self.inlinelen,
             self.rf.SysParams["numPulses"],
             self.rf.SysParams["frame_lines"],
@@ -1162,68 +903,7 @@ class FieldShared:
             expected_line0=expected_line0,
             expected_first_field=expected_first_field,
         )
-        # Not needed after this.
-        del self.lt_vsync
         return res
-
-    def pulse_qualitycheck(self, prev_pulse, pulse):
-        return sync.pulse_qualitycheck(prev_pulse, pulse, self.inlinelen)
-
-    def run_vblank_state_machine(self, pulses, LT):
-        """Determines if a pulse set is a valid vblank by running a state machine"""
-        a = _run_vblank_state_machine(pulses, LT, self.rf.SysParams["numPulses"], self.inlinelen)
-        return a
-
-    def refinepulses(self):
-        LT = self.get_timings()
-        lt_hsync = LT["hsync"]
-        lt_eq = LT["eq"]
-        self.lt_vsync = LT["vsync"]
-
-        HSYNC, EQPL1, VSYNC, EQPL2 = range(4)
-
-        i = 0
-
-        # print("lt_hsync: ", lt_hsync, " lt_eq: ", lt_eq, " lt_vsync: ", lt_vsync)
-
-        # Pulse = namedtuple("Pulse", "start len")
-        valid_pulses = []
-        num_vblanks = 0
-
-        # test_list = _to_seq(_to_type_list(self.rawpulses, lt_hsync, lt_eq, lt_vsync), self.rf.SysParams["numPulses"])
-        # print_output_types(test_list)
-
-        while i < len(self.rawpulses):
-            curpulse = self.rawpulses[i]
-            if inrange(curpulse.len, *lt_hsync):
-                good = (
-                    self.pulse_qualitycheck(valid_pulses[-1], (0, curpulse))
-                    if len(valid_pulses)
-                    else False
-                )
-                valid_pulses.append((HSYNC, curpulse, good))
-                i += 1
-            elif (
-                i > 2
-                and inrange(self.rawpulses[i].len, *lt_eq)
-                and (len(valid_pulses) and valid_pulses[-1][0] == HSYNC)
-            ):
-                done, vblank_pulses = self.run_vblank_state_machine(
-                    self.rawpulses[i - 2 : i + 24], LT
-                )
-                # print_output_order(i, done, vblank_pulses)
-                if done:
-                    [valid_pulses.append(p) for p in vblank_pulses[2:]]
-                    i += len(vblank_pulses) - 2
-                    num_vblanks += 1
-                else:
-                    # spulse = (HSYNC, self.rawpulses[i], False)
-                    i += 1
-            else:
-                # spulse = (HSYNC, self.rawpulses[i], False)
-                i += 1
-
-        return valid_pulses  # , num_vblanks
 
     def get_pulses(self, do_level_detect=False):
         demod = self.data["video"]["demod_05"]
@@ -1536,11 +1216,7 @@ class FieldShared:
             prev_first_hsync_offset_lines = 0
 
         fallback_line0loc = None
-        if (
-            self.rf.options.fallback_vsync
-            and hasattr(self, "lt_vsync")
-            and self.lt_vsync is not None
-        ):
+        if self.rf.options.fallback_vsync:
             (
                 fallback_line0loc,
                 _,
@@ -1845,201 +1521,17 @@ class FieldShared:
         return linelocs, lineloc_errs, nextfield
 
     def refine_linelocs_hsync(self):
-        if not self.rf.options.skip_hsync_refine:
-            threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
-
-            return sync.refine_linelocs_hsync(self, self.linebad, threshold)
-        else:
+        if self.rf.options.skip_hsync_refine:
             return self.linelocs1.copy()
 
-        if False:
-            import timeit
-
-            linebad = self.linebad.copy()
-            linebad_b = self.linebad.copy()
-            time = timeit.timeit(lambda: sync.refine_linelocs_hsync(self, linebad), number=100)
-            time2 = timeit.timeit(lambda: self._refine_linelocs_hsync(linebad_b), number=100)
-            print("time", time)
-            print("time2", time2)
-            linebad1 = self.linebad.copy()
-            linebad2 = self.linebad.copy()
-            # print(np.asanyarray(self._refine_linelocs_hsync(linebad1)) - np.asanyarray(refine_linelocs_hsync_t(self, linebad2)))
-            assert np.all(
-                np.asanyarray(self._refine_linelocs_hsync(linebad1))
-                == np.asanyarray(sync.refine_linelocs_hsync(self, linebad2))
-            )
-        # return sync.refine_linelocs_hsync(self, self.linebad)
-
-    def _refine_linelocs_hsync(self, linebad):
-        """Refine the line start locations using horizontal sync data."""
-        # Old python variant for dev comparisons, not used - will be removed later.
-        # linelocs2 = np.asarray(self.linelocs1, dtype=np.float64)
-        linelocs2 = self.linelocs1.copy()
-        normal_hsync_length = self.usectoinpx(self.rf.SysParams["hsyncPulseUS"])
-
-        demod_05 = self.data["video"]["demod_05"]
-        one_usec = self.rf.freq
-
-        for i in range(len(self.linelocs1)):
-            # skip VSYNC lines, since they handle the pulses differently
-            if inrange(i, 3, 6) or (self.rf.system == "PAL" and inrange(i, 1, 2)):
-                linebad[i] = True
-                continue
-
-            # refine beginning of hsync
-
-            # start looking 1 msec back
-            ll1 = self.linelocs1[i] - one_usec
-            # and locate the next time the half point between hsync and 0 is crossed.
-            zc = lddu.calczc(
-                demod_05,
-                ll1,
-                self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2),
-                reverse=False,
-                count=one_usec * 2,
-            )
-
-            right_cross = None
-
-            if not self.rf.options.disable_right_hsync:
-                right_cross = lddu.calczc(
-                    demod_05,
-                    ll1 + (normal_hsync_length) - one_usec,
-                    self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2),
-                    reverse=False,
-                    count=one_usec * 3,
-                )
-            right_cross_refined = False
-
-            # If the crossing exists, we can check if the hsync pulse looks normal and
-            # refine it.
-            if zc is not None and not linebad[i]:
-                linelocs2[i] = zc
-
-                # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
-                hsync_area = demod_05[int(zc - (one_usec * 0.75)) : int(zc + (one_usec * 8))]
-                if lddu.nb_min(hsync_area) < self.rf.iretohz(-55) or lddu.nb_max(
-                    hsync_area
-                ) > self.rf.iretohz(30):
-                    # don't use the computed value here if it's bad
-                    linebad[i] = True
-                    linelocs2[i] = self.linelocs1[i]
-                else:
-                    porch_level = lddu.nb_median(
-                        demod_05[int(zc + (one_usec * 8)) : int(zc + (one_usec * 9))]
-                    )
-                    sync_level = lddu.nb_median(
-                        demod_05[int(zc + (one_usec * 1)) : int(zc + (one_usec * 2.5))]
-                    )
-
-                    # Re-calculate the crossing point using the mid point between the measured sync
-                    # and porch levels
-                    zc2 = lddu.calczc(
-                        demod_05,
-                        ll1,
-                        (porch_level + sync_level) / 2,
-                        reverse=False,
-                        count=400,
-                    )
-
-                    # any wild variation here indicates a failure
-                    if zc2 is not None and np.abs(zc2 - zc) < (one_usec / 2):
-                        linelocs2[i] = zc2
-                    else:
-                        linebad[i] = True
-            else:
-                linebad[i] = True
-
-            # Check right cross
-            if right_cross is not None:
-                zc2 = None
-
-                zc_fr = right_cross - normal_hsync_length
-
-                # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
-                hsync_area = demod_05[int(zc_fr - (one_usec * 0.75)) : int(zc_fr + (one_usec * 8))]
-                if lddu.nb_min(hsync_area) > self.rf.iretohz(-55) and lddu.nb_max(
-                    hsync_area
-                ) < self.rf.iretohz(30):
-                    porch_level = lddu.nb_median(
-                        demod_05[int(zc_fr + (one_usec * 8)) : int(zc_fr + (one_usec * 9))]
-                    )
-                    sync_level = lddu.nb_median(
-                        demod_05[int(zc_fr + (one_usec * 1)) : int(zc_fr + (one_usec * 2.5))]
-                    )
-
-                    # Re-calculate the crossing point using the mid point between the measured sync
-                    # and porch levels
-                    zc2 = lddu.calczc(
-                        demod_05,
-                        ll1 + normal_hsync_length - one_usec,
-                        (porch_level + sync_level) / 2,
-                        reverse=False,
-                        count=400,
-                    )
-
-                    # any wild variation here indicates a failure
-                    if zc2 is not None and np.abs(zc2 - right_cross) < (one_usec / 2):
-                        right_cross = zc2
-                        right_cross_refined = True
-
-            if linebad[i]:
-                linelocs2[i] = self.linelocs1[i]  # don't use the computed value here if it's bad
-
-            if right_cross is not None:
-                # right_locs[i] = right_cross
-                # hsync_from_right[i] = right_cross - normal_hsync_length + 2.25
-
-                # If we get a good result from calculating hsync start from the
-                # right side of the hsync pulse, we use that as it's less likely
-                # to be messed up by overshoot.
-                if right_cross_refined:
-                    linebad[i] = False
-                    linelocs2[i] = right_cross - normal_hsync_length + 2.25
-
-        return linelocs2
-
-    def getBlankRange(self, validpulses, start=0):
-        """Look through pulses to fit a group that fit as a blanking area.
-        Overridden to lower the threshold a little as the default
-        discarded some distorted/non-standard ones.
-        """
-        vp_type = np.array([p[0] for p in validpulses])
-
-        vp_vsyncs = np.where(vp_type[start:] == ldd.VSYNC)[0]
-        firstvsync = vp_vsyncs[0] + start if len(vp_vsyncs) else None
-
-        if firstvsync is None or firstvsync < 10:
-            if start == 0:
-                ldd.logger.debug("No vsync found!")
-            return None, None
-
-        for newstart in range(firstvsync - 10, firstvsync - 4):
-            blank_locs = np.where(vp_type[newstart:] > 0)[0]
-            if len(blank_locs) == 0:
-                continue
-
-            firstblank = blank_locs[0] + newstart
-            hsync_locs = np.where(vp_type[firstblank:] == 0)[0]
-
-            if len(hsync_locs) == 0:
-                continue
-
-            lastblank = hsync_locs[0] + firstblank - 1
-
-            if (lastblank - firstblank) > formats.BLANK_LENGTH_THRESHOLD:
-                return firstblank, lastblank
-
-        # there isn't a valid range to find, or it's impossibly short
-        return None, None
+        threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
+        return sync.refine_linelocs_hsync(self, self.linebad, threshold)
 
     def calc_burstmedian(self):
         # Set this to a constant value for now to avoid the comb filter messing with chroma levels.
         return 1.0
 
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal"""
-        return self.get_pulses()
+    getpulses = get_pulses
 
     def compute_deriv_error(self, linelocs, baserr):
         """Disabled this for now as tapes have large variations in line pos
@@ -2077,129 +1569,12 @@ class FieldShared:
         return LT
 
     def fix_badlines(self, linelocs_in, linelocs_backup_in=None):
-        # No longer needed. Bad line locations are fixed in sync.pyx
+        # Bad line locations are already fixed in sync.pyx
         return linelocs_in
-        """Go through the list of lines marked bad and guess something for the lineloc based on
-        previous/next good lines"""
-        # Overridden to add some further logic.
-        self.linebad = self.compute_deriv_error(linelocs_in, self.linebad)
-        linelocs = np.array(linelocs_in.copy())
-
-        if linelocs_backup_in is not None:
-            linelocs_backup = np.array(linelocs_backup_in.copy())
-            badlines = np.isnan(linelocs)
-            linelocs[badlines] = linelocs_backup[badlines]
-
-        # If the next good line is this far down, don't use it to calculate guessed lineloc
-        # as it may be below head switch and thus distort.
-        last_from_bottom = len(linelocs) - 16
-
-        for l in np.where(self.linebad)[0]:
-            prevgood = l - 1
-            nextgood = l + 1
-
-            while prevgood >= 0 and self.linebad[prevgood]:
-                prevgood -= 1
-
-            while nextgood < len(linelocs) and self.linebad[nextgood]:
-                nextgood += 1
-
-            firstcheck = 0 if self.rf.system == "PAL" else 1
-
-            if prevgood >= firstcheck and nextgood < (len(linelocs) + self.lineoffset):
-                if nextgood > last_from_bottom:
-                    # Don't use prev+next for these as that could cross head switch.
-                    if prevgood > last_from_bottom + 4:
-                        guess_len = linelocs[prevgood] - linelocs[prevgood - 1]
-                        linelocs[l] = linelocs[l - 1] + guess_len
-                else:
-                    gap = (linelocs[nextgood] - linelocs[prevgood]) / (nextgood - prevgood)
-                    linelocs[l] = (gap * (l - prevgood)) + linelocs[prevgood]
-
-        return linelocs
 
 
-class FieldPALShared(FieldShared, ldd.FieldPAL):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALShared, self).__init__(*args, **kwargs)
-        self.track_phase_set = False
-        self.ire0_backporch = (96, 160)
-        self.burst_detected_line = 0
-        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
-
-    @staticmethod
-    def _sync_to_burst(
-        linelocs,
-        outlinelen,
-        fsc,
-        fsc_ratio,
-        even_burst_avg_phase,
-        odd_burst_avg_phase,
-        phase_sequence,
-        burst_detected_line,
-    ):
-        burst_tbc_start = max(9, burst_detected_line)
-
-        inv_outlinelen = 1.0 / outlinelen
-        inv_fsc = 1.0 / fsc
-        phase_to_samples_factor = fsc_ratio / 360.0
-
-        for idx in range(burst_tbc_start, len(phase_sequence)):
-            burst = phase_sequence[idx]
-
-            # Select PAL target phase based on line polarity (even/odd)
-            target_phase = odd_burst_avg_phase if burst.line_number % 2 else even_burst_avg_phase
-
-            # Calculate phase delta including the PAL line offset
-            phase_delta = (target_phase - burst.phase_deg + burst.phase_offset_deg + 180.0) % 360.0 - 180.0
-
-            line_start = linelocs[burst.line_number]
-            line_end = linelocs[burst.line_number + 1]
-            line_length = line_end - line_start
-            
-            scale = line_length * inv_outlinelen
-
-            # Base phase adjustment
-            line_adjust = phase_delta * phase_to_samples_factor
-
-            # Frequency Drift Tracking
-            f_offset = burst.frequency - fsc
-            burst_center_distance = burst.center - line_start
-            accumulated_drift_samples = (f_offset * burst_center_distance) * inv_fsc
-
-            # Combine phase offset and subcarrier drift adjustments
-            corrected_adjust = line_adjust - accumulated_drift_samples
-
-            # Shift the HSync location 
-            linelocs[burst.line_number] += corrected_adjust * scale
-
-    def refine_linelocs_pilot(self, linelocs=None):
-        if linelocs is None:
-            linelocs = self.linelocs2.copy()
-        else:
-            linelocs = linelocs.copy()
-
-        if not self.track_phase_set and self.rf.options.write_chroma:
-            # only do this once, since this does not affect hsync currently
-            self.lock_to_burst()
-
-            if (
-                not self.rf.options.disable_burst_hsync
-                and self.phase_sequence is not None
-                and self.burst_detected_line != -1  # color killer not active for entire field
-            ):
-                FieldPALShared._sync_to_burst(
-                    linelocs,
-                    self.outlinelen,
-                    self.rf.SysParams["fsc_mhz"] * 1e6,
-                    self.fsc_ratio,
-                    self.even_burst_phase_avg,
-                    self.odd_burst_phase_avg,
-                    self.phase_sequence,
-                    self.burst_detected_line,
-                )
-
-        return linelocs
+class FieldPALTape(FieldShared, ldd.FieldPAL):
+    ire0_backporch = (96, 160)
 
     def determine_field_number(self):
         """Workaround to shut down phase id mismatch warnings, the actual code
@@ -2207,245 +1582,5 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         return 1 + (self.rf.field_number % 8)
 
 
-class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCShared, self).__init__(*args, **kwargs)
-        self.track_phase_set = False
-        self.fieldPhaseID = None
-        self.ire0_backporch = (74, 124)
-        self.burst_detected_line = 0
-        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
-
-
-    @staticmethod
-    def _sync_to_burst(
-        linelocs, outlinelen, fsc, fsc_ratio, burst_avg_phase, phase_sequence, burst_detected_line
-    ):
-        burst_tbc_start = max(9, burst_detected_line)
-
-        # Precompute loop-invariant multipliers (Eliminates division inside the loop)
-        inv_outlinelen = 1.0 / outlinelen
-        inv_fsc = 1.0 / fsc
-        phase_to_samples_factor = fsc_ratio / 360.0
-
-        for idx in range(burst_tbc_start, len(phase_sequence)):
-            burst = phase_sequence[idx]
-
-            # Phase difference at the burst center
-            phase_delta = (burst_avg_phase - burst.phase_deg + 180.0) % 360.0 - 180.0
-
-            line_start = linelocs[burst.line_number]
-            line_end = linelocs[burst.line_number + 1]
-            line_length = line_end - line_start
-            scale = line_length * inv_outlinelen
-
-            # Base phase adjustment
-            line_adjust = phase_delta * phase_to_samples_factor
-
-            # Calculate the subcarrier cycle frequency drift as samples:
-            f_offset = burst.frequency - fsc
-            burst_center_distance = burst.center - line_start
-            accumulated_drift_samples = (f_offset * burst_center_distance) * inv_fsc
-
-            # Subtract frequency drift and scale the shift
-            corrected_adjust = line_adjust - accumulated_drift_samples
-
-            linelocs[burst.line_number] += corrected_adjust * scale
-
-    def refine_linelocs_burst(self, linelocs=None):
-        if linelocs is None:
-            linelocs = self.linelocs2.copy()
-        else:
-            linelocs = linelocs.copy()
-
-        # populates color burst info for hsync refinement the step below
-        if self.rf.options.write_chroma:
-            self.lock_to_burst()
-
-            if (
-                not self.rf.options.disable_burst_hsync
-                and self.phase_sequence is not None
-                and self.burst_detected_line != -1  # color killer not active for entire field
-            ):
-                if self.rf.color_system == "NTSC":
-                    FieldNTSCShared._sync_to_burst(
-                        linelocs,
-                        self.outlinelen,
-                        self.rf.SysParams["fsc_mhz"] * 1e6,
-                        self.fsc_ratio,
-                        self.burst_phase_avg,
-                        self.phase_sequence,
-                        self.burst_detected_line,
-                    )
-                elif self.rf.color_system == "NLINHA":
-                    # NLINHA uses pal
-                    FieldPALShared._sync_to_burst(
-                        linelocs,
-                        self.outlinelen,
-                        self.rf.SysParams["fsc_mhz"] * 1e6,
-                        self.fsc_ratio,
-                        self.even_burst_phase_avg,
-                        self.odd_burst_phase_avg,
-                        self.phase_sequence,
-                        self.burst_detected_line,
-                    )
-
-        return linelocs
-
-
-class FieldPALVHS(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALVHS, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldPALVHS, self).downscale(final=final, *args, **kwargs)
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldPALSVHS(FieldPALVHS):
-    """Add PAL SVHS-specific stuff (deemp, pilot burst etc here)"""
-
-    def __init__(self, *args, **kwargs):
-        super(FieldPALSVHS, self).__init__(*args, **kwargs)
-
-
-class FieldPALUMatic(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALUMatic, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldPALUMatic, self).downscale(final=final, *args, **kwargs)
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldPALBetamax(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALBetamax, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldPALBetamax, self).downscale(final=final, *args, **kwargs)
-
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldPALVideo8(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALVideo8, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldPALVideo8, self).downscale(final=final, *args, **kwargs)
-
-        dschroma = decode_chroma(self, do_chroma_deemphasis=True)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldPALTypeC(FieldPALShared, ldd.FieldPAL):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALTypeC, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldPALTypeC, self).downscale(final=final, *args, **kwargs)
-
-        return (dsout, None), dsaudio, dsefm
-
-
-class FieldNTSCVHS(FieldNTSCShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCVHS, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        """Downscale the channels and upconvert chroma to standard color carrier frequency."""
-        dsout, dsaudio, dsefm = super(FieldNTSCVHS, self).downscale(final=final, *args, **kwargs)
-
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldNTSCSVHS(FieldNTSCVHS):
-    """Add NTSC SVHS-specific stuff (deemp etc here)"""
-
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCSVHS, self).__init__(*args, **kwargs)
-
-
-class FieldNTSCBetamax(FieldNTSCShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCBetamax, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldNTSCBetamax, self).downscale(
-            final=final, *args, **kwargs
-        )
-
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldPALMVHS(FieldNTSCVHS):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALMVHS, self).__init__(*args, **kwargs)
-
-
-class FieldNTSCUMatic(FieldNTSCShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCUMatic, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldNTSCUMatic, self).downscale(final=final, *args, **kwargs)
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldNTSCTypeC(FieldNTSCShared, ldd.FieldNTSC):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCTypeC, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldNTSCTypeC, self).downscale(final=final, *args, **kwargs)
-
-        return (dsout, None), dsaudio, dsefm
-
-
-class FieldNTSCVideo8(FieldNTSCShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCVideo8, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        """Downscale the channels and upconvert chroma to standard color carrier frequency."""
-        dsout, dsaudio, dsefm = super(FieldNTSCVideo8, self).downscale(final=final, *args, **kwargs)
-
-        dschroma = decode_chroma(self, do_chroma_deemphasis=True)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldMESECAMVHS(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldMESECAMVHS, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldMESECAMVHS, self).downscale(final=final, *args, **kwargs)
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
-
-
-class FieldSECAMVHS(FieldPALShared):
-    def __init__(self, *args, **kwargs):
-        super(FieldSECAMVHS, self).__init__(*args, **kwargs)
-
-    def downscale(self, final=False, *args, **kwargs):
-        dsout, dsaudio, dsefm = super(FieldSECAMVHS, self).downscale(final=final, *args, **kwargs)
-        dschroma = decode_chroma(self)
-
-        return (dsout, dschroma), dsaudio, dsefm
+class FieldNTSCTape(FieldShared, ldd.FieldNTSC):
+    ire0_backporch = (74, 124)
