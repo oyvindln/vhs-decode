@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import time
 import numpy as np
 import scipy.signal as sps
@@ -40,7 +41,6 @@ from vhsdecode.compute_video_filters import (
 )
 from vhsdecode import compute_video_filters as cvf
 from vhsdecode.rust_utils import sosfiltfilt_rust
-from vhsdecode.dbwriter import DBWriter
 
 
 def is_secam(system: str):
@@ -109,10 +109,11 @@ class VHSDecode(ldd.LDdecode):
         self.rf.decoder = self
         self.FieldClass = field_class_from_formats(system, tape_format)
 
-        self._db_writer = DBWriter(fname_out) if extra_options.get("write_db") else None
         self.dbconn = None
-        if self._db_writer:
-            self.dbconn = self._db_writer.db_connection
+        if extra_options.get("write_db"):
+            if os.path.exists(fname_out + ".tbc.db"):
+                os.unlink(fname_out + ".tbc.db")
+            self.dbconn = sqlite3.connect(fname_out + ".tbc.db")
             self.create_db_schema()
 
         self.outfile_chroma = None
@@ -283,25 +284,17 @@ class VHSDecode(ldd.LDdecode):
             self._dropped = None
             return
 
-        # Remove fields that are currently not used to cut down on space usage.
-        # the qt tools will load them as 0 with the current code
-        # if they don't exist.
-        if "audioSamples" in fi:
-            del fi["audioSamples"]
-
-        self.fieldinfo.append(fi)
-
-        if self._db_writer:
-            if not self.capture_id:
-                self.build_sqlite_metadata()
-            self._db_writer.write_field(fi, self.doDOD, self.capture_id)
-            # NOTE: this calls commit so we don't call it in dbwriter.write_field.
-            self.build_sqlite_metadata()
-
-        self.outfile_video.write(picturey)
         if self.rf.options.write_chroma:
             self.outfile_chroma.write(picturec)
-        self.fields_written += 1
+
+        if self.dbconn:
+            # Not measured on tape (see calc_burstmedian), but the field record needs it.
+            fi["medianBurstIRE"] = 1.0
+            super(VHSDecode, self).writeout((f, fi, picturey, audio, efm))
+        else:
+            self.fieldinfo.append(fi)
+            self.outfile_video.write(picturey)
+            self.fields_written += 1
 
     def close(self):
         if self.decodethread and self.decodethread.is_alive():
