@@ -24,7 +24,7 @@ try:
         QPushButton,
         QLineEdit,
         QFileDialog,
-        QDialog,
+        QInputDialog,
         QMessageBox,
         QSpinBox,
         QFrame,
@@ -47,7 +47,7 @@ except ImportError:
         QPushButton,
         QLineEdit,
         QFileDialog,
-        QDialog,
+        QInputDialog,
         QMessageBox,
         QSpinBox,
         QFrame,
@@ -56,21 +56,8 @@ except ImportError:
     )
     from PyQt5 import QtGui, QtCore
 
+import vhsdecode.hifi.constants as hifi_constants
 from vhsdecode.hifi.constants import (
-    DEFAULT_8MM_AUDIO_MODE,
-    DEFAULT_8MM_DEEMPHASIS_TAU_1,
-    DEFAULT_8MM_DEEMPHASIS_TAU_2,
-    DEFAULT_8MM_EXPANDER_ATTACK_TAU,
-    DEFAULT_8MM_EXPANDER_GAIN,
-    DEFAULT_8MM_EXPANDER_HOLD_TAU,
-    DEFAULT_8MM_EXPANDER_RATIO,
-    DEFAULT_8MM_EXPANDER_RELEASE_TAU,
-    DEFAULT_8MM_EXPANDER_WEIGHTING_LOW_PASS,
-    DEFAULT_8MM_EXPANDER_WEIGHTING_LOW_PASS_TRANSITION,
-    DEFAULT_8MM_EXPANDER_WEIGHTING_TAU_1,
-    DEFAULT_8MM_EXPANDER_WEIGHTING_TAU_2,
-    DEFAULT_8MM_NR_DEEMPHASIS_TAU_1,
-    DEFAULT_8MM_NR_DEEMPHASIS_TAU_2,
     DEFAULT_DEMOD,
     DEFAULT_DOC_MODE,
     DEFAULT_RESAMPLER_QUALITY,
@@ -304,70 +291,6 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
     return decode_options
 
 
-class InputDialog(QDialog):
-    def __init__(self, label: str, title: str, value=None, validator=None):
-        super().__init__()
-        self.validator = validator
-        self.label = label
-        self.value = value
-        self.title = title
-        self.init_ui()
-
-    def init_ui(self):
-        self.setWindowTitle(self.title)
-
-        layout = QHBoxLayout()
-
-        self.input_line = QLineEdit(self)
-        self.input_line.setText(str(self.value))
-
-        if self.validator is not None:
-            self.input_line.setValidator(self.validator)
-        layout.addWidget(self.input_line)
-
-        label = QLabel(self.label, self)
-        layout.addWidget(label)
-
-        ok_button = QPushButton("Accept", self)
-        ok_button.clicked.connect(self.accept_user_input)
-        layout.addWidget(ok_button)
-
-        self.setLayout(layout)
-        self.setStyleSheet(
-            """
-            QDialog {
-                background-color: #333;
-                color: #eee;
-            }
-            QLineEdit {
-                background-color: #555;
-                color: #eee;
-                border: 1px solid #777;
-            }
-            QPushButton {
-                background-color: #555;
-                color: #eee;
-                border: 1px solid #777;
-            }
-            QLabel {
-                color: #eee;
-            }
-        """
-        )
-
-        # Set dialog size
-        self.setFixedWidth(int(self.sizeHint().width()))
-        self.setFixedHeight(self.sizeHint().height())
-
-    def accept_user_input(self):
-        self.value = self.input_line.text()
-        self.accept()
-
-    def get_input_value(self):
-        self.exec()
-        return self.value
-
-
 class HifiUi(QMainWindow):
     def __init__(
         self,
@@ -525,14 +448,7 @@ class HifiUi(QMainWindow):
         return QIcon()
 
     def _set_status_window_icon(self, theme_name: str):
-        themed_icon = QIcon.fromTheme(theme_name)
-        if themed_icon is not None and not themed_icon.isNull():
-            self.setWindowIcon(themed_icon)
-            return
-
-        fallback_icon = self._fallback_window_icon()
-        if fallback_icon is not None and not fallback_icon.isNull():
-            self.setWindowIcon(fallback_icon)
+        self.setWindowIcon(QIcon.fromTheme(theme_name, self._fallback_window_icon()))
 
     def resize_window(self, axis="hv"):
         self.central_widget.adjustSize()
@@ -1022,7 +938,6 @@ class HifiUi(QMainWindow):
         self.expander_attack_tau_dial_control.valueChanged.connect(self.schedule_plot_update)
         self.expander_hold_tau_dial_control.valueChanged.connect(self.schedule_plot_update)
         self.expander_release_tau_dial_control.valueChanged.connect(self.schedule_plot_update)
-        self.expander_ratio_dial_control.valueChanged.connect(self.schedule_plot_update)
 
         self.expander_weighting_low_tau_dial_control.valueChanged.connect(self.schedule_plot_update)
         self.expander_weighting_high_tau_dial_control.valueChanged.connect(self.schedule_plot_update)
@@ -1077,9 +992,6 @@ class HifiUi(QMainWindow):
         self.expander_gain_dial_control.setValue(values.expander_gain)
         self.expander_ratio_dial_control.setValue(values.expander_ratio)
         self.expander_env_detection_combo.setCurrentText(values.expander_env_detection)
-        self.expander_env_detection_combo.setCurrentIndex(
-            self.expander_env_detection_combo.findText(values.expander_env_detection)
-        )
         self.expander_attack_tau_dial_control.setValue(values.expander_attack_tau)
         self.expander_hold_tau_dial_control.setValue(values.expander_hold_tau)
         self.expander_release_tau_dial_control.setValue(values.expander_release_tau)
@@ -1102,9 +1014,6 @@ class HifiUi(QMainWindow):
         self.spectral_nr_amount_dial_control.setValue(values.spectral_nr_amount)
         self.normalize_checkbox.setChecked(values.normalize)
         self.doc_combo.setCurrentText(values.doc)
-        self.doc_combo.setCurrentIndex(
-            self.doc_combo.findText(values.doc)
-        )
         self.enable_expander_checkbox.setChecked(values.enable_expander)
         self.enable_deemphasis_checkbox.setChecked(values.enable_deemphasis)
         self.head_switching_interpolation_checkbox.setChecked(
@@ -1113,28 +1022,12 @@ class HifiUi(QMainWindow):
         self.automatic_fine_tuning_checkbox.setChecked(values.automatic_fine_tuning)
         self.bias_guess_checkbox.setChecked(values.bias_guess)
         self.sample_rate_combo.setCurrentText(str(values.audio_sample_rate))
-        self.sample_rate_combo.setCurrentIndex(
-            self.sample_rate_combo.findText(str(values.audio_sample_rate))
-        )
         self.standard_combo.setCurrentText(values.standard)
-        self.standard_combo.setCurrentIndex(
-            self.standard_combo.findText(values.standard)
-        )
         self.format_combo.setCurrentText(values.format)
-        self.format_combo.setCurrentIndex(self.format_combo.findText(values.format))
         self.audio_mode_combo.setCurrentText(values.audio_mode)
-        self.audio_mode_combo.setCurrentIndex(
-            self.audio_mode_combo.findText(values.audio_mode)
-        )
         self.resampler_quality_combo.setCurrentText(values.resampler_quality.title())
-        self.resampler_quality_combo.setCurrentIndex(
-            self.resampler_quality_combo.findText(values.resampler_quality.title())
-        )
 
         self.demod_type_combo.setCurrentText(values.demod_type)
-        self.demod_type_combo.setCurrentIndex(
-            self.demod_type_combo.findText(values.demod_type)
-        )
 
         self.threads_spinbox.setValue(max(1, int(values.threads)))
 
@@ -1239,36 +1132,24 @@ class HifiUi(QMainWindow):
         self.afe_right_carrier_spinbox.setValue(int(standard.RCarrierRef))
 
     def update_deemphasis_expander_values(self, format):
-        if format == "VHS":
-            self.deemphasis_low_tau_dial_control.setValue(DEFAULT_VHS_DEEMPHASIS_TAU_1)
-            self.deemphasis_high_tau_dial_control.setValue(DEFAULT_VHS_DEEMPHASIS_TAU_2)
-            self.nr_deemphasis_low_tau_dial_control.setValue(DEFAULT_VHS_NR_DEEMPHASIS_TAU_1)
-            self.nr_deemphasis_high_tau_dial_control.setValue(DEFAULT_VHS_NR_DEEMPHASIS_TAU_2)
-            self.expander_gain_dial_control.setValue(DEFAULT_VHS_EXPANDER_GAIN)
-            self.expander_ratio_dial_control.setValue(DEFAULT_VHS_EXPANDER_RATIO)
-            self.expander_attack_tau_dial_control.setValue(DEFAULT_VHS_EXPANDER_ATTACK_TAU)
-            self.expander_hold_tau_dial_control.setValue(DEFAULT_VHS_EXPANDER_HOLD_TAU)
-            self.expander_release_tau_dial_control.setValue(DEFAULT_VHS_EXPANDER_RELEASE_TAU)
-            self.expander_weighting_low_tau_dial_control.setValue(DEFAULT_VHS_EXPANDER_WEIGHTING_TAU_1)
-            self.expander_weighting_high_tau_dial_control.setValue(DEFAULT_VHS_EXPANDER_WEIGHTING_TAU_2)
-            self.expander_weighting_low_pass_dial_control.setValue(DEFAULT_VHS_EXPANDER_WEIGHTING_LOW_PASS)
-            self.expander_weighting_low_pass_transition_dial_control.setValue(DEFAULT_VHS_EXPANDER_WEIGHTING_LOW_PASS_TRANSITION)
-            self.audio_mode_combo.setCurrentText(audio_mode_to_ui[DEFAULT_VHS_AUDIO_MODE])
-        else:
-            self.deemphasis_low_tau_dial_control.setValue(DEFAULT_8MM_DEEMPHASIS_TAU_1)
-            self.deemphasis_high_tau_dial_control.setValue(DEFAULT_8MM_DEEMPHASIS_TAU_2)
-            self.nr_deemphasis_low_tau_dial_control.setValue(DEFAULT_8MM_NR_DEEMPHASIS_TAU_1)
-            self.nr_deemphasis_high_tau_dial_control.setValue(DEFAULT_8MM_NR_DEEMPHASIS_TAU_2)
-            self.expander_gain_dial_control.setValue(DEFAULT_8MM_EXPANDER_GAIN)
-            self.expander_ratio_dial_control.setValue(DEFAULT_8MM_EXPANDER_RATIO)
-            self.expander_attack_tau_dial_control.setValue(DEFAULT_8MM_EXPANDER_ATTACK_TAU)
-            self.expander_hold_tau_dial_control.setValue(DEFAULT_8MM_EXPANDER_HOLD_TAU)
-            self.expander_release_tau_dial_control.setValue(DEFAULT_8MM_EXPANDER_RELEASE_TAU)
-            self.expander_weighting_low_tau_dial_control.setValue(DEFAULT_8MM_EXPANDER_WEIGHTING_TAU_1)
-            self.expander_weighting_high_tau_dial_control.setValue(DEFAULT_8MM_EXPANDER_WEIGHTING_TAU_2)
-            self.expander_weighting_low_pass_dial_control.setValue(DEFAULT_8MM_EXPANDER_WEIGHTING_LOW_PASS)
-            self.expander_weighting_low_pass_transition_dial_control.setValue(DEFAULT_8MM_EXPANDER_WEIGHTING_LOW_PASS_TRANSITION)
-            self.audio_mode_combo.setCurrentText(audio_mode_to_ui[DEFAULT_8MM_AUDIO_MODE])
+        prefix = "DEFAULT_VHS_" if format == "VHS" else "DEFAULT_8MM_"
+        for control, name in (
+            (self.deemphasis_low_tau_dial_control, "DEEMPHASIS_TAU_1"),
+            (self.deemphasis_high_tau_dial_control, "DEEMPHASIS_TAU_2"),
+            (self.nr_deemphasis_low_tau_dial_control, "NR_DEEMPHASIS_TAU_1"),
+            (self.nr_deemphasis_high_tau_dial_control, "NR_DEEMPHASIS_TAU_2"),
+            (self.expander_gain_dial_control, "EXPANDER_GAIN"),
+            (self.expander_ratio_dial_control, "EXPANDER_RATIO"),
+            (self.expander_attack_tau_dial_control, "EXPANDER_ATTACK_TAU"),
+            (self.expander_hold_tau_dial_control, "EXPANDER_HOLD_TAU"),
+            (self.expander_release_tau_dial_control, "EXPANDER_RELEASE_TAU"),
+            (self.expander_weighting_low_tau_dial_control, "EXPANDER_WEIGHTING_TAU_1"),
+            (self.expander_weighting_high_tau_dial_control, "EXPANDER_WEIGHTING_TAU_2"),
+            (self.expander_weighting_low_pass_dial_control, "EXPANDER_WEIGHTING_LOW_PASS"),
+            (self.expander_weighting_low_pass_transition_dial_control, "EXPANDER_WEIGHTING_LOW_PASS_TRANSITION"),
+        ):
+            control.setValue(getattr(hifi_constants, prefix + name))
+        self.audio_mode_combo.setCurrentText(audio_mode_to_ui[getattr(hifi_constants, prefix + "AUDIO_MODE")])
 
     def on_standard_change(self):
         self.update_afe_values(
@@ -1399,14 +1280,10 @@ class HifiUi(QMainWindow):
             return
         print("Input sample rate changed.")
         if "Other" in self.input_samplerate_combo.currentText():
-            input_dialog = InputDialog(
-                title="Input Sample Rate",
-                label="MHz",
-                value=self.input_sample_rate,
-                validator=QtGui.QDoubleValidator(),
+            value, ok = QInputDialog.getDouble(
+                self, "Input Sample Rate", "MHz", float(self.input_sample_rate), decimals=6
             )
-            value: float = input_dialog.get_input_value()
-            if value is not None:
+            if ok:
                 new_other_text = f"Other ({float(value):g})"
                 self.input_samplerate_combo.setPlaceholderText(new_other_text)
                 self.input_samplerate_combo.setCurrentIndex(-1)
@@ -1482,13 +1359,8 @@ class FileOutputDialogUI(HifiUi):
         )
 
     def on_file_output_button_clicked(self):
-        qdialog = QFileDialog(self)
-        qdialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        if os.path.isdir(os.path.dirname(self.file_output_textbox.text())):
-            qdialog.setDirectory(os.path.dirname(self.file_output_textbox.text()))
-
-        file_name, _ = qdialog.getOpenFileName(
-            self, "Open File", "", "All Files (*);;FLAC (*.flac)"
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, "Save File", self.file_output_textbox.text(), "All Files (*);;FLAC (*.flac)"
         )
         if file_name:
             self.file_output_textbox.setText(file_name)
@@ -1796,7 +1668,7 @@ class FileIODialogUI(HifiUi):
     def auto_detect_format_system_from_filename(self, input_path: str):
         """Auto-set Format and Standard from keywords in the input filename.
 
-        Recognizes VHS/SVHS, Video8/Hi8, Betamax, Betacam, NTSC and PAL. Only
+        Recognizes VHS/SVHS, Video8/Hi8, NTSC and PAL. Only
         updates a control when a matching keyword is found; the existing
         selection is left untouched otherwise.
         """
@@ -1805,11 +1677,7 @@ class FileIODialogUI(HifiUi):
         name_lower = os.path.basename(input_path).lower()
 
         # Check rarer/more-specific formats first so SVHS/VHS don't shadow them.
-        if "betamax" in name_lower:
-            self.format_combo.setCurrentText("Betamax")
-        elif "betacam" in name_lower:
-            self.format_combo.setCurrentText("Betacam")
-        elif "video8" in name_lower or "hi8" in name_lower or "hi-8" in name_lower:
+        if "video8" in name_lower or "hi8" in name_lower or "hi-8" in name_lower:
             self.format_combo.setCurrentText("Video8/Hi8")
         elif (
             "svhs" in name_lower
@@ -1874,12 +1742,8 @@ class FileIODialogUI(HifiUi):
         event.ignore()
 
     def on_file_input_button_clicked(self):
-        qdialog = QFileDialog(self)
-        qdialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        if os.path.isdir(os.path.dirname(self.file_input_textbox.text())):
-            qdialog.setDirectory(os.path.dirname(self.file_input_textbox.text()))
-        file_name, _ = qdialog.getOpenFileName(
-            self, "Open File", "", "All Files (*);;FLAC (*.flac)"
+        file_name, _ = QFileDialog.getOpenFileName(
+            self, "Open File", self.file_input_textbox.text(), "All Files (*);;FLAC (*.flac)"
         )
 
         if os.path.exists(file_name):

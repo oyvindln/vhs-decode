@@ -52,8 +52,6 @@ PyInstaller.__main__.run(
         "--add-data",
         "assets:assets",
         "--hidden-import",
-        "vhsdecode.windows_bootstrap",
-        "--hidden-import",
         "vhsdecode.decode_launcher",
         "--hidden-import",
         "vhsdecode.main",

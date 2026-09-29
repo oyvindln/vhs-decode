@@ -108,46 +108,7 @@ class TestOutputFile(argparse.Action):
             setattr(namespace, self.dest, values)
 
 
-def add_argument_hidden_in_gui(parser, use_gui, *args, **kwargs):
-    if use_gui:
-        parser.add_argument(*args, **kwargs, gooey_options={"visible": False})
-    else:
-        parser.add_argument(*args, **kwargs)
-
-
-def common_parser(meta_title, use_gui=False):
-    if not use_gui:
-        return common_parser_cli(meta_title)
-    else:
-        return common_parser_gui(meta_title)
-
-
-def common_parser_gui(meta_title):
-    from gooey import Gooey, GooeyParser
-
-    @Gooey(program_name="VHS decode")
-    def common_parser_gui_inner(meta_title):
-        parser = GooeyParser(description=meta_title)
-        parser.add_argument(
-            "infile",
-            metavar="infile",
-            type=str,
-            help="source file",
-            widget="FileChooser",
-        )
-        parser.add_argument(
-            "outfile",
-            metavar="outfile",
-            type=str,
-            help="source file",
-            widget="FileSaver",
-        )
-        return common_parser_inner(parser, True)
-
-    return common_parser_gui_inner(meta_title)
-
-
-def common_parser_cli(meta_title, default_threads=DEFAULT_THREADS + 1):
+def common_parser(meta_title, default_threads=DEFAULT_THREADS + 1):
     parser = argparse.ArgumentParser(
         description=meta_title, formatter_class=argparse.RawTextHelpFormatter
     )
@@ -184,7 +145,7 @@ def common_parser_cli(meta_title, default_threads=DEFAULT_THREADS + 1):
     return common_parser_inner(parser, default_threads=default_threads)
 
 
-def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
+def common_parser_inner(parser, default_threads=DEFAULT_THREADS):
     parser.add_argument(
         "--system",
         metavar="system",
@@ -292,27 +253,21 @@ def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
     )
 
     system_group = parser.add_argument_group("Video system options")
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "-p",
         "--pal",
         dest="pal",
         action="store_true",
         help="source is in PAL format",
     )
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "-n",
         "--ntsc",
         dest="ntsc",
         action="store_true",
         help="source is in NTSC format",
     )
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "--pm",
         "--palm",
         dest="palm",

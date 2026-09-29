@@ -94,7 +94,7 @@ def _normalize_ire0_adjust_args(raw_args):
     return normalized
 
 
-def main(args=None, use_gui=False):
+def main(args=None):
     # Allows stack-dump on Unix via `kill -USR1 <pid>` when supported.
     # Windows does not provide SIGUSR1.
     sigusr1 = getattr(signal, "SIGUSR1", None)
@@ -111,7 +111,6 @@ def main(args=None, use_gui=False):
 
     parser, debug_group = common_parser(
         "Extracts video from RAW RF captures of colour-under & composite modulated" " tapes",
-        use_gui=use_gui,
     )
 
     parser.add_argument(
@@ -236,16 +235,15 @@ def main(args=None, use_gui=False):
             " specify Q factor (filter width)"
         ),
     )
-    if not use_gui:
-        luma_group.add_argument(
-            "--noclamp",
-            "--no_clamping",
-            dest="disable_dc_offset",
-            action="store_true",
-            default=True,
-            help=argparse.SUPPRESS,
-            # help="Disable blanking DC offset clamping/compensation (no effect as this is the default currently)",
-        )
+    luma_group.add_argument(
+        "--noclamp",
+        "--no_clamping",
+        dest="disable_dc_offset",
+        action="store_true",
+        default=True,
+        help=argparse.SUPPRESS,
+        # help="Disable blanking DC offset clamping/compensation (no effect as this is the default currently)",
+    )
     luma_group.add_argument(
         "--clamp",
         dest="enable_dc_offset",
@@ -646,7 +644,7 @@ def main(args=None, use_gui=False):
     rf_options["secam_lo_trim"] = args.secam_lo_trim
     rf_options["gnrc_afe"] = args.gnrc_afe
 
-    extra_options = get_extra_options(args, not use_gui)
+    extra_options = get_extra_options(args, True)
     extra_options["params_file"] = args.params_file
     extra_options["orc"] = args.orc
 
