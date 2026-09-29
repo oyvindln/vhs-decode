@@ -114,6 +114,10 @@ jobs:
           pip install pyinstaller pyinstaller-versionfile
           pip install -e ".[hifi_gui_qt6]"
 
+      - name: Generate version metadata
+        shell: bash
+        run: python scripts/generate_version.py > lddecode/version
+
       - name: Build Windows binary
         run: |
           python .\scripts\ci\build-windows-decode-bin.py
