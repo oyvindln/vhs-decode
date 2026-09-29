@@ -1,6 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "setuptools-rust", "setuptools_scm>=6.2", "wheel", "Cython", "numpy"]
-# requires = ["setuptools>=61", "wheel", "Cython", "numpy"]
+requires = ["setuptools>=61", "setuptools-rust", "setuptools_scm>=6.2", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -31,7 +30,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "cython",
     "matplotlib",
     "noisereduce>=2.0.0",
     "numba>=0.59",

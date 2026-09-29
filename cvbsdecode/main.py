@@ -5,8 +5,6 @@ import sys
 import signal
 import traceback
 
-import numpy
-import pyximport; pyximport.install(language_level=3, setup_args={'include_dirs': numpy.get_include()}, reload_support=True)  # noqa: E702
 
 import lddecode.utils as lddu
 from lddecode.utils_logging import init_logging

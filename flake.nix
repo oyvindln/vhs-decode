@@ -72,13 +72,11 @@
             setuptools-rust
             setuptools-scm
             wheel
-            cython
             pkgs.rustc
           ];
           
           propagatedBuildInputs = with pythonPackages; [
             av
-            cython
             matplotlib
             noisereduce
             numba

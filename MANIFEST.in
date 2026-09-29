@@ -1,4 +1,3 @@
-include vhsdecode/*.pyx
 include Cargo.toml
 build/versionfile.txt
 recursive-include rust *.rs

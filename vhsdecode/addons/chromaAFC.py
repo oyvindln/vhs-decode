@@ -8,7 +8,6 @@ from numpy.fft import rfft, rfftfreq
 import lddecode.core as ldd
 from scipy.signal import argrelextrema
 from vhsdecode.rust_utils import sosfiltfilt_rust
-from vhsdecode.linear_filter import FiltersClass
 
 twopi = 2 * np.pi
 
@@ -98,11 +97,6 @@ class ChromaAFC:
         self.cc_wave = np.array([])
 
     # applies a filtfilt to the data over the array of filters
-    def chainfiltfilt(self, data, filters):
-        for filt in filters:
-            data = filt.filtfilt(data)
-        return data
-
     def fit(self):
         table = self.tableset(sample_size=self.fieldlen)
         x, y = table[:, 0], table[:, 1]
@@ -455,7 +449,9 @@ class ChromaAFC:
         return carrier_freq
 
     def measureCenterFreq(self, data):
-        return self.fftCenterFreq(self.chainfiltfilt(data, self.narrowband))
+        for b, a in self.narrowband:
+            data = sps.filtfilt(b, a, data)
+        return self.fftCenterFreq(data)
 
     # returns the downconverted chroma carrier offset
     def freqOffset(self, chroma, adjustf=True):
@@ -600,10 +596,7 @@ class ChromaAFC:
             fs=self.samp_rate,
         )
 
-        return [
-            FiltersClass(iir_narrow_lo[0], iir_narrow_lo[1], self.samp_rate),
-            FiltersClass(iir_narrow_hi[0], iir_narrow_hi[1], self.samp_rate),
-        ]
+        return [iir_narrow_lo, iir_narrow_hi]
 
     def get_band_tolerance(self):
         return (100 - self.max_f_dev_percents[0]) / 100, (100 + self.max_f_dev_percents[1]) / 100

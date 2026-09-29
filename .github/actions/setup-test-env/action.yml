@@ -25,8 +25,3 @@ runs:
       shell: bash
       run: pip install ".[test]"
 
-    - name: Verify Cython extensions compiled
-      shell: bash
-      run: |
-        cd /tmp
-        python -c "import vhsdecode.linear_filter; import vhsdecode.sync; print('Cython OK')"
