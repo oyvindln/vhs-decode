@@ -43,9 +43,7 @@ jobs:
         with:
           python-version: "${{ matrix.python }}"
           cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            requirements.txt
+          cache-dependency-path: pyproject.toml
       - name: Generate version metadata
         shell: bash
         run: |
@@ -92,7 +90,6 @@ jobs:
             python3 -m pip install "numba==0.60.0"
           fi
 
-          python3 -m pip install -r ./requirements.txt
           python3 -m pip install "pyinstaller>=6.20"
           python3 -m pip install -e ".[hifi_gui_qt6,hifi_gnuradio]"
 

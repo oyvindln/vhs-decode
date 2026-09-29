@@ -1,7 +1,0 @@
-[Desktop Entry]
-Name=ld-analyse
-Exec=ld-analyse %f
-Terminal=false
-Icon=64-analyse
-Type=Application
-Categories=AudioVideo;Video

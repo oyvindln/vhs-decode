@@ -42,31 +42,26 @@ dependencies = [
     "av",
 ]
 dynamic = ["version"]
-# version = "0.2.1dev0"
 
 [project.optional-dependencies]
 intel = [ "intel-cmplr-lib-rt", "icc_rt" ]
 hifi_gui = [ "PyQt5>=5.14.1" ]
 hifi_gui_qt6 = [ "PyQt6>=6.4.2" ]
-# Can probably be depcretaded now since it's also an option in vhs-decode to use it.
 hifi_gnuradio = [ "pyzmq" ]
-gnuradio = [ "pyzmq" ]
 test = [ "pytest>=7.0" ]
 
 [project.scripts]
+ld-compress = "lddecode.compress:main"
+ld-cut = "lddecode.cut:main"
 ld-decode = "lddecode.main:main"
 ld-ldf-reader-py = "lddecode.ldf_reader:main"
+ld-lds-converter-py = "lddecode.lds:main"
+ld-find-start = "lddecode.start_finder:main"
 vhs-decode = "vhsdecode.main:main"
 cvbs-decode = "cvbsdecode.main:main"
 hifi-decode = "vhsdecode.hifi.main:main"
 filter-tune = "filter_tune.filter_tune:main"
 decode-launcher = "vhsdecode.decode_launcher:main"
-
-#[console_scripts]
-# TODO: These should maybe be made modules too
-#ld-cut = "ld-cut"
-#cx-expander = "cx-expander"
-#tbc-video-export = "tbc-video-export"
 
 [project.urls]
 Homepage = "https://www.domesday86.com"
@@ -80,6 +75,18 @@ local_scheme = "no-local-version"
 # Restrict git describe/version parsing to real version tags (avoid tags like "rev4.0" breaking builds)
 git_describe_command = "git describe --dirty --tags --long --match [0-9]* --match v[0-9]*"
 tag_regex = '^(?:v)?(?P<version>\d+(?:\.\d+)*(?:(?:a|b|rc)\d*)?)$'
+
+[tool.setuptools]
+packages = [
+    "lddecode",
+    "vhsdecode",
+    "vhsdecode.addons",
+    "vhsdecode.format_defs",
+    "vhsdecode.hifi",
+    "cvbsdecode",
+    "filter_tune",
+]
+script-files = ["scripts/cx-expander", "decode.py"]
 
 [tool.setuptools.package-data]
 lddecode = ["py.typed", "version", "sinc_lut.npz"]

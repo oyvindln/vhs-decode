@@ -1,12 +1,7 @@
-build/versionfile.txt
 exclude CMake*
-exclude gen_*
-exclude compile.bat*
 exclude README_*
 exclude advanced_flags.md
 exclude .flake8
-exclude vcpkg*
-exclude ld-ldf-reader.c
 prune .github
 prune tools
 prune notebooks

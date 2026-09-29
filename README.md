@@ -315,7 +315,7 @@ For a basic click-to-open launcher that lets you select common tools and open th
 
 or if you built from source :
 
-    ./decode-launcher
+    python decode.py decode-launcher
 
 You can drag and drop RF input files onto the launcher window or input field, and drop `.json` files to auto-fill the params JSON field.
 

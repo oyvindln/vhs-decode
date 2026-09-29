@@ -54,17 +54,17 @@
 
         vhs-decode = pythonPackages.buildPythonPackage {
           inherit pname version;
-          
+
           src = ./.;
-          
+
           pyproject = true;
-          
+
           nativeBuildInputs = with pythonPackages; [
             setuptools
             setuptools-scm
             wheel
           ];
-          
+
           propagatedBuildInputs = with pythonPackages; [
             av
             matplotlib
@@ -77,7 +77,7 @@
             soundfile
             soxr
           ];
-          
+
           # static-ffmpeg is not in nixpkgs; ffmpeg is provided via pkgs.ffmpeg
           postPatch = ''
             substituteInPlace pyproject.toml \
@@ -88,10 +88,15 @@
           preBuild = ''
             echo "${fullVersion}" > lddecode/version
           '';
-          
+
+          # Applied by wrapPythonPrograms to the Python commands in $out/bin
+          makeWrapperArgs = [
+            "--prefix" "PATH" ":" toolPath
+          ];
+
           # Skip tests for minimal build
           doCheck = false;
-          
+
           meta = with pkgs.lib; {
             description = "Software defined LaserDisc and videotape decoder";
             homepage = "https://github.com/oyvindln/vhs-decode";
@@ -135,12 +140,25 @@
             type = "app";
             program = "${vhs-decode}/bin/ld-ldf-reader-py";
           };
+          ld-cut = {
+            type = "app";
+            program = "${vhs-decode}/bin/ld-cut";
+          };
+          ld-compress = {
+            type = "app";
+            program = "${vhs-decode}/bin/ld-compress";
+          };
+          ld-lds-converter-py = {
+            type = "app";
+            program = "${vhs-decode}/bin/ld-lds-converter-py";
+          };
         };
         
         devShells.default = pkgs.mkShell {
           buildInputs = [
             pkgs.cmake
             pkgs.ffmpeg
+            pkgs.flac
             vhs-decode
             pythonPackages.jupyter
             pythonPackages.pandas
@@ -148,7 +166,7 @@
             pythonPackages.pytest-cov
             docsEnv
           ];
-          
+
           shellHook = ''
             echo "vhs-decode development environment"
           '';

@@ -1,7 +1,0 @@
-[Desktop Entry]
-Name=tbc-tools
-Exec=tbc-tools-x86_64.AppImage %f
-Terminal=false
-Icon=vhs-decode
-Type=Application
-Categories=AudioVideo;Video;
