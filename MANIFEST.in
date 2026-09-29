@@ -1,4 +1,3 @@
-include vhsdecode/format_defs/*.txt
 include vhsdecode/*.pyx
 include Cargo.toml
 build/versionfile.txt

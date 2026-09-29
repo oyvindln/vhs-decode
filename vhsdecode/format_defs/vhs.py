@@ -63,7 +63,13 @@ def fill_rfparams_svhs_shared(rfparams: dict) -> None:
     rfparams["video_lpf_supergauss"] = True
 
     rfparams["video_custom_luma_filters"] = [
-        {"type": "file", "filename": "svhs-sp-linear-subdeemphasis"},
+        # Linear part of the SP sub-deemphasis. The time constants are a fit
+        # (within 0.01 dB) to the response of that network, not spec values.
+        {
+            "type": "analog",
+            "zeros_tau": [1.305e-6, 63.83e-9],
+            "poles_tau": [882.5e-9, 88.76e-9, 17.18e-9],
+        },
         {"type": "highshelf", "gain": 4.0, "midfreq": 2000000, "q": 0.4967045},
     ]
 
