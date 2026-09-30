@@ -29,8 +29,6 @@ jobs:
 
     name: Build decode (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v5
@@ -153,10 +151,3 @@ jobs:
           name: decode_macos_${{ matrix.arch }}
           path: ${{ env.DMG_NAME }}
           if-no-files-found: error
-      - name: Upload DMG to Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ${{ env.DMG_NAME }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
