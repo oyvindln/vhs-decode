@@ -2,11 +2,9 @@ import argparse
 import os
 import sys
 import signal
-import traceback
 import json
 import shutil
 import tempfile
-import time
 import faulthandler
 import math
 
@@ -19,12 +17,11 @@ from vhsdecode.cmdcommons import (
     common_parser,
     select_sample_freq,
     select_system,
-    get_basics,
     get_rf_options,
     get_extra_options,
-    IOArgsException,
-    test_input_file,
-    test_output_file,
+    get_basics_or_exit,
+    check_overwrite,
+    decode_fields,
 )
 from vhsdecode.formats import TAPE_SPEEDS
 
@@ -198,18 +195,6 @@ def main(args=None):
             "\n  Default is (video system lines / 2) i.e. NTSC=525/2, PAL=625/2, etc."
             "\n  Wow calculation is based on position of hsync pulses which is affected by the accuracy of the TBC. "
             "\n  If you see vertical brightness variations (banding), setting to a value larger than 0 will smooth the wow adjustment."
-        ),
-    )
-    luma_group.add_argument(
-        "--wow_interpolation_method",
-        type=str,
-        default="linear",
-        choices=["linear", "quadratic", "cubic"],
-        help=(
-            "Sets the type of interpolation spline used to correct wow."
-            "\n  linear     [default]"
-            "\n  quadratic"
-            "\n  cubic"
         ),
     )
     luma_group.add_argument(
@@ -546,36 +531,8 @@ def main(args=None):
     normalized_args = _normalize_ire0_adjust_args(raw_args)
     args = parser.parse_args(normalized_args)
 
-    try:
-        filename, outname, firstframe, req_frames = get_basics(args)
-    except IOArgsException as e:
-        parser.print_help()
-        print(e)
-        print(
-            f"ERROR: input file '{args.infile}' not found"
-            if not test_input_file(args.infile)
-            else "Input file: OK"
-        )
-        print(
-            f"ERROR: output file '{args.outfile}' is not writable"
-            if not test_output_file(args.outfile)
-            else "Output file: OK"
-        )
-        sys.exit(1)
-
-    if not args.overwrite:
-        conflicts_ext = [".tbc", "_chroma.tbc", ".log", ".tbc.json"]
-        conflicts = []
-
-        for ext in conflicts_ext:
-            if os.path.isfile(outname + ext):
-                conflicts.append(outname + ext)
-
-        if conflicts:
-            print("Existing decode files found, remove them or run command with" " --overwrite")
-            for conflict in conflicts:
-                print("\t", conflict)
-            sys.exit(1)
+    filename, outname, firstframe, req_frames = get_basics_or_exit(parser, args)
+    check_overwrite(args, outname, [".tbc", "_chroma.tbc", ".log", ".tbc.json"])
 
     system = select_system(args)
     sample_freq = select_sample_freq(args)
@@ -763,67 +720,10 @@ def main(args=None):
     if system == "NTSC" and not args.ntscj:
         vhsd.blackIRE = 7.5
 
-    done = False
-
-    jsondumper = lddu.JSONDumper(vhsd, outname)
-
-    def cleanup():
-        jsondumper.close()
-        vhsd.close()
-
     logger.debug("Sys Parameters: \n" + json.dumps(vhsd.rf.SysParams, sort_keys=True, indent=4))
     logger.debug("RF Parameters: \n" + json.dumps(vhsd.rf.DecoderParams, sort_keys=True, indent=4))
 
-    while not done and vhsd.fields_written < (req_frames * 2):
-        try:
-            f = vhsd.readfield()
-        except KeyboardInterrupt:
-            print("\nTerminated, saving JSON and exiting")
-            cleanup()
-            sys.exit(1)
-        except Exception as err:
-            print(
-                "\nERROR - please paste the following into a bug report:",
-                file=sys.stderr,
-            )
-            print("current sample:", vhsd.fdoffset, file=sys.stderr)
-            print("arguments:", args, file=sys.stderr)
-            print("Exception:", err, " Traceback:", file=sys.stderr)
-            traceback.print_tb(err.__traceback__)
-            cleanup()
-            sys.exit(1)
-
-        if f is None:
-            done = True
-        else:
-            f.prevfield = None
-
-        if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
-            jsondumper.write()
-            # Check free disk space
-            output_dir = os.path.dirname(os.path.abspath(outname))
-            try:
-                free_space = shutil.disk_usage(output_dir).free
-                if (
-                    free_space < 1024 * 1024 * 1024 * 10
-                ):  # 10GB, 500 fields_written needs around 675MB, 1G0B for some margin because there can be other things writing to the disk as well, the disk might fill before the next check otherwise.
-                    print(
-                        "\nLess than 10GB of free disk space is remaining, decoding paused. Decoding will resume once there is more space, or press Ctrl+C to exit.",
-                        file=sys.stderr,
-                    )
-                    while True:
-                        try:
-                            time.sleep(1)
-                            free_space = shutil.disk_usage(output_dir).free
-                            if free_space >= 1024 * 1024 * 1024 * 10:  # 10GB
-                                print("\nDisk space available, resuming decode.", file=sys.stderr)
-                                break
-                        except KeyboardInterrupt:
-                            print("\nTerminated, saving JSON and exiting")
-                            cleanup()
-                            sys.exit(1)
-            except OSError:
-                pass  # Ignore if we can't check disk space
+    cleanup = decode_fields(vhsd, args, outname, req_frames)
 
     if vhsd.fields_written:
         print("\nCompleted: saving JSON and exiting.", file=sys.stderr)

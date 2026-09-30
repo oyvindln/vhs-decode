@@ -1,7 +1,6 @@
-# Contributing to vhs-decode
+# Contributing to ld-decode
 
-Thank you for your interest in contributing to vhs-decode! This document provides guidelines and information for contributors.
-
+Thank you for your interest in contributing to ld-decode! This document provides guidelines and information for contributors.
 
 ## Table of Contents
 
@@ -14,7 +13,6 @@ Thank you for your interest in contributing to vhs-decode! This document provide
 - [Submitting Changes](#submitting-changes)
 - [Community](#community)
 
-
 ## Code of Conduct
 
 This project is run by volunteers and we expect all contributors to be respectful and constructive. Please:
@@ -22,7 +20,7 @@ This project is run by volunteers and we expect all contributors to be respectfu
 - Be welcoming and inclusive
 - Be respectful of differing viewpoints and experiences
 - Accept constructive criticism gracefully
-- Focus on what is best for the tape community
+- Focus on what is best for the community
 - Show empathy towards other community members
 
 ## Getting Started
@@ -42,8 +40,8 @@ See [BUILD.md](BUILD.md) for complete build instructions. Quick reference:
 
 ```bash
 # Clone the repository with submodules
-git clone --recurse-submodules https://github.com/oyvindln/vhs-decode.git
-cd vhs-decode
+git clone --recurse-submodules https://github.com/happycube/ld-decode.git
+cd ld-decode
 
 # Create virtual environment
 python3 -m venv venv
@@ -63,8 +61,8 @@ For Python development, see the virtual environment section in [INSTALL.md](INST
 Quick reference:
 
 ```bash
-python3 -m venv ~/vhs-decode-venv
-source ~/vhs-decode-venv/bin/activate
+python3 -m venv ~/ld-decode-venv
+source ~/ld-decode-venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -75,10 +73,10 @@ pip install -e .
 
 Before creating a bug report:
 
-1. Check the [existing issues](https://github.com/oyvindln/vhs-decode/issues) to avoid duplicates
+1. Check the [existing issues](https://github.com/happycube/ld-decode/issues) to avoid duplicates
 2. Gather information about the bug:
    - Operating system and version
-   - vhs-decode version (git commit hash)
+   - ld-decode version (git commit hash)
    - Steps to reproduce
    - Expected vs. actual behavior
    - Relevant logs or error messages
@@ -88,11 +86,11 @@ Create a detailed bug report including:
 ```markdown
 **Environment:**
 - OS: Ubuntu 22.04
-- vhs-decode commit: abc123def
+- ld-decode commit: abc123def
 - Qt version: 6.x.x
 
 **Steps to Reproduce:**
-1. Run `vhs-decode myfile.flac`
+1. Run `ld-decode myfile.ldf`
 2. Click on X
 3. Observe Y
 
@@ -134,11 +132,11 @@ Areas where contributions are particularly welcome:
 
 ```bash
 # Fork the repository on GitHub, then clone your fork
-git clone --recurse-submodules https://github.com/YOUR_USERNAME/vhs-decode.git
-cd vhs-decode
+git clone --recurse-submodules https://github.com/YOUR_USERNAME/ld-decode.git
+cd ld-decode
 
 # Add upstream remote
-git remote add upstream https://github.com/oyvindln/vhs-decode.git
+git remote add upstream https://github.com/happycube/ld-decode.git
 
 # If you already cloned without --recurse-submodules, initialize testdata:
 git submodule update --init --recursive
@@ -181,10 +179,10 @@ pytest --output-on-failure
 pytest tests/test_chroma.py --output-on-failure
 
 # Run with coverage
-pytest --cov=vhsdecode
+pytest --cov=lddecode
 
 # Test manually with your changes
-python -c "import vhsdecode; print('Import successful')"
+python -c "import lddecode; print('Import successful')"
 ```
 
 ### 5. Commit Your Changes
@@ -293,16 +291,16 @@ def decode_video(input_file, output_file, system='pal'):
 
 Example:
 ```cmake
-add_executable(tbc-analyse
+add_executable(ld-analyse
     main.cpp
     mainwindow.cpp
 )
 
-target_link_libraries(tbc-analyse
+target_link_libraries(ld-analyse
     PRIVATE
         Qt6::Core
         Qt6::Widgets
-        tbc-library
+        lddecode-library
 )
 ```
 
@@ -417,39 +415,30 @@ A good pull request:
 
 PR Description Template:
 ```markdown
-
-
 ## Description
-
 Brief description of changes
 
 ## Motivation
-
 Why is this change needed?
 
 ## Related Issues
-
 Fixes #123
 Related to #456
 
 ## Changes Made
-
 - Added X
 - Modified Y
 - Removed Z
 
 ## Testing
-
 - [ ] All tests pass
 - [ ] Tested manually with [describe test case]
 - [ ] Added new tests for [feature]
 
 ## Screenshots (if applicable)
-
 [Add screenshots here]
 
 ## Checklist
-
 - [ ] Code follows project style guidelines
 - [ ] Documentation updated
 - [ ] Tests added/updated
@@ -466,14 +455,15 @@ Related to #456
 
 ## License
 
-By contributing to vhs-decode, you agree that your contributions will be licensed under the GPL-3.0 license.
+By contributing to ld-decode, you agree that your contributions will be licensed under the GPL-3.0 license.
 
 ## Questions?
 
 If you have questions about contributing:
 
-1. Check the [vhs-decode documentation](https://github.com/oyvindln/vhs-decode/wiki)
-2. Search [existing issues](https://github.com/happycube/vhs-decode/issues)
+1. Check the [ld-decode documentation](https://happycube.github.io/ld-decode/)
+2. Search [existing issues](https://github.com/happycube/ld-decode/issues)
+3. Ask in the [Discord server](https://discord.gg/pVVrrxd)
 4. Open a new issue with your question
 
-Thank you for contributing to vhs-decode! 🎉
+Thank you for contributing to ld-decode! 🎉

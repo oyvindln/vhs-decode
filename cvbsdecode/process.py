@@ -1,11 +1,11 @@
 import math
-import traceback
 import os
 import sqlite3
 import numpy as np
 import scipy.signal as sps
 
 from collections import namedtuple
+from unittest import mock
 import itertools
 
 import lddecode.core as ldd
@@ -14,6 +14,8 @@ from lddecode.utils import inrange
 
 import vhsdecode.formats as vhs_formats
 import vhsdecode.sync as sync
+from vhsdecode.field import FieldShared
+from vhsdecode.process import VHSDecode, VHSRFDecode
 from vhsdecode.addons.chromasep import ChromaSepClass
 from vhsdecode.formats import parent_system
 
@@ -21,6 +23,25 @@ from lddecode.core import npfft
 
 
 class FieldCVBSShared:
+    refine_linelocs_hsync = FieldShared.refine_linelocs_hsync
+    compute_deriv_error = FieldShared.compute_deriv_error
+
+    def getpulses(self):
+        """Find sync pulses in the demodulated video signal
+
+        NOTE: TEMPORARY override until an override for the value itself is added upstream.
+        """
+        return getpulses_override(self)
+
+    def hz_to_output(self, input):
+        if (
+            self.rf.DecoderParams["clamp_agc"] is True
+            and self.outlinecount * self.outlinelen == input.size
+        ):
+            return hz_to_output_override(self, input)
+        else:
+            return super(FieldCVBSShared, self).hz_to_output(input)
+
     def compute_linelocs(self):
         # Override to avoid mooving backwards if hitting lastline < proclines condition.
         # TODO: make shared function etc for vhs and cvbs and push some improvements
@@ -89,21 +110,11 @@ class FieldCVBSShared:
         return linelocs, lineloc_errs, nextfield
 
 
-def chroma_to_u16(chroma):
-    """Scale the chroma output array to a 16-bit value for output."""
-    S16_ABS_MAX = 32767
-
-    if np.max(chroma) > S16_ABS_MAX or abs(np.min(chroma)) > S16_ABS_MAX:
-        ldd.logger.warning("Chroma signal clipping.")
-    return np.uint16(chroma + S16_ABS_MAX)
-
-
 def generate_f05_filter(filters, freq_half, blocklen):
     F0_5 = sps.firwin(65, [0.5 / freq_half], pass_zero=True)
     F0_5_fft = lddu.filtfft((F0_5, [1.0]), blocklen)
     filters["F05_offset"] = 32
     filters["F05"] = F0_5_fft
-    # filters["FVideo05"] = filters["Fvideo_lpf"] * filters["F05"]
 
 
 def find_sync_levels(field):
@@ -143,38 +154,6 @@ def find_sync_levels(field):
                 # Give up
                 return None, None
 
-    if False:
-        import matplotlib.pyplot as plt
-
-        data = field.data["video"]["demod_05"]
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
-        #        ax1.plot(hilbert, color='#FF0000')
-        # ax1.plot(data, color="#00FF00")
-        ax1.axhline(sync_min, color="#0000FF")
-        #        ax1.axhline(blank_level, color="#000000")
-        ax1.axvline(search_start, color="#FF0000")
-        ax1.axvline(next_cross_raw, color="#00FF00")
-        ax1.axvline(next_cross, color="#0000FF")
-        ax1.axhline(blank_level, color="#000000")
-        #            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-        #            ax1.axhline(self.iretohz(7.5))
-        #            ax1.axhline(self.iretohz(100))
-        # print("Vsync IRE", self.SysParams["vsync_ire"])
-        #            ax2 = ax1.twinx()
-        #            ax3 = ax1.twinx()
-        ax1.plot(data)
-        ax2.plot(on_sync)
-        #            ax2.plot(luma05[:2048])
-        #            ax4.plot(env, color="#00FF00")
-        #            ax3.plot(np.angle(hilbert))
-        #            ax4.plot(hilbert.imag)
-        #            crossings = find_crossings(env, 700)
-        #            ax3.plot(crossings, color="#0000FF")
-        plt.show()
-        #            exit(0)
-
     return sync_min, blank_level
 
 
@@ -196,34 +175,6 @@ def getpulses_override(field):
             field.rf.DecoderParams["hz_ire"] = (blank_level - sync_level) / (
                 -field.rf.SysParams["vsync_ire"]
             )
-
-        if False:
-            import matplotlib.pyplot as plt
-
-            data = field.data["video"]["demod_05"]
-
-            fig, ax1 = plt.subplots(1, 1, sharex=True)
-            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
-            #        ax1.plot(hilbert, color='#FF0000')
-            # ax1.plot(data, color="#00FF00")
-            ax1.axhline(field.rf.iretohz(0), color="#000000")
-            #        ax1.axhline(blank_level, color="#000000")
-            ax1.axhline(field.rf.iretohz(field.rf.SysParams["vsync_ire"]))
-            #            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            #            ax1.axhline(self.iretohz(7.5))
-            #            ax1.axhline(self.iretohz(100))
-            # print("Vsync IRE", self.SysParams["vsync_ire"])
-            #            ax2 = ax1.twinx()
-            #            ax3 = ax1.twinx()
-            ax1.plot(data)
-            #            ax2.plot(luma05[:2048])
-            #            ax4.plot(env, color="#00FF00")
-            #            ax3.plot(np.angle(hilbert))
-            #            ax4.plot(hilbert.imag)
-            #            crossings = find_crossings(env, 700)
-            #            ax3.plot(crossings, color="#0000FF")
-            plt.show()
-            #            exit(0)
 
     # pass one using standard levels
 
@@ -387,9 +338,6 @@ def hz_to_output_override(field, input):
 
 
 class FieldPALCVBS(FieldCVBSShared, ldd.FieldPAL):
-    def __init__(self, *args, **kwargs):
-        super(FieldPALCVBS, self).__init__(*args, **kwargs)
-
     def refine_linelocs_pilot(self, linelocs=None):
         """Override this as most sources won't have a pilot burst."""
         if linelocs is None:
@@ -399,96 +347,12 @@ class FieldPALCVBS(FieldCVBSShared, ldd.FieldPAL):
 
         return linelocs
 
-    def refine_linelocs_hsync(self):
-        if not self.rf.options.skip_hsync_refine:
-            threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
-            return sync.refine_linelocs_hsync(self, self.linebad, threshold)
-        else:
-            return self.linelocs1.copy()
-
-    def _determine_field_number(self):
-        """Using LD code as it should work on stable sources, but may not work on stuff like vhs."""
-        return 1 + (self.rf.field_number % 8)
-
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def hz_to_output(self, input):
-        if (
-            self.rf.DecoderParams["clamp_agc"] is True
-            and self.outlinecount * self.outlinelen == input.size
-        ):
-            return hz_to_output_override(self, input)
-        else:
-            return super(FieldPALCVBS, self).hz_to_output(input)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as tapes have large variations in line pos
-        Due to e.g head switch.
-        compute errors based off the second derivative - if it exceeds 1 something's wrong,
-        and if 4 really wrong...
-        """
-        return baserr
-
-    def dropout_detect(self):
-        return None
-
 
 class FieldNTSCCVBS(FieldCVBSShared, ldd.FieldNTSC):
-    def __init__(self, *args, **kwargs):
-        super(FieldNTSCCVBS, self).__init__(*args, **kwargs)
-
-    def refine_linelocs_hsync(self):
-        if not self.rf.options.skip_hsync_refine:
-            threshold = self.rf.iretohz(self.rf.SysParams["vsync_ire"] / 2)
-            return sync.refine_linelocs_hsync(self, self.linebad, threshold)
-            return super(FieldNTSCCVBS, self).refine_linelocs_hsync()
-        else:
-            return self.linelocs1.copy()
-
-    def _refine_linelocs_burst(self, linelocs=None):
-        """Standard impl works for stable sources, we may need to override this for
-        unstable ones though.
-        """
-        if linelocs is None:
-            linelocs = self.linelocs2
-        else:
-            linelocs = linelocs.copy()
-
-        return linelocs
-
-    def dropout_detect(self):
-        return None
-
-    def getpulses(self):
-        """Find sync pulses in the demodulated video signal
-
-        NOTE: TEMPORARY override until an override for the value itself is added upstream.
-        """
-        return getpulses_override(self)
-
-    def compute_deriv_error(self, linelocs, baserr):
-        """Disabled this for now as line starts can vary widely."""
-        return baserr
-
-    def hz_to_output(self, input):
-        if (
-            self.rf.DecoderParams["clamp_agc"] is True
-            and self.outlinecount * self.outlinelen == input.size
-        ):
-            return hz_to_output_override(self, input)
-        else:
-            return super(FieldNTSCCVBS, self).hz_to_output(input)
+    pass
 
 
 class FieldMPALCVBS(FieldNTSCCVBS):
-    def __init__(self, *args, **kwargs):
-        super(FieldMPALCVBS, self).__init__(*args, **kwargs)
-
     def refine_linelocs_burst(self, linelocs=None):
         """Not used for PALM."""
         if linelocs is None:
@@ -499,11 +363,6 @@ class FieldMPALCVBS(FieldNTSCCVBS):
         self.fieldPhaseID = 0
 
         return linelocs
-
-
-def _demodcache_dummy(self, *args, **kwargs):
-    self.ended = True
-    pass
 
 
 # Superclass to override laserdisc-specific parts of ld-decode with stuff that works for VHS
@@ -525,32 +384,29 @@ class CVBSDecode(ldd.LDdecode):
         rf_options={},
         extra_options={},
     ):
-        # monkey patch init with a dummy to prevent calling set_start_method twice on macos
-        # and not create extra threads.
-        # This is kinda hacky and should be sorted in a better way ideally.
-        temp_init = ldd.DemodCache.__init__
-        ldd.DemodCache.__init__ = _demodcache_dummy
-
-        super(CVBSDecode, self).__init__(
-            fname_in,
-            None,
-            freader,
-            logger,
-            analog_audio=False,
-            system=parent_system(system),
-            doDOD=False,
-            threads=threads,
-            extra_options=extra_options,
-        )
-        # Adjustment for output to avoid clipping.
-        self.level_adjust = level_adjust
-        # Overwrite the rf decoder with the VHS-altered one
-        self.rf = CVBSDecodeInner(
+        rf = CVBSDecodeInner(
             system=system,
             tape_format="UMATIC",
             inputfreq=inputfreq,
             rf_options=rf_options,
         )
+
+        # The superclass constructs its own laserdisc RFDecode (and the demod cache around it),
+        # so hand it the composite decoder instead. No output filename so it opens no files.
+        with mock.patch.object(ldd, "RFDecode", lambda **_: rf):
+            super(CVBSDecode, self).__init__(
+                fname_in,
+                None,
+                freader,
+                logger,
+                analog_audio=False,
+                system=parent_system(system),
+                doDOD=False,
+                threads=threads,
+                extra_options=extra_options,
+            )
+        # Adjustment for output to avoid clipping.
+        self.level_adjust = level_adjust
 
         # Store reference to ourself in the rf decoder - needed to access data location for track
         # phase, may want to do this in a better way later.
@@ -564,13 +420,6 @@ class CVBSDecode(ldd.LDdecode):
         else:
             raise Exception("Unknown video system!", system)
 
-        # Restore init functino now that superclass constructor is finished.
-        ldd.DemodCache.__init__ = temp_init
-
-        self.demodcache = ldd.DemodCache(
-            self.rf, self.infile, self.freader, None, num_worker_threads=self.numthreads
-        )
-
         self.dbconn = None
         if extra_options.get("write_db"):
             if os.path.exists(fname_out + ".tbc.db"):
@@ -583,32 +432,6 @@ class CVBSDecode(ldd.LDdecode):
         if fname_out:
             self.outfile_video = open(fname_out + ".tbc", "wb")
 
-    # Override to avoid NaN in JSON.
-    def calcsnr(self, f, snrslice):
-        data = f.output_to_ire(f.dspicture[snrslice])
-
-        signal = np.mean(data)
-        noise = np.std(data)
-
-        # Make sure signal is positive so we don't try to do log on a negative value.
-        if signal < 0.0:
-            ldd.logger.info(
-                "WARNING: Negative mean for SNR, changing to absolute value."
-            )
-            signal = abs(signal)
-        if noise == 0:
-            return 0
-        return 20 * np.log10(signal / noise)
-
-    def calcpsnr(self, f, snrslice):
-        data = f.output_to_ire(f.dspicture[snrslice])
-
-        #        signal = np.mean(data)
-        noise = np.std(data)
-        if noise == 0:
-            return 0
-        return 20 * np.log10(100 / noise)
-
     def buildmetadata(self, f):
         # Avoid crash if this is NaN
         if math.isnan(f.burstmedian):
@@ -620,35 +443,20 @@ class CVBSDecode(ldd.LDdecode):
     def decodeFrameNumber(self, f1, f2):
         return None
 
-    # Again ignored for non-ld sources.
-    def checkMTF(self, field, pfield=None):
-        return True
+    checkMTF = VHSDecode.checkMTF
 
     def computeMetricsNTSC(self, metrics, f, fp=None):
         return None
 
     def build_json(self):
-        # for f in self.fieldstack:
-        #    if f:
-        #        break
-        ## TODO: Make some shared function/class for stuff that is the same in cvbs and vhs-decode
-        try:
-            # if not f:
-            #    # Make sure we don't fail if the last attempted field failed to decode
-            #    # Might be better to fix this elsewhere.
-            #    f = self.prevfield
-            jout = super(CVBSDecode, self).build_json()
-
-            if self.rf.color_system == "MPAL":
-                # jout["videoParameters"]["isSourcePal"] = True
-                # jout["videoParameters"]["isSourcePalM"] = True
-                jout["videoParameters"]["system"] = "PAL-M"
-
-            return jout
-        except TypeError as e:
-            traceback.print_exc()
-            print("Cannot build json: %s" % e)
+        jout = super(CVBSDecode, self).build_json()
+        if jout is None:
             return None
+
+        if self.rf.color_system == "MPAL":
+            jout["videoParameters"]["system"] = "PAL-M"
+
+        return jout
 
     def writeout(self, dataset: tuple):
         if self.dbconn:
@@ -709,54 +517,16 @@ class CVBSDecodeInner(ldd.RFDecode):
         # Lastly we re-create the filters with the new parameters.
         self.computevideofilters()
 
-        self.Filters["FVideo"] = self.Filters["Fvideo_lpf"]
         generate_f05_filter(self.Filters, self.freq_half, self.blocklen)
-
-        # Filter to pick out color-under chroma component.
-        # filter at about twice the carrier. (This seems to be similar to what VCRs do)
-        # TODO: Needs tweaking
-        # Note: order will be doubled since we use filtfilt.
-        # chroma_lowpass = sps.butter(
-        #     2,
-        #     [50000 / self.freq_hz_half, DP["chroma_bpf_upper"] / self.freq_hz_half],
-        #     btype="bandpass",
-        #     output="sos",
-        # )
-        # self.Filters["FVideoBurst"] = chroma_lowpass
 
         if self.notch is not None:
             self.Filters["FVideoNotch"] = sps.iirnotch(
                 self.notch / self.freq_half, self.notch_q
             )
-            # self.Filters["FVideoNotchF"] = lddu.filtfft(
-            #     self.Filters["FVideoNotch"], self.blocklen
-            # )
-
-        # The following filters are for post-TBC:
-        # The output sample rate is at approx 4fsc
-        fsc_mhz = self.SysParams["fsc_mhz"]
-        out_sample_rate_mhz = fsc_mhz * 4
-        out_frequency_half = out_sample_rate_mhz / 2
-
-        # Final band-pass filter for chroma output.
-        # Mostly to filter out the higher-frequency wave that results from signal mixing.
-        # Needs tweaking.
-        # Note: order will be doubled since we use filtfilt.
-        chroma_bandpass_final = sps.butter(
-            1,
-            [
-                (fsc_mhz - 0.1) / out_frequency_half,
-                (fsc_mhz + 0.1) / out_frequency_half,
-            ],
-            btype="bandpass",
-            output="sos",
-        )
-        self.Filters["FChromaBpf"] = chroma_bandpass_final
 
         # Increase the cutoff at the end of blocks to avoid edge distortion from filters
         # making it through.
         self.blockcut_end = 1024
-        self.demods = 0
 
         if self._chroma_trap:
             self._chroma_sep_class = ChromaSepClass(
@@ -781,16 +551,7 @@ class CVBSDecodeInner(ldd.RFDecode):
     def color_system(self):
         return self._color_system
 
-    def computedelays(self, mtf_level=0):
-        """Override computedelays
-        It's normally used for dropout compensation, but the dropout compensation implementation
-        in ld-decode assumes composite color. This function is called even if it's disabled, and
-        seems to break with the VHS setup, so we disable it by overriding it for now.
-        """
-        # Set these to 0 for now, the metrics calculations look for them.
-        self.delays = {}
-        self.delays["video_sync"] = 0
-        self.delays["video_white"] = 0
+    computedelays = VHSRFDecode.computedelays
 
     def demodblock(self, data=None, mtf_level=0, fftdata=None, cut=False):
         datalen = len(fftdata)
@@ -829,30 +590,6 @@ class CVBSDecodeInner(ldd.RFDecode):
         videoburst = npfft.irfft(
             luma_fft * self.Filters["Fburst"][: (len(self.Filters["Fburst"]) // 2) + 1]
         ).astype(np.float32)
-
-        if False:
-            import matplotlib.pyplot as plt
-
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-            # ax1.plot((20 * np.log10(self.Filters["Fdeemp"])))
-            #        ax1.plot(hilbert, color='#FF0000')
-            # ax1.plot(data, color="#00FF00")
-            ax1.axhline(self.iretohz(0))
-            ax1.axhline(self.iretohz(self.SysParams["vsync_ire"]))
-            ax1.axhline(self.iretohz(7.5))
-            ax1.axhline(self.iretohz(100))
-            # print("Vsync IRE", self.SysParams["vsync_ire"])
-            #            ax2 = ax1.twinx()
-            #            ax3 = ax1.twinx()
-            ax1.plot(luma)
-            ax2.plot(luma05)
-            #            ax4.plot(env, color="#00FF00")
-            #            ax3.plot(np.angle(hilbert))
-            #            ax4.plot(hilbert.imag)
-            #            crossings = find_crossings(env, 700)
-            #            ax3.plot(crossings, color="#0000FF")
-            plt.show()
-        #            exit(0)
 
         video_out = np.rec.array(
             [luma, luma05, videoburst],
