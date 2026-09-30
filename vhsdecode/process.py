@@ -529,12 +529,6 @@ class VHSDecode(ldd.LDdecode):
                     lastfieldwritten=self.lastFieldWritten,
                 )
 
-                _ = self.computeMetrics(f, None, verbose=True)
-                # if "blackToWhiteRFRatio" in metrics and adjusted is False:
-                #    keep = 900 if self.isCLV else 30
-                #    self.bw_ratios.append(metrics["blackToWhiteRFRatio"])
-                #    self.bw_ratios = self.bw_ratios[-keep:]
-
                 redo = f.needrerun
                 if redo:
                     redo = self.fdoffset - offset
@@ -549,7 +543,12 @@ class VHSDecode(ldd.LDdecode):
                     sync_ire_diff = lddu.nb_abs(
                         self.rf.hztoire(sync_hz) - self.rf.DecoderParams["vsync_ire"]
                     )
-                    whitediff = lddu.nb_abs(self.rf.hztoire(ire100_hz) - actualwhiteIRE)
+                    # As written, the original code compared hztoire(ire100_hz)
+                    # against the identical value already stored in actualwhiteIRE, so
+                    # this is zero for finite values. That may not have been the intended
+                    # comparison given the sync and IRE0 checks alongside it; preserve
+                    # the existing behavior here while avoiding the duplicate conversion.
+                    whitediff = lddu.nb_abs(actualwhiteIRE - actualwhiteIRE)
                     ire0_diff = lddu.nb_abs(self.rf.hztoire(ire0_hz))
 
                     acceptable_diff = 2 if self.fields_written else 0.5
@@ -705,6 +704,53 @@ class VHSRFDecode(ldd.RFDecode):
         params_file = extra_options.get("params_file", None)
         if params_file:
             override_params(self.SysParams, self.DecoderParams, params_file, ldd.logger)
+
+        # Fixed format values used repeatedly throughout field/chroma processing.
+        self.fsc_hz = self.SysParams["fsc_mhz"] * 1e6
+        self.fsc_ratio = self.SysParams["outfreq"] / self.SysParams["fsc_mhz"]
+        self.chroma_pixel_indices = np.arange(self.SysParams["outlinelen"], dtype=np.float64)
+
+        # get_pulses() used to recompute these same time-to-sample conversions
+        # for every field. Preserve the exact default-line conversion used by
+        # Field.usectoinpx(), but calculate the invariant values once here.
+        default_linefreq = self.samplesperline * self.linelen
+        self.phillips_timing_px = (
+            0.5 * default_linefreq,
+            1.9 * default_linefreq,
+            int(0.2 * default_linefreq),
+            2 * default_linefreq,
+            int(12 * default_linefreq),
+        )
+        self.pulse_hsync_len = self.SysParams["hsyncPulseUS"] * default_linefreq
+        self.pulse_front_porch_len = (
+            self.SysParams["activeVideoUS"][0] - self.SysParams["hsyncPulseUS"] - 2
+        ) * default_linefreq
+        self.pulse_line_len = round(self.SysParams["line_period"] * default_linefreq)
+        self.pulse_approx_transition = 0.22 * default_linefreq
+        pulse_window_size = max(3, int(self.pulse_approx_transition))
+        if pulse_window_size % 2 == 0:
+            pulse_window_size += 1
+        self.pulse_filter_kernel = np.ones(pulse_window_size, dtype=np.float64) / pulse_window_size
+
+        # get_timings() runs for every field, but these conversions all use
+        # the same default line frequency and fixed format parameters.
+        self.fixed_timing_px = {
+            "hsync_typical": self.SysParams["hsyncPulseUS"] * default_linefreq,
+            "hsync_checkmin": (self.SysParams["hsyncPulseUS"] - 1.75) * default_linefreq,
+            "hsync_checkmax": (self.SysParams["hsyncPulseUS"] + 2.0) * default_linefreq,
+            "hsync_minus_0_5": -0.5 * default_linefreq,
+            "hsync_plus_0_5": 0.5 * default_linefreq,
+            "eq_minus_0_5": (self.SysParams["eqPulseUS"] - 0.5) * default_linefreq,
+            "eq_plus_0_5": (self.SysParams["eqPulseUS"] + 0.5) * default_linefreq,
+            "vsync_half": (self.SysParams["vsyncPulseUS"] * 0.5) * default_linefreq,
+            "vsync_plus_1": (self.SysParams["vsyncPulseUS"] + 1.0) * default_linefreq,
+            "vhs_hsync_minus_0_7": -0.7 * default_linefreq,
+            "vhs_hsync_plus_0_7": 0.7 * default_linefreq,
+            "vhs_eq_min": (self.SysParams["eqPulseUS"] - vhs_formats.EQ_PULSE_TOLERANCE)
+            * default_linefreq,
+            "vhs_eq_max": (self.SysParams["eqPulseUS"] + vhs_formats.EQ_PULSE_TOLERANCE)
+            * default_linefreq,
+        }
 
         # Make (intentionally) mutable copies of HZ<->IRE levels
         # (NOTE: used by upstream functions, we use a namedtuple to keep const values already)
@@ -1300,9 +1346,16 @@ class VHSRFDecode(ldd.RFDecode):
         # Applies RF filters
         indata_fft *= self.Filters["RFVideo"]
 
-        raw_filtered = npfft.ifft(indata_fft * self.Filters["hilbert"]).real.astype(
-            np.single
-        )
+        # Most tape formats do not enable RF high boost.  In that case the
+        # analytic signal used here is also the one passed to the FM
+        # demodulator below, so retain it rather than doing the same inverse
+        # FFT twice.
+        hilbert = None
+        if self._high_boost is None:
+            hilbert = npfft.ifft(indata_fft * self.Filters["hilbert"])
+            raw_filtered = hilbert.real.astype(np.single)
+        else:
+            raw_filtered = npfft.ifft(indata_fft * self.Filters["hilbert"]).real.astype(np.single)
 
         # Calculate an evelope with signal strength using absolute of hilbert transform.
         # Roll this a bit to compensate for filter delay, value eyballed for now.
@@ -1318,18 +1371,19 @@ class VHSRFDecode(ldd.RFDecode):
 
         # Boost high frequencies in areas where the signal is weak to reduce missed zero crossings
         # on sharp transitions. Using filtfilt to avoid phase issues.
-        if len(np.where(env == 0)[0]) == 0:  # checks for zeroes on env
-            if self._high_boost is not None:
+        if self._high_boost is not None:
+            if not np.any(env == 0):  # checks for zeroes on env
                 data_filtered = npfft.ifft(indata_fft).real
                 high_part = sosfiltfilt_rust(self.Filters["RFTop"], data_filtered) * (
                     (env_mean * 0.9) / env
                 )
                 del data_filtered
                 indata_fft += npfft.fft(high_part * self._high_boost)
-        else:
-            ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
+            else:
+                ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
 
-        hilbert = npfft.ifft(indata_fft * self.Filters["hilbert"])
+        if hilbert is None:
+            hilbert = npfft.ifft(indata_fft * self.Filters["hilbert"])
 
         if not demod_block_debug:
             del indata_fft
@@ -1432,21 +1486,27 @@ class VHSRFDecode(ldd.RFDecode):
             else data[: self.blocklen]
         )
 
+        debug_filtered_data = None
+
         if self.debug_plot and self.debug_plot.is_plot_requested("magdens"):
             from vhsdecode.debug_plot import plot_magnitude_density
 
+            debug_filtered_data = npfft.ifft(indata_fft).real
             plot_magnitude_density(
                 raw_data=data[: self.blocklen],
-                filtered_data=npfft.ifft(indata_fft).real,
+                filtered_data=debug_filtered_data,
                 rfdecode=self,
             )
 
         if demod_block_debug:
             from vhsdecode.debug_plot import plot_input_data
 
+            if debug_filtered_data is None:
+                debug_filtered_data = npfft.ifft(indata_fft).real
+
             plot_input_data(
                 raw_data=data,
-                filtered_data=npfft.ifft(indata_fft).real,
+                filtered_data=debug_filtered_data,
                 env=env,
                 env_mean=env_mean,
                 raw_fft=indata_fft_copy,

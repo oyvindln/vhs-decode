@@ -1245,19 +1245,18 @@ class FieldShared:
 
     def get_pulses(self, do_level_detect=False):
         demod = self.data["video"]["demod_05"]
-        hsync_len = self.usectoinpx(self.rf.SysParams["hsyncPulseUS"])
-        front_porch_len = self.usectoinpx(self.rf.SysParams["activeVideoUS"][0] - self.rf.SysParams["hsyncPulseUS"] - 2)
-        line_len = round(self.usectoinpx(self.rf.SysParams["line_period"]))
+        hsync_len = self.rf.pulse_hsync_len
+        front_porch_len = self.rf.pulse_front_porch_len
+        line_len = self.rf.pulse_line_len
+        approx_transition = self.rf.pulse_approx_transition
 
         # 1. Filter out high frequencies
         # boxcar FIR filter to remove high frequency data (color burst, pilot tone)
-        approx_transition = self.usectoinpx(0.22)
-        window_size = max(3, int(approx_transition))
-        if window_size % 2 == 0:
-            window_size += 1
-
-        kernel = np.ones(window_size, dtype=np.float64) / window_size
-        filtered_demod = np.convolve(demod, kernel, mode='same')
+        filtered_demod = np.convolve(
+            demod,
+            self.rf.pulse_filter_kernel,
+            mode='same',
+        )
 
         if do_level_detect:
             # try to detect the levels by measuring the lower 5%, and 25% of data
@@ -2080,19 +2079,14 @@ class FieldShared:
         # Get the defaults - this works somehow because python.
         LT = super(FieldShared, self).get_timings()
 
-        hsync_min = LT["hsync_median"] + self.usectoinpx(-0.7)
-        hsync_max = LT["hsync_median"] + self.usectoinpx(0.7)
+        fixed_timing_px = self.rf.fixed_timing_px
+        hsync_min = LT["hsync_median"] + fixed_timing_px["vhs_hsync_minus_0_7"]
+        hsync_max = LT["hsync_median"] + fixed_timing_px["vhs_hsync_plus_0_7"]
 
         LT["hsync"] = (hsync_min, hsync_max)
 
-        eq_min = (
-            self.usectoinpx(self.rf.SysParams["eqPulseUS"] - formats.EQ_PULSE_TOLERANCE)
-            + LT["hsync_offset"]
-        )
-        eq_max = (
-            self.usectoinpx(self.rf.SysParams["eqPulseUS"] + formats.EQ_PULSE_TOLERANCE)
-            + LT["hsync_offset"]
-        )
+        eq_min = fixed_timing_px["vhs_eq_min"] + LT["hsync_offset"]
+        eq_max = fixed_timing_px["vhs_eq_max"] + LT["hsync_offset"]
 
         LT["eq"] = (eq_min, eq_max)
 
@@ -2147,7 +2141,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         self.track_phase_set = False
         self.ire0_backporch = (96, 160)
         self.burst_detected_line = 0
-        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
+        self.fsc_ratio = self.rf.fsc_ratio
 
     @staticmethod
     def _sync_to_burst(
@@ -2213,7 +2207,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
                 FieldPALShared._sync_to_burst(
                     linelocs,
                     self.outlinelen,
-                    self.rf.SysParams["fsc_mhz"] * 1e6,
+                    self.rf.fsc_hz,
                     self.fsc_ratio,
                     self.even_burst_phase_avg,
                     self.odd_burst_phase_avg,
@@ -2236,7 +2230,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         self.fieldPhaseID = None
         self.ire0_backporch = (74, 124)
         self.burst_detected_line = 0
-        self.fsc_ratio = self.rf.SysParams["outfreq"] / self.rf.SysParams["fsc_mhz"]
+        self.fsc_ratio = self.rf.fsc_ratio
 
 
     @staticmethod
@@ -2293,7 +2287,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
                     FieldNTSCShared._sync_to_burst(
                         linelocs,
                         self.outlinelen,
-                        self.rf.SysParams["fsc_mhz"] * 1e6,
+                    self.rf.fsc_hz,
                         self.fsc_ratio,
                         self.burst_phase_avg,
                         self.phase_sequence,
@@ -2304,7 +2298,7 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
                     FieldPALShared._sync_to_burst(
                         linelocs,
                         self.outlinelen,
-                        self.rf.SysParams["fsc_mhz"] * 1e6,
+                    self.rf.fsc_hz,
                         self.fsc_ratio,
                         self.even_burst_phase_avg,
                         self.odd_burst_phase_avg,
