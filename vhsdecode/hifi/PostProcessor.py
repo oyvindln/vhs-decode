@@ -13,7 +13,7 @@ from vhsdecode.hifi.utils import (
     cleanup_process
 )
 
-from numba import njit, guvectorize
+from numba import njit
 import numba
 import atexit
 from setproctitle import setproctitle
@@ -238,18 +238,6 @@ class PostProcessor:
         atexit.register(self.mix_to_stereo_worker_process.join)
 
     @staticmethod
-    @guvectorize(
-        [(numba.types.float32, NumbaAudioArray, NumbaAudioArray)],
-        "(),(n)->(n)",
-        cache=True,
-        fastmath=True,
-        nopython=True,
-    )
-    def normalize(gain, _, audio):
-        for i in range(len(audio)):
-            audio[i] = audio[i] * gain
-
-    @staticmethod
     def dc_block_worker(
         in_conn,
         out_conn,
@@ -322,9 +310,7 @@ class PostProcessor:
             if spectral_nr_amount > 0:
                 spectral_nr.spectral_nr(pre, spectral_nr_out)
             else:
-                DecoderSharedMemory.copy_data_float32(
-                    pre, spectral_nr_out, len(spectral_nr_out)
-                )
+                spectral_nr_out[:] = pre[: len(spectral_nr_out)]
 
             buffer.close()
             out_conn.send((decoder_state, channel_num))
@@ -630,12 +616,8 @@ class PostProcessor:
             in_preL = np.empty(in_decoder_state.block_audio_final_len, dtype=REAL_DTYPE, order="C")
             in_preR = np.empty(in_decoder_state.block_audio_final_len, dtype=REAL_DTYPE, order="C")
 
-            DecoderSharedMemory.copy_data_float32(
-                in_preL_buffer, in_preL, len(in_preL)
-            )
-            DecoderSharedMemory.copy_data_float32(
-                in_preR_buffer, in_preR, len(in_preR)
-            )
+            in_preL[:] = in_preL_buffer[: len(in_preL)]
+            in_preR[:] = in_preR_buffer[: len(in_preR)]
 
             buffer.close()
 
@@ -673,17 +655,9 @@ class PostProcessor:
                     buffer = PostProcessorSharedMemory(decoder_state)
 
                     post_processor_preL = buffer.get_pre_left()
-                    DecoderSharedMemory.copy_data_float32(
-                        preL,
-                        post_processor_preL,
-                        len(post_processor_preL),
-                    )
+                    post_processor_preL[:] = preL[: len(post_processor_preL)]
                     post_processor_preR = buffer.get_pre_right()
-                    DecoderSharedMemory.copy_data_float32(
-                        preR,
-                        post_processor_preR,
-                        len(post_processor_preR),
-                    )
+                    post_processor_preR[:] = preR[: len(post_processor_preR)]
 
                     l_tx.send((decoder_state, 0))
                     r_tx.send((decoder_state, 1))

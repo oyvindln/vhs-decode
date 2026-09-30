@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vhsdecode.hifi.utils import parse_flac_streaminfo
+import soundfile as sf
 from vhsdecode.drop_paths import extract_dropped_file_paths
 
 try:
@@ -1640,10 +1640,10 @@ class FileIODialogUI(HifiUi):
         """
         if not input_path.lower().endswith(".flac"):
             return
-        streaminfo = parse_flac_streaminfo(input_path)
-        if streaminfo is None or streaminfo["sample_rate"] <= 0:
+        try:
+            sample_rate = sf.info(input_path).samplerate
+        except Exception:
             return
-        sample_rate = streaminfo["sample_rate"]
         if sample_rate in (44100, 48000):
             # Standard audio rates, not an FM RF capture. RF FLAC stores the
             # rate in kHz (e.g. 40 MSps = 40000), so 44100/48000 are audio.
