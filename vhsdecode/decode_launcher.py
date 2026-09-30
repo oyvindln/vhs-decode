@@ -217,29 +217,36 @@ HIFI_AUDIO_OUTPUT_EXTENSIONS = {".flac", ".wav"}
 
 
 def _load_app_icon() -> QIcon:
-    icon_dir = Path(__file__).resolve().parents[1] / "assets" / "icons"
+    # In PyInstaller --onefile/--onedir builds, bundled data is extracted
+    # to sys._MEIPASS.  In source/dev mode, assets live relative to the
+    # package directory.  Check both locations.
+    icon_dirs: list[Path] = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        icon_dirs.append(Path(meipass) / "assets" / "icons")
+
+    # Source/dev mode: assets/ is two levels up from vhsdecode/
+    icon_dirs.append(Path(__file__).resolve().parents[1] / "assets" / "icons")
+
+    # Fallback: beside the executable (e.g. portable installs)
+    exec_dir = Path(sys.executable).resolve().parent
+    icon_dirs.append(exec_dir / "assets" / "icons")
 
     if sys.platform == "darwin":
-        candidates = (
-            icon_dir / "vhs-decode.icns",
-            icon_dir / "vhs-decode.png",
-        )
+        icon_names = ("vhs-decode.icns", "vhs-decode.png")
     elif os.name == "nt":
-        candidates = (
-            icon_dir / "vhs-decode.ico",
-            icon_dir / "vhs-decode.png",
-        )
+        icon_names = ("vhs-decode.ico", "vhs-decode.png")
     else:
-        candidates = (
-            icon_dir / "vhs-decode.png",
-            icon_dir / "vhs-decode.ico",
-        )
+        icon_names = ("vhs-decode.png", "vhs-decode.ico")
 
-    for candidate in candidates:
-        if candidate.is_file():
-            icon = QIcon(str(candidate))
-            if not icon.isNull():
-                return icon
+    for icon_dir in icon_dirs:
+        for name in icon_names:
+            candidate = icon_dir / name
+            if candidate.is_file():
+                icon = QIcon(str(candidate))
+                if not icon.isNull():
+                    return icon
 
     return QIcon()
 
@@ -662,6 +669,8 @@ class DecodeLauncherWindow(QWidget):
         self._hosted_launches: list[object] = []
         self._native_gui_warmup_started = False
         self._native_gui_warmup_done = threading.Event()
+        self._force_terminal_by_tool: dict[str, bool] = {"hifi": True}
+        self._active_tool_subcommand: Optional[str] = None
 
         self.launch_button = QPushButton("Launch selected tool")
         self.launch_tbc_tools_button = QPushButton("Launch tbc-tools / ld-analyse")
@@ -746,13 +755,18 @@ class DecodeLauncherWindow(QWidget):
         self.tape_format_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.tape_speed_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.threads_spin.valueChanged.connect(self._refresh_tool_state)
-        self.force_terminal_check.toggled.connect(self._refresh_tool_state)
+        self.force_terminal_check.toggled.connect(self._on_force_terminal_toggled)
         self.params_json_browse_button.clicked.connect(self._browse_params_json_file)
         self.input_browse_button.clicked.connect(self._browse_input_file)
         self.output_browse_button.clicked.connect(self._browse_output_file)
         self.launch_button.clicked.connect(self._launch_selected_tool)
         self.launch_tbc_tools_button.clicked.connect(self._launch_tbc_tools)
         self.close_button.clicked.connect(self.close)
+
+    def _on_force_terminal_toggled(self, checked: bool) -> None:
+        tool = self._selected_tool()
+        self._force_terminal_by_tool[tool.subcommand] = checked
+        self._refresh_tool_state()
 
     def _selected_tool(self) -> ToolSpec:
         return self._tools[self.tool_combo.currentIndex()]
@@ -863,6 +877,15 @@ class DecodeLauncherWindow(QWidget):
 
     def _refresh_tool_state(self) -> None:
         tool = self._selected_tool()
+        if self._active_tool_subcommand != tool.subcommand:
+            self._active_tool_subcommand = tool.subcommand
+            desired_force_terminal = self._force_terminal_by_tool.get(
+                tool.subcommand,
+                tool.subcommand == "hifi",
+            )
+            self.force_terminal_check.blockSignals(True)
+            self.force_terminal_check.setChecked(desired_force_terminal)
+            self.force_terminal_check.blockSignals(False)
         self._sync_system_options_for_tool(tool)
         self._sync_tape_format_options_for_tool(tool)
         params_json_allowed = tool.subcommand == "vhs"
@@ -1381,6 +1404,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.parse_args(argv)
 
     app = QApplication(sys.argv)
+    try:
+        from vhsdecode.qt_identity import apply_app_identity
+
+        apply_app_identity(app)
+    except Exception:
+        pass
     icon = _load_app_icon()
     if icon is not None and not icon.isNull():
         app.setWindowIcon(icon)

@@ -1,7 +1,11 @@
 [Desktop Entry]
 Name=vhs-decode
-Exec=vhs-decode-x86_64.AppImage %f
+Comment=Software defined VHS/LaserDisc/CVBS decoder
+Exec=AppRun %f
 Terminal=false
 Icon=vhs-decode
 Type=Application
-Categories=AudioVideo;Video;
+Categories=AudioVideo;Video;AudioVideoEditing;
+Keywords=vhs;laserdisc;ld;cvbs;rf;decode;video;tape;
+TryExec=AppRun
+StartupWMClass=vhs-decode

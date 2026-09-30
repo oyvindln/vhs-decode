@@ -660,7 +660,24 @@ def profile(function) -> int:
     return run_profiler
 
 def cleanup_process(process):
-    atexit.unregister(process.terminate)
-    atexit.unregister(process.join)
-    process.terminate()
-    process.join()
+    if process is None:
+        return
+
+    try:
+        atexit.unregister(process.terminate)
+    except Exception:
+        pass
+    try:
+        atexit.unregister(process.join)
+    except Exception:
+        pass
+
+    try:
+        process.terminate()
+    except (AssertionError, ValueError, OSError):
+        pass
+
+    try:
+        process.join()
+    except (AssertionError, ValueError):
+        pass

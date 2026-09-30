@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - arch: arm64
             os: ubuntu-24.04-arm
     name: Build decode (${{ matrix.arch }})
@@ -28,7 +28,12 @@ jobs:
     steps:
       - name: Setup environment
         run: |
-          dnf install --assumeyes git python3.12-pip gcc-c++ file
+          dnf install --assumeyes git python3.12-pip gcc-c++ file fuse fuse-libs xz tar
+          if ! dnf install --assumeyes portaudio; then
+            dnf install --assumeyes oracle-epel-release-el8 || \
+              dnf install --assumeyes https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+            dnf install --assumeyes portaudio
+          fi
 
       - uses: actions/checkout@v5
         with:
@@ -55,14 +60,148 @@ jobs:
             echo "PyQt6==6.7.1"
             echo "$(pwd)[hifi_gui_qt6,hifi_gnuradio]"
           } > _build_appimage/requirements.txt
+          PORTAUDIO_LIB_PATH="$(rpm -ql portaudio | grep -E 'libportaudio\.so\.2$' | head -n 1)"
+          if [ -z "${PORTAUDIO_LIB_PATH}" ] || [ ! -f "${PORTAUDIO_LIB_PATH}" ]; then
+            echo "Failed to locate libportaudio.so.2 from the portaudio package."
+            exit 1
+          fi
+          # Pre-download ffmpeg/ffprobe directly via curl so they are
+          # bundled in the AppImage instead of downloaded at runtime.
+          # This is REQUIRED — self-contained binaries must include ffmpeg.
+          # x86_64: use zackees/ffmpeg_bins (zip format)
+          # arm64: use BtbN/FFmpeg-Builds (tar.xz format, zackees has no arm64)
+          FFMPEG_EXTRACT="$(mktemp -d /tmp/ffmpeg-extract-XXXXXX)"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
+            FFMPEG_ARCHIVE="$(mktemp /tmp/ffmpeg-XXXXXX.tar.xz)"
+            curl -fsSL "${FFMPEG_URL}" -o "${FFMPEG_ARCHIVE}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_URL}"; exit 1; }
+            tar -xf "${FFMPEG_ARCHIVE}" -C "${FFMPEG_EXTRACT}" --strip-components=1 || { echo "ERROR: failed to extract ffmpeg tar.xz"; exit 1; }
+          else
+            FFMPEG_URL="https://github.com/zackees/ffmpeg_bins/raw/main/v5.0/linux.zip"
+            FFMPEG_ARCHIVE="$(mktemp /tmp/ffmpeg-XXXXXX.zip)"
+            curl -fsSL "${FFMPEG_URL}" -o "${FFMPEG_ARCHIVE}" || { echo "ERROR: failed to download ffmpeg from ${FFMPEG_URL}"; exit 1; }
+            python3 -c "import zipfile; zipfile.ZipFile('${FFMPEG_ARCHIVE}').extractall('${FFMPEG_EXTRACT}')" || { echo "ERROR: failed to extract ffmpeg zip"; exit 1; }
+          fi
+          FFMPEG_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffmpeg' | head -n 1)"
+          FFPROBE_BIN="$(find "${FFMPEG_EXTRACT}" -type f -name 'ffprobe' | head -n 1)"
+          if [ -z "${FFMPEG_BIN}" ] || [ ! -f "${FFMPEG_BIN}" ]; then
+            echo "ERROR: ffmpeg binary not found in extracted archive. Self-contained binaries require bundled ffmpeg."
+            exit 1
+          fi
+          echo "Downloaded ffmpeg: ${FFMPEG_BIN}"
+          # Save paths for post-build patching
+          cp "${FFMPEG_BIN}" /tmp/ffmpeg-bundled
+          chmod +x /tmp/ffmpeg-bundled
+          [ -n "${FFPROBE_BIN}" ] && [ -f "${FFPROBE_BIN}" ] && cp "${FFPROBE_BIN}" /tmp/ffprobe-bundled || touch /tmp/ffprobe-bundled
+          cp "${PORTAUDIO_LIB_PATH}" /tmp/libportaudio.so.2
+          rm -f "${FFMPEG_ARCHIVE}"
+          rm -rf "${FFMPEG_EXTRACT}"
 
-          python-appimage build app -p 3.12 _build_appimage
+          # Build the AppImage normally (without -x flags, which are unreliable)
+          python-appimage build app -p 3.12 \
+            -- \
+            _build_appimage
           APPIMAGE_SRC="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
           if [ -z "${APPIMAGE_SRC}" ]; then
             echo "Failed to locate generated AppImage."
             exit 1
           fi
+
+          # Post-build patching: extract the AppImage, add ffmpeg/portaudio,
+          # and repackage with appimagetool. python-appimage doesn't reliably
+          # bundle extra files via -x flags or template subdirectories.
+          echo "Patching AppImage with ffmpeg/portaudio..."
+          rm -rf squashfs-root
+          "${APPIMAGE_SRC}" --appimage-extract 2>/dev/null || {
+            dnf install --assumeyes squashfs-tools 2>/dev/null || true
+            unsquashfs -d squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: could not extract AppImage for patching"; exit 1; }
+          }
+          mkdir -p squashfs-root/usr/bin squashfs-root/usr/lib
+          cp /tmp/ffmpeg-bundled squashfs-root/usr/bin/ffmpeg
+          cp /tmp/ffprobe-bundled squashfs-root/usr/bin/ffprobe
+          cp /tmp/libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so.2
+          ln -sf libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so
+          chmod +x squashfs-root/usr/bin/ffmpeg squashfs-root/usr/bin/ffprobe
+          # Install the original icon as .DirIcon and root icon for
+          # taskbar/launcher display. Also install into usr/share/icons
+          # so desktop environments can find it via the hicolor theme.
+          cp assets/icons/vhs-decode.png squashfs-root/.DirIcon
+          cp assets/icons/vhs-decode.png squashfs-root/vhs-decode.png
+          mkdir -p squashfs-root/usr/share/icons/hicolor/256x256/apps
+          cp assets/icons/vhs-decode.png squashfs-root/usr/share/icons/hicolor/256x256/apps/vhs-decode.png
+          # Install the desktop file
+          mkdir -p squashfs-root/usr/share/applications
+          cp resources/appimage/decode/vhs-decode.desktop \
+             squashfs-root/usr/share/applications/vhs-decode.desktop
+          ln -sf usr/share/applications/vhs-decode.desktop squashfs-root/vhs-decode.desktop
+          # Replace AppRun with one that does desktop integration on first
+          # run. python-appimage generates a bare AppRun that just calls
+          # python directly — it never registers the .desktop file or icon
+          # with the user's desktop environment, so the taskbar shows a
+          # generic icon and pinning doesn't work.
+          cp resources/appimage/decode/AppRun squashfs-root/AppRun
+          chmod +x squashfs-root/AppRun
+          # Download appimagetool for repackaging
+          AIT_ARCH="x86_64"
+          [ "${{ matrix.arch }}" = "arm64" ] && AIT_ARCH="aarch64"
+          curl -fsSL "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${AIT_ARCH}.AppImage" -o /tmp/appimagetool || { echo "ERROR: failed to download appimagetool"; exit 1; }
+          chmod +x /tmp/appimagetool
+          rm -f "${APPIMAGE_SRC}"
+          ARCH=${AIT_ARCH} /tmp/appimagetool squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: failed to repackage AppImage"; exit 1; }
+          rm -rf squashfs-root /tmp/appimagetool
+
           mv "${APPIMAGE_SRC}" "./decode-${{ matrix.arch }}.AppImage"
+
+      - name: Smoke test AppImage binary startup (crash regression)
+        run: |
+          set -euo pipefail
+          APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
+          # The binary MUST start without crashing. This catches import
+          # errors (e.g. static_ffmpeg.add_paths() downloading/locking
+          # on a read-only mount) before the binary reaches users.
+          "${APPIMAGE_PATH}" ld --version
+
+      - name: Smoke test AppImage hifi preview dependency bundle
+        run: |
+          set -euo pipefail
+          APPIMAGE_PATH="./decode-${{ matrix.arch }}.AppImage"
+          # Extract the AppImage contents. --appimage-extract needs fuse;
+          # fall back to unsquashfs if fuse isn't working in the container.
+          rm -rf squashfs-root
+          if ! "${APPIMAGE_PATH}" --appimage-extract 2>/dev/null; then
+            echo "--appimage-extract failed, trying unsquashfs..."
+            dnf install --assumeyes squashfs-tools 2>/dev/null || true
+            unsquashfs -d squashfs-root "${APPIMAGE_PATH}" || { echo "ERROR: could not extract AppImage"; exit 1; }
+          fi
+          APPDIR_PATH="${PWD}/squashfs-root"
+          # Debug: list top-level contents of extracted AppImage
+          echo "=== AppImage root contents ==="
+          ls -la "${APPDIR_PATH}/" || true
+          echo "=== Searching for portaudio ==="
+          find "${APPDIR_PATH}" \( -type f -o -type l \) -iname '*portaudio*' || true
+          echo "=== Searching for ffmpeg ==="
+          find "${APPDIR_PATH}" -type f -name 'ffmpeg' || true
+          echo "=== Searching for python ==="
+          find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' || true
+          BUNDLED_PYTHON="$(find "${APPDIR_PATH}/opt" -maxdepth 3 -type f -name 'python3.*' | grep '/bin/python3\.' | head -n 1)"
+          BUNDLED_PORTAUDIO="$(find "${APPDIR_PATH}" \( -type f -o -type l \) \( -name 'libportaudio.so.2' -o -name 'libportaudio.so' \) | head -n 1)"
+          BUNDLED_FFMPEG="$(find "${APPDIR_PATH}" -type f -name 'ffmpeg' | head -n 1)"
+          if [ -z "${BUNDLED_PYTHON}" ] || [ ! -x "${BUNDLED_PYTHON}" ]; then
+            echo "Failed to locate bundled Python interpreter in AppImage."
+            exit 1
+          fi
+          if [ -z "${BUNDLED_PORTAUDIO}" ]; then
+            echo "Failed to locate bundled libportaudio shared library inside AppImage."
+            exit 1
+          fi
+          if [ -z "${BUNDLED_FFMPEG}" ]; then
+            echo "ERROR: ffmpeg is not bundled in the AppImage. Self-contained binaries must include ffmpeg."
+            exit 1
+          fi
+          echo "Found bundled ffmpeg: ${BUNDLED_FFMPEG}"
+          echo "Found bundled portaudio: ${BUNDLED_PORTAUDIO}"
+          APPDIR="${APPDIR_PATH}" "${BUNDLED_PYTHON}" -I -c "import os; from vhsdecode.hifi.main import _sounddevice_available; assert _sounddevice_available(); import sounddevice as sd; lib_path = os.path.realpath(getattr(sd, '_libname', '')); assert lib_path.startswith(os.path.realpath(os.environ['APPDIR'])), lib_path; assert 'portaudio' in os.path.basename(lib_path).lower(), lib_path"
+          rm -rf squashfs-root
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v7

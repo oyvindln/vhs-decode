@@ -1494,6 +1494,12 @@ def main():
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     os.environ["QT_STYLE_OVERRIDE"] = "Fusion"
     app = QApplication(sys.argv)
+    try:
+        from vhsdecode.qt_identity import apply_app_identity
+
+        apply_app_identity(app)
+    except Exception:
+        pass
     _apply_fusion_dark_mode(app)
     logger = logging.getLogger("vhstune")
     tape_format = "VHS"

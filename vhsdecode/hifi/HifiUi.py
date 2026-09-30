@@ -215,6 +215,8 @@ class MainUIParameters:
         self.head_switching_interpolation = True
         self.doc = doc_mode_to_ui[DEFAULT_DOC_MODE]
         self.threads: int = cpu_count()
+        self.preview_real_time: bool = False
+        self.preview_only: bool = False
 
 
 def decode_options_to_ui_parameters(decode_options):
@@ -256,6 +258,8 @@ def decode_options_to_ui_parameters(decode_options):
     values.head_switching_interpolation = decode_options["head_switching_interpolation"]
     values.doc = doc_mode_to_ui[decode_options["doc"]]
     values.threads = decode_options.get("threads", values.threads)
+    values.preview_real_time = decode_options.get("preview_real_time", False)
+    values.preview_only = decode_options.get("preview_only", False)
     return values
 
 
@@ -300,6 +304,8 @@ def ui_parameters_to_decode_options(values: MainUIParameters):
         "doc": ui_to_doc_mode[values.doc],
         "mode": ui_to_audio_mode[values.audio_mode],
         "threads": max(1, int(values.threads)),
+        "preview_real_time": values.preview_real_time,
+        "preview_only": values.preview_only,
     }
     return decode_options
 
@@ -516,11 +522,30 @@ class HifiUi(QMainWindow):
             if app_icon is not None and not app_icon.isNull():
                 return app_icon
 
-        repo_icon = Path(__file__).resolve().parents[2] / "assets" / "icons" / "vhs-decode.png"
-        if repo_icon.is_file():
-            file_icon = QIcon(str(repo_icon))
-            if not file_icon.isNull():
-                return file_icon
+        # In PyInstaller builds, bundled data is in sys._MEIPASS.
+        # In source mode, assets are relative to the package.
+        icon_dirs = []
+        meipass = getattr(sys, "_MEIPASS", None)
+        if isinstance(meipass, str) and meipass:
+            icon_dirs.append(Path(meipass) / "assets" / "icons")
+        icon_dirs.append(Path(__file__).resolve().parents[2] / "assets" / "icons")
+        exec_dir = Path(sys.executable).resolve().parent
+        icon_dirs.append(exec_dir / "assets" / "icons")
+
+        if sys.platform == "darwin":
+            icon_names = ("vhs-decode.icns", "vhs-decode.png")
+        elif os.name == "nt":
+            icon_names = ("vhs-decode.ico", "vhs-decode.png")
+        else:
+            icon_names = ("vhs-decode.png", "vhs-decode.ico")
+
+        for icon_dir in icon_dirs:
+            for name in icon_names:
+                candidate = icon_dir / name
+                if candidate.is_file():
+                    file_icon = QIcon(str(candidate))
+                    if not file_icon.isNull():
+                        return file_icon
 
         return QIcon()
 
@@ -854,6 +879,23 @@ class HifiUi(QMainWindow):
         resampler_quality_layout.addWidget(self.resampler_quality_combo)
         advanced_format_options_frame.inner_layout.addLayout(resampler_quality_layout)
 
+        # Preview mode selection
+        preview_mode_layout = QHBoxLayout()
+        preview_mode_label = QLabel("Preview Mode")
+        self.preview_mode_combo = QComboBox(self)
+        self.preview_mode_combo.addItems(
+            ["Preview with decode", "Preview real-time", "Preview only"]
+        )
+        self.preview_mode_combo.setToolTip(
+            "Preview with decode: decode to file + play at 1x real-time (smooth)\n"
+            "Preview real-time: decode to file + play at decode speed (fast)\n"
+            "Preview only: play at decode speed, no file output (quick scrubbing)"
+        )
+        self.preview_mode_combo.setCurrentIndex(0)
+        preview_mode_layout.addWidget(preview_mode_label)
+        preview_mode_layout.addWidget(self.preview_mode_combo)
+        advanced_format_options_frame.inner_layout.addLayout(preview_mode_layout)
+
         return layout
 
     def build_expander_deemphasis_section(self):
@@ -1162,6 +1204,13 @@ class HifiUi(QMainWindow):
 
         self.input_file = values.input_file
         self.output_file = values.output_file
+        # Map preview flags to combo index
+        if values.preview_only:
+            self.preview_mode_combo.setCurrentIndex(2)
+        elif values.preview_real_time:
+            self.preview_mode_combo.setCurrentIndex(1)
+        else:
+            self.preview_mode_combo.setCurrentIndex(0)
 
     def getValues(self) -> MainUIParameters:
         values = MainUIParameters()
@@ -1214,6 +1263,10 @@ class HifiUi(QMainWindow):
         values.input_file = self.input_file
         values.output_file = self.output_file
         values.threads = self.threads_spinbox.value()
+        # Map combo index to preview flags
+        preview_mode_index = self.preview_mode_combo.currentIndex()
+        values.preview_real_time = preview_mode_index in (1, 2)
+        values.preview_only = preview_mode_index == 2
         return values
 
     def update_afe_values(
@@ -2048,6 +2101,12 @@ class PlotWindow(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    try:
+        from vhsdecode.qt_identity import apply_app_identity
+
+        apply_app_identity(app)
+    except Exception:
+        pass
     params = MainUIParameters()
     window = FileIODialogUI(params)
     window.show()

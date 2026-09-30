@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import os
 import sys
 import threading
+import queue
 from typing import Optional
 import signal
 from numba import njit
@@ -23,7 +24,7 @@ import numba
 import atexit
 import asyncio
 from setproctitle import setproctitle
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 
 import numpy as np
 import soundfile as sf
@@ -113,14 +114,128 @@ SOUNDDEVICE_AVAILABLE = None
 from vhsdecode.hifi.HiFiDecode import HiFiDecode
 from vhsdecode.hifi.PostProcessor import PostProcessor
 
+def _linux_portaudio_search_roots() -> list[str]:
+    roots = []
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        roots.extend(
+            [
+                appdir,
+                os.path.join(appdir, "usr", "lib"),
+                os.path.join(appdir, "usr", "lib64"),
+                os.path.join(appdir, "lib"),
+                os.path.join(appdir, "lib64"),
+            ]
+        )
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if isinstance(meipass, str) and meipass:
+        roots.extend(
+            [
+                meipass,
+                os.path.join(meipass, "usr", "lib"),
+                os.path.join(meipass, "usr", "lib64"),
+                os.path.join(meipass, "lib"),
+                os.path.join(meipass, "lib64"),
+            ]
+        )
+
+    executable_dir = os.path.dirname(sys.executable)
+    if executable_dir:
+        roots.extend(
+            [
+                executable_dir,
+                os.path.join(executable_dir, "lib"),
+                os.path.join(executable_dir, "..", "lib"),
+            ]
+        )
+
+    ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+    if ld_library_path:
+        roots.extend(
+            [entry for entry in ld_library_path.split(os.pathsep) if entry]
+        )
+
+    return roots
+
+
+def _iter_linux_portaudio_candidates():
+    seen_paths = set()
+    for root in _linux_portaudio_search_roots():
+        normalized_root = os.path.realpath(root)
+        if normalized_root in seen_paths:
+            continue
+        seen_paths.add(normalized_root)
+
+        for fallback_name in ("libportaudio.so.2", "libportaudio.so"):
+            candidate_path = os.path.join(normalized_root, fallback_name)
+            if os.path.isfile(candidate_path):
+                yield candidate_path
+
+    for fallback_name in ("libportaudio.so.2", "libportaudio.so"):
+        yield fallback_name
+
+
+def _import_sounddevice_with_linux_portaudio_fallback():
+    import ctypes.util
+
+    original_find_library = ctypes.util.find_library
+    last_error = None
+
+    for candidate in _iter_linux_portaudio_candidates():
+        def _find_library_with_fallback(name, _candidate=candidate):
+            if name == "portaudio":
+                return _candidate
+            return original_find_library(name)
+
+        ctypes.util.find_library = _find_library_with_fallback
+        try:
+            sys.modules.pop("sounddevice", None)
+            import sounddevice as imported_sounddevice
+            return imported_sounddevice
+        except (ImportError, OSError) as error:
+            last_error = error
+        finally:
+            ctypes.util.find_library = original_find_library
+
+    if last_error is not None:
+        raise last_error
+    raise OSError("PortAudio library not found")
+
 
 def _sounddevice_available():
     global sd, SOUNDDEVICE_AVAILABLE
 
     if SOUNDDEVICE_AVAILABLE is None:
-        try:
-            import sounddevice as imported_sounddevice
-        except (ImportError, OSError):
+        imported_sounddevice = None
+        is_linux = sys.platform.startswith("linux")
+        prefer_bundled_portaudio = is_linux and (
+            bool(os.environ.get("APPDIR")) or bool(getattr(sys, "_MEIPASS", None))
+        )
+
+        if prefer_bundled_portaudio:
+            try:
+                imported_sounddevice = (
+                    _import_sounddevice_with_linux_portaudio_fallback()
+                )
+            except (ImportError, OSError):
+                imported_sounddevice = None
+
+        if imported_sounddevice is None:
+            try:
+                import sounddevice as imported_sounddevice
+            except (ImportError, OSError):
+                if is_linux:
+                    try:
+                        imported_sounddevice = (
+                            _import_sounddevice_with_linux_portaudio_fallback()
+                        )
+                    except (ImportError, OSError):
+                        imported_sounddevice = None
+                else:
+                    imported_sounddevice = None
+
+        if imported_sounddevice is None:
             SOUNDDEVICE_AVAILABLE = False
         else:
             sd = imported_sounddevice
@@ -232,7 +347,21 @@ parser.add_argument(
     dest="preview",
     action="store_true",
     default=False,
-    help="Preview the audio through your speakers as it decodes. Uses preview quality (faster and noisier)",
+    help="Preview the audio through your speakers as it decodes. Uses preview quality (faster and noisier).\n  By default playback is buffered and locked to real-time speed for smooth listening.\n  Use --preview-real-time to play at decode speed instead.",
+)
+parser.add_argument(
+    "--preview-real-time",
+    dest="preview_real_time",
+    action="store_true",
+    default=False,
+    help="When previewing, play audio at decode speed (faster than real-time) instead of\n  buffering and locking to real-time. Audio will play as fast as samples are decoded.",
+)
+parser.add_argument(
+    "--preview-only",
+    dest="preview_only",
+    action="store_true",
+    default=False,
+    help="Preview only: play decoded audio without writing an output file.\n  Implies --preview --preview-real-time. Useful for quick 'is there something' scrubbing.",
 )
 parser.add_argument(
     "--gui",
@@ -755,6 +884,7 @@ class AsyncReader:
 
         return self
 
+
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
@@ -1078,6 +1208,12 @@ class AppWindow:
         app = app if app is not None else QApplication.instance()
         if app is None:
             app = QApplication(argv)
+            try:
+                from vhsdecode.qt_identity import apply_app_identity
+
+                apply_app_identity(app)
+            except Exception:
+                pass
         print("Opening hifi-ui...")
         if decode_options["input_file"] == "-":
             window = FileOutputDialogUI(decode_options_to_ui_parameters(decode_options))
@@ -1147,23 +1283,145 @@ class HostedHifiController:
 
 
 class SoundDeviceProcess:
-    def __init__(self, sample_rate, stop_requested):
+    def __init__(self, sample_rate, stop_requested, real_time=False):
         self._sample_rate = sample_rate
         self._stop_requested = stop_requested
+        self._real_time = real_time
+
+    @staticmethod
+    def _preferred_output_device():
+        try:
+            default_device = sd.default.device
+        except Exception:
+            return None
+
+        if isinstance(default_device, (tuple, list)):
+            if len(default_device) < 2:
+                return None
+            try:
+                output_device = int(default_device[1])
+                return output_device if output_device >= 0 else None
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            default_index = int(default_device)
+            return default_index if default_index >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _fallback_output_devices():
+        try:
+            devices = sd.query_devices()
+        except Exception:
+            return []
+
+        is_linux = sys.platform.startswith("linux")
+        ranked_devices = []
+        for index, device in enumerate(devices):
+            try:
+                max_output_channels = int(device.get("max_output_channels", 0))
+            except Exception:
+                max_output_channels = 0
+            if max_output_channels < 2:
+                continue
+
+            # On Linux systems running PulseAudio or PipeWire, the "pulse"/
+            # "pipewire" ALSA plugins are the correct routing path to the
+            # user's actual output device (e.g. a USB audio interface).
+            # Direct ALSA hardware plugins like "sysdefault"/"front"/"dmix"
+            # may open successfully but bypass the audio server entirely,
+            # sending audio nowhere the user can hear.
+            #
+            # On Windows and macOS these ALSA plugin names don't exist, so
+            # the name-based ranking is skipped and devices are tried in
+            # PortAudio index order (which already groups by host API).
+            priority = 2
+            if is_linux:
+                name = str(device.get("name", ""))
+                lowered = name.lower()
+                if any(marker in lowered for marker in ("pulse", "pipewire")):
+                    priority = 0
+                elif any(marker in lowered for marker in ("default", "sysdefault")):
+                    priority = 1
+                elif any(marker in lowered for marker in ("front", "dmix")):
+                    priority = 3
+            ranked_devices.append((priority, index))
+
+        ranked_devices.sort(key=lambda item: (item[0], item[1]))
+        return [index for _, index in ranked_devices]
+
+    @staticmethod
+    def _output_device_candidates():
+        preferred = SoundDeviceProcess._preferred_output_device()
+        fallback = SoundDeviceProcess._fallback_output_devices()
+
+        # On Linux, the PortAudio "default" device is often an ALSA plugin
+        # (e.g. index 29 = "default") that opens successfully but bypasses
+        # PulseAudio/PipeWire, sending audio nowhere the user can hear.
+        # The _fallback_output_devices() ranking already puts pulse/pipewire
+        # plugins first, so on Linux we trust that ordering over the raw
+        # preferred index. On Windows/macOS the preferred device is reliable.
+        if sys.platform.startswith("linux"):
+            candidates = list(fallback)
+            if preferred is not None and preferred not in candidates:
+                candidates.append(preferred)
+        else:
+            candidates = []
+            if preferred is not None:
+                candidates.append(preferred)
+            candidates.extend(fallback)
+
+        candidates.append(None)
+
+        deduped = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    @staticmethod
+    def _describe_output_device(device):
+        if device is None:
+            return "default"
+        try:
+            device_info = sd.query_devices(device)
+            name = device_info.get("name")
+            if name:
+                return f"{device} ({name})"
+        except Exception:
+            pass
+        return str(device)
 
     def __enter__(self):
-        self._play_parent_conn, self._play_child_conn = Pipe()
-        self._process = Process(
+        self._playback_enabled = True
+        self._pace_start_time = None
+        self._pace_samples_queued = 0
+
+        # Thread + queue for audio device I/O.
+        # In buffered mode, the time-based pacer in play() blocks the
+        # output worker process, creating backpressure through the
+        # post-processor pipe to the decoders — pacing the whole
+        # pipeline to 1x real-time so audio stays in sync with decode.
+        # In real-time mode, play() never blocks; decode runs at full speed.
+        maxsize = 2
+        self._play_queue: queue.Queue = queue.Queue(maxsize=maxsize)
+        self._play_thread = threading.Thread(
             target=SoundDeviceProcess.play_worker,
             name="hifi_playback_worker",
-            args=(self._play_child_conn, self._sample_rate, self._stop_requested),
+            args=(self._play_queue, self._sample_rate, self._stop_requested, self._real_time),
+            daemon=True,
         )
-        self._process.start()
+        self._play_thread.start()
         return self
 
     def __exit__(self, exception_type, exception_value, exception_traceback):
-        self._process.terminate()
-        self._process.join()
+        try:
+            self._play_queue.put_nowait(None)
+        except Exception:
+            pass
+        self._play_thread.join(timeout=5)
         return self
 
     @staticmethod
@@ -1182,43 +1440,127 @@ class SoundDeviceProcess:
             stacked[i][1] = interleaved[i * 2 + 1] * 2**15
 
     @staticmethod
-    def play_worker(conn, sample_rate, stop_requested):
-        setproctitle(current_process().name)
+    def play_worker(play_queue, sample_rate, stop_requested, real_time=False):
         if not _sounddevice_available():
             return
         output_stream = None
-        while True:
+        # In buffered mode, the playback thread paces itself to 1x real-time
+        # with a time-based sleeper. Decode runs at full speed; play() uses
+        # drop-oldest so the queue always holds the most recent blocks.
+        # This keeps lag to ~1-2 seconds (the queue depth) regardless of
+        # how far ahead decode gets.
+        pace_start = None
+        pace_samples_played = 0
+        try:
             while True:
                 try:
                     with stop_requested.get_lock():
                         if stop_requested.value == STOP_IMMEDIATE_REQUESTED:
                             return
 
-                    if conn.poll(1):
-                        stereo = conn.recv_bytes()
-                        break
-                except InterruptedError:
-                    pass
-                except EOFError:
+                    stereo = play_queue.get(timeout=1)
+                    if stereo is None:
+                        return
+                except queue.Empty:
+                    continue
+
+                if output_stream == None:
+                    open_error = None
+                    for output_device in SoundDeviceProcess._output_device_candidates():
+                        stream_options = {
+                            "samplerate": sample_rate,
+                            "channels": 2,
+                            "dtype": "int16",
+                        }
+                        if output_device is not None:
+                            stream_options["device"] = output_device
+                        device_label = SoundDeviceProcess._describe_output_device(output_device)
+                        try:
+                            output_stream = sd.OutputStream(**stream_options)
+                            output_stream.start()
+                            print(
+                                "Preview playback using output device: "
+                                f"{device_label}",
+                                flush=True,
+                            )
+                            break
+                        except Exception as exc:
+                            output_stream = None
+                            open_error = exc
+                            print(
+                                f"[preview] output device {device_label} failed: "
+                                f"{type(exc).__name__}: {exc}",
+                                flush=True,
+                            )
+
+                    if output_stream is None:
+                        if open_error is None:
+                            print("WARN: preview playback unavailable: no usable output device found.", flush=True)
+                        else:
+                            print(f"WARN: preview playback unavailable: {open_error}", flush=True)
+                        return
+
+                num_frames = len(stereo) // 2
+
+                # In buffered mode, pace to 1x real-time here in the
+                # playback thread. Decode runs at full speed; old blocks
+                # are dropped by play() when the queue overflows.
+                if not real_time:
+                    if pace_start is None:
+                        pace_start = time.monotonic()
+                    pace_samples_played += num_frames
+                    expected_wall = pace_samples_played / sample_rate
+                    actual_wall = time.monotonic() - pace_start
+                    if actual_wall < expected_wall:
+                        time.sleep(expected_wall - actual_wall)
+
+                stacked = np.empty((num_frames, 2), dtype=np.int16, order="C")
+
+                SoundDeviceProcess.build_stereo(stereo, stacked)
+                try:
+                    output_stream.write(stacked)
+                except Exception as exc:
+                    print(f"WARN: preview playback stopped: {exc}", flush=True)
                     return
-
-            if output_stream == None:
-                output_stream = sd.OutputStream(
-                    samplerate=sample_rate, channels=2, dtype="int16"
-                )
-                output_stream.start()
-
-            interleaved_len = int(len(stereo) / np.dtype(np.float32).itemsize)
-            interleaved = np.ndarray(
-                interleaved_len, dtype=np.float32, buffer=stereo, order="C"
-            )
-            stacked = np.empty((int(len(interleaved) / 2), 2), dtype=np.int16, order="C")
-
-            SoundDeviceProcess.build_stereo(interleaved, stacked)
-            output_stream.write(stacked)
+        finally:
+            if output_stream is not None:
+                with suppress(Exception):
+                    output_stream.stop()
+                with suppress(Exception):
+                    output_stream.close()
 
     def play(self, stereo):
-        self._play_parent_conn.send_bytes(stereo)
+        if not self._playback_enabled:
+            return True
+
+        if self._real_time:
+            # Real-time mode: non-blocking, drop blocks that can't keep up.
+            try:
+                self._play_queue.put_nowait(stereo)
+            except queue.Full:
+                pass
+            return True
+
+        # Buffered (default) mode: non-blocking with drop-oldest.
+        # Decode runs at full speed. When the playback queue is full
+        # (because the 1x-paced thread hasn't drained it yet), drop the
+        # oldest block and replace it with the newest. This keeps the
+        # queue holding the most recent audio so playback stays near
+        # real-time with only ~1-2 seconds of lag (the queue depth).
+        # The output file still gets every block (file write happens
+        # before play()).
+        try:
+            self._play_queue.put_nowait(stereo)
+        except queue.Full:
+            try:
+                self._play_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._play_queue.put_nowait(stereo)
+            except queue.Full:
+                pass
+        return True
 
 
 def write_soundfile_process_worker(
@@ -1239,17 +1581,30 @@ def write_soundfile_process_worker(
     audio_rate = decode_options["audio_rate"]
     input_rate = decode_options["input_rate"]
     preview_mode = decode_options["preview"]
-    preview_playback_enabled = preview_mode and _sounddevice_available()
+    # Defer sounddevice initialization to the playback thread only.
+    # Calling _sounddevice_available() here would initialize PortAudio in
+    # this (forked) process, and the inherited ALSA default-device state
+    # from the main process causes PaErrorCode -9993 ("Illegal combination
+    # of I/O devices") when the thread later tries to open a non-default
+    # output device (e.g. the pulse plugin on Linux).
+    preview_playback_enabled = preview_mode
     normalize = decode_options["normalize"]
     dual_mono = decode_options["mode"] == AUDIO_MODE_DUAL_MONO or decode_options["mode"] == AUDIO_MODE_DUAL_MONO_MS
+    preview_real_time = decode_options.get("preview_real_time", False)
+    preview_only = decode_options.get("preview_only", False)
     if preview_playback_enabled:
-        player = SoundDeviceProcess(audio_rate, stop_requested)
+        player = SoundDeviceProcess(audio_rate, stop_requested, real_time=preview_real_time)
     else:
         if preview_mode:
-            print("Import of sounddevice failed, preview is not available!")
+            print("Import of sounddevice failed, preview is not available!", flush=True)
         player = nullcontext()
 
-    if dual_mono:
+    # In preview-only mode, skip file output entirely — just play audio.
+    if preview_only:
+        stereo_output = nullcontext()
+        channel_1_output = nullcontext()
+        channel_2_output = nullcontext()
+    elif dual_mono:
         stereo_output = nullcontext()
         channel_1_output = as_outputfile(
             get_dual_mono_filename(output_file, channel_1_suffix),
@@ -1269,69 +1624,75 @@ def write_soundfile_process_worker(
         channel_1_output = nullcontext()
         channel_2_output = nullcontext()
 
-    with player, stereo_output, channel_1_output, channel_2_output:
-        done = False
-        while not done:
-            while True:
-                try:
-                    decoder_state = post_processor_out_rx_conn.recv()
-                    break
-                except InterruptedError:
-                    pass
-                except EOFError:
-                    return
+    try:
+        with player, stereo_output, channel_1_output, channel_2_output:
+            done = False
+            while not done:
+                while True:
+                    try:
+                        decoder_state = post_processor_out_rx_conn.recv()
+                        break
+                    except InterruptedError:
+                        pass
+                    except EOFError:
+                        return
 
-            buffer = PostProcessorSharedMemory(decoder_state)
-            stereo = buffer.get_stereo()
-            samples_decoded = len(stereo) / 2
-            
-            # pad the start of the audio due to beginning gap
-            if decoder_state.block_num == 0:
-                padding = round(decoder_state.block_audio_final_overlap / 2) * 2 * 4 # 2 channels, 4 bytes per channel
+                buffer = PostProcessorSharedMemory(decoder_state)
+                stereo = buffer.get_stereo()
+                samples_decoded = len(stereo) / 2
                 
+                # pad the start of the audio due to beginning gap
+                if decoder_state.block_num == 0 and not preview_only:
+                    padding = round(decoder_state.block_audio_final_overlap / 2) * 2 * 4 # 2 channels, 4 bytes per channel
+                    
+                    if dual_mono:
+                        channel_1_output.buffer_write(bytes(padding), dtype="float32")
+                        channel_2_output.buffer_write(bytes(padding), dtype="float32")
+                    else:
+                        stereo_output.buffer_write(bytes(padding), dtype="float32")
+
+                if not preview_only:
+                    if dual_mono:
+                        channel_1, channel_2 = stereo[::2], stereo[1::2]
+                        channel_1_output.write(channel_1)
+                        channel_2_output.write(channel_2)
+                    else:
+                        stereo_output.buffer_write(stereo, dtype="float32")
+
+                if preview_playback_enabled:
+                    stereo_copy = np.empty_like(stereo, order="C")
+                    DecoderSharedMemory.copy_data_float32(
+                        stereo, stereo_copy, len(stereo_copy)
+                    )
+                    if not player.play(stereo_copy):
+                        preview_playback_enabled = False
+                        print("WARN: preview playback disabled after output-stream failure.")
+
+                buffer.close()
+                post_processor_shared_memory_idle_queue.put((decoder_state.name, decoder_state.numa_node))
+                with total_samples_decoded.get_lock():
+                    total_samples_decoded.value = int(
+                        total_samples_decoded.value + samples_decoded
+                    )
+
+                log_decode(
+                    start_time,
+                    input_position.value,
+                    total_samples_decoded.value,
+                    blocks_enqueued.value,
+                    input_rate,
+                    audio_rate,
+                )
+
+                done = decoder_state.is_last_block
+
+            if not preview_only:
                 if dual_mono:
-                    channel_1_output.buffer_write(bytes(padding), dtype="float32")
-                    channel_2_output.buffer_write(bytes(padding), dtype="float32")
+                    channel_1_output.flush()
+                    channel_2_output.flush()
                 else:
-                    stereo_output.buffer_write(bytes(padding), dtype="float32")
-
-            if dual_mono:
-                channel_1, channel_2 = stereo[::2], stereo[1::2]
-                channel_1_output.write(channel_1)
-                channel_2_output.write(channel_2)
-            else:
-                stereo_output.buffer_write(stereo, dtype="float32")
-
-            if preview_playback_enabled:
-                stereo_copy = np.empty_like(stereo, order="C")
-                DecoderSharedMemory.copy_data_float32(
-                    stereo, stereo_copy, len(stereo_copy)
-                )
-                player.play(stereo_copy)
-
-            buffer.close()
-            post_processor_shared_memory_idle_queue.put((decoder_state.name, decoder_state.numa_node))
-            with total_samples_decoded.get_lock():
-                total_samples_decoded.value = int(
-                    total_samples_decoded.value + samples_decoded
-                )
-
-            log_decode(
-                start_time,
-                input_position.value,
-                total_samples_decoded.value,
-                blocks_enqueued.value,
-                input_rate,
-                audio_rate,
-            )
-
-            done = decoder_state.is_last_block
-
-        if dual_mono:
-            channel_1_output.flush()
-            channel_2_output.flush()
-        else:
-            stereo_output.flush()
+                    stereo_output.flush()
+    finally:
         decode_done.set()
 
 
@@ -1577,32 +1938,46 @@ async def decode_parallel(
 
     async def ui_task(stop_requested, ui_t):
         while True:
-            previous_state = ui_t.window.transport_state
-            ui_t.app.processEvents()
-
-            if ui_t.window.transport_state == STOP_STATE:
+            try:
+                previous_state = ui_t.window.transport_state
+                ui_t.app.processEvents()
+                current_state = ui_t.window.transport_state
+            except RuntimeError:
                 with stop_requested.get_lock():
                     stop_requested.value = STOP_REQUESTED
 
+                break
+
+            if current_state == STOP_STATE:
+                with stop_requested.get_lock():
+                    stop_requested.value = STOP_REQUESTED
                     if previous_state == PREVIEW_STATE:
                         stop_requested.value = STOP_IMMEDIATE_REQUESTED
-
                 break
-            elif ui_t.window.transport_state == PAUSE_STATE:
-                while ui_t.window.transport_state == PAUSE_STATE:
-                    ui_t.app.processEvents()
+            elif current_state == PAUSE_STATE:
+                while True:
+                    try:
+                        if ui_t.window.transport_state != PAUSE_STATE:
+                            break
+                        ui_t.app.processEvents()
+                    except RuntimeError:
+                        with stop_requested.get_lock():
+                            stop_requested.value = STOP_REQUESTED
+                        return
                     await asyncio.sleep(0.01)
 
             await asyncio.sleep(0.01)
+    ui_transport_task = None
 
     if ui_t is not None:
-        asyncio.create_task(ui_task(stop_requested, ui_t))
+        ui_transport_task = asyncio.create_task(ui_task(stop_requested, ui_t))
 
     with as_soundfile(input_file, input_format_override) as f:
         loop = asyncio.get_event_loop()
         previous_block = np.empty(block_size, dtype=REAL_DTYPE)
         progressB = TimeProgressBar(f.frames, f.frames)
         block_num = 0
+        force_immediate_stop = False
 
         while True:
             # get the next available shared memory buffer
@@ -1615,7 +1990,13 @@ async def decode_parallel(
                 except InterruptedError:
                     pass
                 except EOFError:
-                    return
+                    force_immediate_stop = True
+                    break
+
+            if force_immediate_stop:
+                with stop_requested.get_lock():
+                    stop_requested.value = STOP_IMMEDIATE_REQUESTED
+                break
 
             decoder_state = DecoderState(
                 decoder, buffer_name, 0, block_size, block_num, False, numa_node
@@ -1659,8 +2040,16 @@ async def decode_parallel(
     print("")
     
     with stop_requested.get_lock():
-        if stop_requested.value != STOP_IMMEDIATE_REQUESTED:
-            decode_done.wait()
+        should_wait_for_decode_done = stop_requested.value != STOP_IMMEDIATE_REQUESTED
+
+    if should_wait_for_decode_done:
+        while not decode_done.wait(timeout=0.1):
+            if not output_file_process.is_alive():
+                print("WARN: output process exited before signaling decode completion.")
+                break
+            if any(not process.is_alive() for process in decoder_processes):
+                print("WARN: one or more decoder workers exited early; forcing cleanup.")
+                break
 
     for p in decoder_processes:
         cleanup_process(p)
@@ -1702,6 +2091,12 @@ async def decode_parallel(
     elapsed_time = datetime.now() - start_time
     dt_string = elapsed_time.total_seconds()
     print(f"\nDecode finished, seconds elapsed: {round(dt_string)}")
+
+    if ui_transport_task is not None:
+        if not ui_transport_task.done():
+            ui_transport_task.cancel()
+        with suppress(asyncio.CancelledError, RuntimeError):
+            await ui_transport_task
 
 async def normalize(input_file_post_gain, output_file, peak_gain, channels, audio_rate):
     try:
@@ -1850,20 +2245,22 @@ def build_decode_options_from_args(args):
         "input_format_override": input_format_override,
         "standard": "p" if system == "PAL" else "n",
         "format": tape_format,
-        "preview": args.preview,
-        "preview_available": _sounddevice_available() if args.preview else False,
+        "preview": args.preview or args.preview_real_time or args.preview_only,
+        "preview_real_time": args.preview_real_time or args.preview_only,
+        "preview_only": args.preview_only,
+        "preview_available": args.preview or args.preview_real_time or args.preview_only,
         "demod_type": args.demod_type,
         "afe_left_carrier_deviation": args.afe_left_carrier_deviation * 10e5,
         "afe_right_carrier_deviation": args.afe_right_carrier_deviation * 10e5,
         "afe_left_carrier": args.afe_left_carrier * 10e5,
         "afe_right_carrier": args.afe_right_carrier * 10e5,
-        "resampler_quality": resampler_quality if not args.preview else "low",
-        "spectral_nr_amount": args.spectral_nr_amount if not args.preview else 0,
+        "resampler_quality": resampler_quality if not (args.preview or args.preview_real_time or args.preview_only) else "low",
+        "spectral_nr_amount": args.spectral_nr_amount if not (args.preview or args.preview_real_time or args.preview_only) else 0,
         "head_switching_interpolation": args.head_switching_interpolation == "on",
         "doc": args.doc,
         "enable_expander": args.enable_expander == "on",
         "enable_deemphasis": args.enable_deemphasis == "on",
-        "auto_fine_tune": args.auto_fine_tune == "on" if not args.preview else False,
+        "auto_fine_tune": args.auto_fine_tune == "on" if not (args.preview or args.preview_real_time or args.preview_only) else False,
         "bias_guess": args.bias_guess,
         "normalize": args.normalize,
         "expander_gain": args.expander_gain or default_expander_gain,
@@ -1881,7 +2278,7 @@ def build_decode_options_from_args(args):
         "deemphasis_low_tau": args.deemphasis_low_tau or default_deemphasis_low_tau,
         "deemphasis_high_tau": args.deemphasis_high_tau or default_deemphasis_high_tau,
         "grc": args.GRC,
-        "audio_rate": args.rate if not args.preview else 44100,
+        "audio_rate": args.rate if not (args.preview or args.preview_real_time or args.preview_only) else 44100,
         "gain": args.gain,
         "input_file": filename,
         "output_file": outname,
@@ -1897,6 +2294,9 @@ def _run_ui_transport_action(args, ui_t):
     options = ui_parameters_to_decode_options(ui_t.window.getValues())
     previous_state = ui_t.window.transport_state
     options["preview"] = previous_state == PREVIEW_STATE
+    # preview flags come from the UI (in getValues) when launching via GUI.
+    options.setdefault("preview_real_time", False)
+    options.setdefault("preview_only", False)
     # apply the thread count chosen in the UI (run_decoder reads args.threads)
     args.threads = max(1, int(options.get("threads", args.threads)))
 
@@ -1945,6 +2345,12 @@ def launch_hosted_ui(argv=None, app=None):
     qt_app = app if app is not None else QApplication.instance()
     if qt_app is None:
         qt_app = QApplication([sys.argv[0]] + launch_args)
+        try:
+            from vhsdecode.qt_identity import apply_app_identity
+
+            apply_app_identity(qt_app)
+        except Exception:
+            pass
     return HostedHifiController(
         [sys.argv[0]] + launch_args, args, decode_options, qt_app
     )

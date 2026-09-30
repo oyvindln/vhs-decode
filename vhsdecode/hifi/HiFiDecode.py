@@ -426,6 +426,26 @@ class FMDiscriminator:
                 numba.types.int32,
                 numba.types.int32,
             ),
+            (
+                numba.types.Array(numba.types.float64, 1, "C"),
+                NumbaAudioArray,
+                numba.types.float32,
+                numba.types.float32,
+                numba.types.Array(DEMOD_DTYPE_NB, 1, "C"),
+                numba.types.Array(DEMOD_DTYPE_NB, 1, "C"),
+                numba.types.int32,
+                numba.types.int32,
+            ),
+            (
+                numba.types.Array(numba.types.float64, 1, "A"),
+                NumbaAudioArray,
+                numba.types.float32,
+                numba.types.float32,
+                numba.types.Array(DEMOD_DTYPE_NB, 1, "C"),
+                numba.types.Array(DEMOD_DTYPE_NB, 1, "C"),
+                numba.types.int32,
+                numba.types.int32,
+            ),
         ],
         cache=True,
         fastmath=True,
@@ -1592,6 +1612,7 @@ class HiFiDecode:
         filtered_signal = sosfiltfilt_rust(
             audio_process_params.hs_sos, audio
         )
+        filtered_signal = np.ascontiguousarray(filtered_signal, dtype=REAL_DTYPE)
         filtered_signal_abs = abs(filtered_signal)
         filtered_signal_mean, filtered_signal_std_dev = HiFiDecode.mean_stddev(
             filtered_signal

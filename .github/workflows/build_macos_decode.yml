@@ -62,7 +62,28 @@ jobs:
           # PyInstaller's pyi_rth_pkgres runtime hook in the bundled binary.
           python3 -m pip install --upgrade pip "setuptools<82" wheel
 
-      - uses: dtolnay/rust-toolchain@stable
+      - id: rust_toolchain
+        uses: dtolnay/rust-toolchain@stable
+        continue-on-error: true
+
+      - name: Retry Rust toolchain install when setup action fails
+        if: steps.rust_toolchain.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for attempt in 1 2 3 4 5; do
+            if rustup toolchain install stable --profile minimal --no-self-update; then
+              rustup default stable
+              rustc --version
+              cargo --version
+              exit 0
+            fi
+            if [ "${attempt}" -lt 5 ]; then
+              sleep "$((attempt * 15))"
+            fi
+          done
+          echo "ERROR: Failed to install Rust stable toolchain after retries."
+          exit 1
 
       - name: Install dependencies
         run: brew install create-dmg libsndfile libomp
