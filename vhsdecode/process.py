@@ -351,9 +351,9 @@ class VHSRFDecode(ldd.RFDecode):
         # Store a separate setting for *color* system as opposed to 525/625 line here.
         # TODO: Fix upstream so we don't have to fake tell ld-decode code that we are using ntsc for
         # palm to avoid it throwing errors.
-        self._color_system = system
+        self.color_system = system
 
-        self._dod_options = DodOptions(
+        self.dod_options = DodOptions(
             dod_threshold_p=rf_options.get(
                 "dod_threshold_p", vhs_formats.DEFAULT_THRESHOLD_P_DDD
             ),
@@ -370,7 +370,7 @@ class VHSRFDecode(ldd.RFDecode):
         )
         track_phase = None if is_secam(system) else rf_options.get("track_phase", None)
         high_boost = rf_options.get("high_boost", None)
-        self._notch = rf_options.get("notch", None)
+        self.notch = rf_options.get("notch", None)
         self._notch_q = rf_options.get("notch_q", 10.0)
         self._disable_diff_demod = rf_options.get("disable_diff_demod", False)
         self.useAGC = extra_options.get("useAGC", False)
@@ -387,7 +387,7 @@ class VHSRFDecode(ldd.RFDecode):
             requested_cafc = False
 
         # Enable cafc for betamax until proper track detection for it is implemented.
-        self._do_cafc = (
+        self.do_cafc = (
             True
             if (tape_format == "BETAMAX" and system != "NTSC")
             else requested_cafc
@@ -417,6 +417,7 @@ class VHSRFDecode(ldd.RFDecode):
         params_file = extra_options.get("params_file", None)
         if params_file:
             override_params(self.SysParams, self.DecoderParams, params_file, ldd.logger)
+        self.sys_params = self.SysParams
 
         # Make (intentionally) mutable copies of HZ<->IRE levels
         # (NOTE: used by upstream functions, we use a namedtuple to keep const values already)
@@ -449,7 +450,7 @@ class VHSRFDecode(ldd.RFDecode):
         # can't be changed later.
         # first depends on IRE/Hz so has to be set after that is properly set.
         # TODO: May want to split this up eventually
-        self._options = namedtuple(
+        self.options = namedtuple(
             "Options",
             [
                 "diff_demod_check_value",
@@ -532,7 +533,7 @@ class VHSRFDecode(ldd.RFDecode):
             rf_options.get("secam_carrier_servo", True),
         )
 
-        if self._options.gnrc_afe:
+        if self.options.gnrc_afe:
             from vhsdecode.addons.gnuradioZMQ import ZMQSend, ZMQReceive
 
             self.zmqsend = ZMQSend()
@@ -548,7 +549,7 @@ class VHSRFDecode(ldd.RFDecode):
 
         # As agc can alter these sysParams values, store a copy to then
         # initial value for reference.
-        self._sysparams_const = namedtuple(
+        self.sysparams_const = namedtuple(
             "SysparamsConst", "hz_ire vsync_hz vsync_ire ire0 vsync_pulse_us"
         )(
             self.SysParams["hz_ire"],
@@ -562,8 +563,8 @@ class VHSRFDecode(ldd.RFDecode):
         self._sub_emphasis_params = create_sub_emphasis_params(
             self.DecoderParams,
             self.SysParams,
-            self._sysparams_const.hz_ire,
-            self._sysparams_const.vsync_ire,
+            self.sysparams_const.hz_ire,
+            self.sysparams_const.vsync_ire,
         )
 
         self.debug_plot = debug_plot
@@ -588,40 +589,40 @@ class VHSRFDecode(ldd.RFDecode):
 
         # Heterodyning / chroma wave related filter part
 
-        self._chroma_afc = ChromaAFC(
+        self.chroma_afc = ChromaAFC(
             self.freq_hz,
             DP["chroma_bpf_upper"] / DP["color_under_carrier"],
             self.SysParams,
             self.DecoderParams["color_under_carrier"],
             self.DecoderParams.get("chroma_bpf_order", 4),
             tape_format=tape_format,
-            do_cafc=self._do_cafc,
+            do_cafc=self.do_cafc,
             chroma_bpf_lower=self.DecoderParams.get("chroma_bpf_lower", 60000),
             conversion_lo_freq=self.DecoderParams.get("chroma_conversion_lo", None),
             carrier_mult=self.DecoderParams.get("chroma_carrier_mult", None),
         )
 
         self.Filters["FVideoBurst"] = (
-            self._chroma_afc.get_chroma_bandpass()
-            if self._options.color_under
-            else self._chroma_afc.get_chroma_bandpass_final(False)
+            self.chroma_afc.get_chroma_bandpass()
+            if self.options.color_under
+            else self.chroma_afc.get_chroma_bandpass_final(False)
         )
 
         if self.options.chroma_deemphasis_filter:
-            out_freq_half = self._chroma_afc.getOutFreqHalf()
+            out_freq_half = self.chroma_afc.getOutFreqHalf()
             self.Filters["chroma_deemphasis"] = cvf.gen_peaking_constq(
                 self.sys_params["fsc_mhz"] / out_freq_half, 3.4, 0.5 / out_freq_half
             )
 
-        if self._notch is not None:
+        if self.notch is not None:
             video_notch_filter = sps.iirnotch(
-                self._notch / self.freq_half, self._notch_q
+                self.notch / self.freq_half, self._notch_q
             )
 
             # Chroma notch filter
-            if self._do_cafc:
+            if self.do_cafc:
                 self.Filters["FVideoNotch"] = sps.iirnotch(
-                    self._notch / self._chroma_afc.getOutFreqHalf(), self._notch_q
+                    self.notch / self.chroma_afc.getOutFreqHalf(), self._notch_q
                 )
             else:
                 self.Filters["FVideoNotch"] = video_notch_filter
@@ -633,11 +634,11 @@ class VHSRFDecode(ldd.RFDecode):
         else:
             self.Filters["FVideoNotch"] = None, None
 
-        if self._options.chroma_audio_notch:
-            if self._do_cafc:
+        if self.options.chroma_audio_notch:
+            if self.do_cafc:
                 self.Filters["FChromaAudioNotch"] = sps.iirnotch(
                     DP["chroma_audio_notch_freq"]
-                    / (self._chroma_afc.getOutFreqHalf() * 1e6),
+                    / (self.chroma_afc.getOutFreqHalf() * 1e6),
                     CHROMA_AUDIO_NOTCH_Q,
                 )
             else:
@@ -648,18 +649,18 @@ class VHSRFDecode(ldd.RFDecode):
 
         # The following filters are for post-TBC:
         # The output sample rate is 4fsc
-        self.Filters["FChromaFinal"] = self._chroma_afc.get_chroma_bandpass_final(
-            self._options.color_under
+        self.Filters["FChromaFinal"] = self.chroma_afc.get_chroma_bandpass_final(
+            self.options.color_under
         )
 
         if is_color_under:
-            self.chroma_heterodyne = self._chroma_afc.getChromaHet()
-            self.fsc_wave, self.fsc_cos_wave = self._chroma_afc.getFSCWaves()
+            self.chroma_heterodyne = self.chroma_afc.getChromaHet()
+            self.fsc_wave, self.fsc_cos_wave = self.chroma_afc.getFSCWaves()
 
-        if self._chroma_afc.carrier_mult is not None:
+        if self.chroma_afc.carrier_mult is not None:
             # SECAM method 1: post-TBC band-pass around the under carriers
             # ahead of the x4 phase multiplication.
-            self.Filters["FSecamUnder"] = self._chroma_afc.get_secam_under_bandpass()
+            self.Filters["FSecamUnder"] = self.chroma_afc.get_secam_under_bandpass()
             # Porch carrier pair sanity check over the first fields, to catch
             # tapes that were actually recorded with the ME-SECAM method.
             self.secam_method_diag = {
@@ -690,47 +691,7 @@ class VHSRFDecode(ldd.RFDecode):
             )
 
         # TODO: This should be managed elsewhere.
-        self._compute_linelocs_issues = False
-
-    @property
-    def sysparams_const(self):
-        return self._sysparams_const
-
-    @property
-    def sys_params(self):
-        return self.SysParams
-
-    @property
-    def options(self):
-        return self._options
-
-    @property
-    def notch(self):
-        return self._notch
-
-    @property
-    def chroma_afc(self):
-        return self._chroma_afc
-
-    @property
-    def do_cafc(self):
-        return self._do_cafc
-
-    @property
-    def color_system(self):
-        return self._color_system
-
-    @property
-    def dod_options(self):
-        return self._dod_options
-
-    @property
-    def compute_linelocs_issues(self):
-        return self._compute_linelocs_issues
-
-    @compute_linelocs_issues.setter
-    def compute_linelocs_issues(self, value):
-        self._compute_linelocs_issues = value
+        self.compute_linelocs_issues = False
 
     def computevideofilters(self):
         self.Filters = {}
@@ -929,7 +890,7 @@ class VHSRFDecode(ldd.RFDecode):
                 self.Filters,
                 self.freq_hz,
                 self.blocklen,
-                (self._sysparams_const.hz_ire * 143.0),
+                (self.sysparams_const.hz_ire * 143.0),
                 self._sub_emphasis_params,
             )
 
@@ -955,7 +916,7 @@ class VHSRFDecode(ldd.RFDecode):
         rv = {}
         demod_block_debug = False
         demod_start_time = time.time()
-        if self._options.gnrc_afe:
+        if self.options.gnrc_afe:
             self.zmqsend.send(data)
             data = self.zmqreceive.receive(data.size)
 
@@ -969,7 +930,7 @@ class VHSRFDecode(ldd.RFDecode):
             # are modifying the data in place.
             indata_fft_copy = indata_fft.copy()
 
-        if self._notch is not None:
+        if self.notch is not None:
             indata_fft *= self.Filters["FVideoNotchF"]
 
         # Applies RF filters
@@ -1087,13 +1048,13 @@ class VHSRFDecode(ldd.RFDecode):
                 self.Filters["FVideoBurst"],
                 self.blocklen,
                 self.Filters["FVideoNotch"],
-                self._notch,
+                self.notch,
                 move=int(self.options.chroma_offset),
                 audio_notch=self.Filters.get("FChromaAudioNotch", None),
                 # TODO: Do we need to tweak move elsewhere too?
                 # if cafc is enabled, this filtering will be done after TBC
             )
-            if not self._do_cafc
+            if not self.do_cafc
             else data[: self.blocklen]
         )
 

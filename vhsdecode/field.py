@@ -1274,10 +1274,6 @@ class FieldShared:
             vblank_pulses,
         )
 
-    @property
-    def compute_linelocs_issues(self):
-        return self._compute_linelocs_issues
-    
     @staticmethod
     @nb.njit(cache=True, fastmath=True, nogil=True)
     def _refine_levels_from_vsync_numba(vsync, orig_sync, orig_blank):
