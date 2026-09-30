@@ -808,9 +808,10 @@ class RFDecode:
 
         hilbert = npfft.ifft(indata_fft_filt)
         demod = unwrap_hilbert(hilbert, self.freq_hz)
-        demod_fft = npfft.fft(np.clip(demod, 1500000, self.freq_hz * 0.75))
-        sync = npfft.ifft(demod_fft * self.Filters["FVideo05"]).real
-        sync = np.roll(sync, -self.Filters["F05_offset"])
+        demod_rfft = npfft.rfft(np.clip(demod, 1500000, self.freq_hz * 0.75))
+        sync = npfft.irfft(
+            demod_rfft * self.Filters["FVideo_rfft"][1], n=self.blocklen
+        )
 
         if cut:
             sync = sync[self.blockcut : -self.blockcut_end]

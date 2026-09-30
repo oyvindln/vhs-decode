@@ -36,6 +36,7 @@ def _check_outputs(system):
 
     demod, expected_video, expected_rfhpf = _legacy_outputs(rf, signal)
     actual = rf.demodblock(data=signal)
+    sync = rf.demodblock_sync(data=signal)
 
     names = ["demod", "demod_05", "demod_burst"]
     if system == "PAL":
@@ -44,6 +45,7 @@ def _check_outputs(system):
     np.testing.assert_allclose(actual["video"]["demod_raw"], demod, rtol=1e-6)
     for name, expected in zip(names, expected_video):
         np.testing.assert_allclose(actual["video"][name], expected, rtol=1e-6)
+    np.testing.assert_allclose(sync, expected_video[1], rtol=1e-6)
 
     rotdelay = rf.delays.get("video_rot", 0)
     expected_rfhpf = expected_rfhpf[

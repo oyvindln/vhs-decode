@@ -23,7 +23,7 @@ import scipy.signal as sps
 # Try to make sure ffmpeg is available
 try:
     import static_ffmpeg
-    static_ffmpeg.add_paths()  # adds static ffmpeg/ffprobe binaries to PATH
+    static_ffmpeg.add_paths(weak=True)  # adds static ffmpeg/ffprobe binaries to PATH
 except ImportError:
     pass
 
@@ -263,6 +263,8 @@ def make_loader(filename, inputfreq=None):
         return load_unpacked_data_s16
     elif filename.endswith(".r16") or filename.endswith(".u16"):
         return load_unpacked_data_u16
+    elif filename.endswith(".s8"):
+        return load_unpacked_data_s8
     elif filename.endswith(".r8") or filename.endswith(".u8"):
         return load_unpacked_data_u8
     elif (
@@ -280,9 +282,11 @@ def make_loader(filename, inputfreq=None):
 
 def load_unpacked_data(infile, sample, readlen, sampletype):
     # this is run for unpacked data:
-    # 1 is for 8-bit cxadc data, 2 for 16bit DD, 3 for 16bit cxadc
-
-    samplelength = 2 if sampletype == 3 else sampletype
+    # 1 is for 8-bit cxadc data, 2 for 16bit DD, 3 for 16bit cxadc,
+    # 4 for 32-bit float, 5 for signed 8-bit
+    #
+    # sampletype is not the sample width, so the two are mapped explicitly.
+    samplelength = {1: 1, 2: 2, 3: 2, 4: 4, 5: 1}[sampletype]
 
     infile.seek(sample * samplelength, 0)
     inbuf = infile.read(readlen * samplelength)
@@ -293,6 +297,11 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
         indata = np.frombuffer(inbuf, "uint16", len(inbuf) // 2)
     elif sampletype == 2:
         indata = np.frombuffer(inbuf, "int16", len(inbuf) // 2)
+    elif sampletype == 5:
+        # Scale up to the 16-bit range, so that a given .s8 file decodes
+        # identically whether it reaches us through this loader or through
+        # the ffmpeg path (which converts s8 to pcm_s16le the same way).
+        indata = np.frombuffer(inbuf, "int8", len(inbuf)).astype(np.int16) * 256
     else:
         # NOTE(oln): Can probably use frombuffer for other variants too but
         # didn't have any samples to test with.
@@ -306,6 +315,10 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
 
 def load_unpacked_data_u8(infile, sample, readlen):
     return load_unpacked_data(infile, sample, readlen, 1)
+
+
+def load_unpacked_data_s8(infile, sample, readlen):
+    return load_unpacked_data(infile, sample, readlen, 5)
 
 
 def load_unpacked_data_s16(infile, sample, readlen):
@@ -1436,16 +1449,32 @@ class JSONDumper:
 
     def write(self):
         if not self._writing.is_set():
-            json_data = self._build_json()
-            field_info = self._get_field_info()
-            self._queue.put((json_data, field_info))
+            self._enqueue()
 
     def close(self):
-        json_data = self._build_json()
-        field_info = self._get_field_info()
-        self._queue.put((json_data, field_info))
+        self._enqueue()
         self._queue.put(None)  # sentinel to stop the consumer
         self._dumper.join()
+
+    def _enqueue(self):
+        """Queue a snapshot for the writer thread, if there is one to take.
+
+        build_json() returns None until a valid field has been decoded, so a
+        decode that ends without ever getting one -- the source frequency not
+        matching the file, say -- has no metadata to write. Passing that None
+        on would kill the writer thread with an AttributeError and leave a
+        truncated .tbc.json.tmp behind, burying the "Completed without
+        handling any frames" message the main thread prints just before this.
+
+        Nothing is dropped by returning early: field info is only drained once
+        there is a JSON body to attach it to, and with no valid field there is
+        no field info to drain.
+        """
+        json_data = self._build_json()
+        if json_data is None:
+            return
+
+        self._queue.put((json_data, self._get_field_info()))
 
     @staticmethod
     def _consume(queue, ready, outname, verboseVITS):
