@@ -21,19 +21,9 @@ If you want portable self-contained binaries instead of source installs which is
 
 - Git
 - Python 3.11+
-- Rust toolchain (required for decode v0.3.5+)
 - FFmpeg
 
-Core Python/runtime dependencies include NumPy, SciPy, Cython, Numba, Pandas, Qt (5/6), Qwt, and CMake build tooling.
-
-Install Rust (Unix shell example):
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-rustc --version
-cargo --version
-```
+Core Python/runtime dependencies include NumPy, SciPy, Numba, Pandas, Qt (5/6), Qwt, and CMake build tooling.
 
 ## Linux
 
@@ -126,7 +116,6 @@ Windows setup/usage wiki:
    - Check the box to add Python to `PATH`.
    - If a new major Python release is not yet supported by `numba`, use the latest supported version.
 2. Install Visual Studio Build Tools 2022 (Desktop development with C++).
-3. Install Rust from <https://www.rust-lang.org/tools/install>.
 
 ### Manual quick build notes (Windows native)
 
@@ -134,8 +123,7 @@ This keeps the original quick manual path in one place:
 
 1. Install Python 3.13 (or the latest `numba`-supported Python release).
 2. Install Visual Studio Build Tools 2022.
-3. Install Rust.
-4. Clone `vhs-decode`, enter the repo folder, then install:
+3. Clone `vhs-decode`, enter the repo folder, then install:
 
 ```powershell
 pip install .[hifi_gui_qt6]
@@ -187,7 +175,7 @@ macOS setup/usage wiki:
 ### Install dependencies (Homebrew)
 
 ```bash
-brew install cmake pkg-config qt qwt ffmpeg fftw python pipx rust portaudio
+brew install cmake pkg-config qt qwt ffmpeg fftw python pipx portaudio
 ```
 
 ### Build and install with pipx
@@ -261,14 +249,6 @@ decode-launcher --help
 
       pacman -S base-devel git qt5-base qwt fftw ffmpeg pv cmake sox python python-pipx
 
-  Install [Rust Compiler](https://www.rust-lang.org/tools/install) (required for decode v0.3.5 onwards)
-
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-
-  Verify Rust Compiler
-
-      source "$HOME/.cargo/env" && echo "Rust version: $(rustc --version)" && echo "Cargo version: $(cargo --version)"
-
 
 ### Windows
 
@@ -277,8 +257,6 @@ decode-launcher --help
    * Download the [python installer](https://www.python.org/downloads/)
    * **Make sure to check the box requesting Python be added to the PATH**
    * (NOTE: Due to the numba library that is used by vhs-decode taking some time to support the latest python version do not install a major version not supported by numba yet. Currently the latest supported version is 3.14. See the [numba repository](https://github.com/numba/numba/issues) if unsure.)
-  1. Install Rust
-   * Download the [Rust installer](https://www.rust-lang.org/tools/install) follow the wizard to install Rust
   1. Install Visual Studio Build Tools
    * Download the [Visual Studio Installer](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
    * In the installer, select `Visual Studio Build Tools 2022`

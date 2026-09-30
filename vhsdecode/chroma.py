@@ -1,31 +1,13 @@
 import math
 import numpy as np
-import lddecode.utils as lddu
 import lddecode.core as ldd
 import scipy.signal as sps
 import scipy.fft as sps_fft
-from vhsdecode.rust_utils import sosfiltfilt_rust
 
 import numba
 from numba import njit
 from numba.experimental import jitclass
-from functools import cache
 
-
-@njit(cache=True, nogil=True, fastmath=True)
-def chroma_to_u16(chroma):
-    """
-    Scale the chroma output array to a 16-bit value for output.
-    """
-    S16_ABS_MAX = 32767.0
-    N = len(chroma)
-
-    out = np.empty(N, dtype=np.uint16)
-
-    for i in range(N):
-        out[i] = np.uint16(chroma[i] + S16_ABS_MAX)
-        
-    return out
 
 @njit(cache=False, nogil=True, fastmath=True)
 def chroma_automatic_gain(
@@ -130,49 +112,24 @@ def chroma_automatic_gain(
     return 0.0, noise_floor
 
 
-@njit(cache=True, nogil=True)
-def comb_c_pal(data, line_len):
-    """Very basic comb filter, adds the signal together with a signal delayed by 2H,
-    and one advanced by 2H
-    line by line. VCRs do this to reduce crosstalk.
-    Helps chroma stability on LP tapes in particular.
-    (VCRs only adds delayed by 1h instead)
+def comb_c(data, line_len, k):
+    """Very basic comb filter: subtract a quarter each of the lines k before and k after
+    (2H for PAL, 1H for NTSC), line by line. VCRs do this to reduce crosstalk, and it
+    helps chroma stability on LP tapes in particular.
     """
-
     # TODO: Compensate for PAL quarter cycle offset
-    data2 = data.copy()
-    numlines = len(data) // line_len
-    for line_num in range(16, numlines - 2):
-        adv2h = data2[(line_num + 2) * line_len : (line_num + 3) * line_len]
-        delayed2h = data2[(line_num - 2) * line_len : (line_num - 1) * line_len]
-        line_slice = data[line_num * line_len : (line_num + 1) * line_len]
-        # Let the delayed signal contribute 1/4 and advanced 1/4.
-        # Could probably make the filtering configurable later.
-        data[line_num * line_len : (line_num + 1) * line_len] = (
-            (line_slice * 2) - (delayed2h) - adv2h
-        ) / 4
-    return data
-
-
-@njit(cache=True, nogil=True)
-def comb_c_ntsc(data, line_len):
-    """Very basic comb filter, adds the signal together with a signal delayed by 1H,
-    and one advanced by 1h
-    line by line. VCRs do this to reduce crosstalk.
-    (VCRs only adds delayed by 1h instead)
-    """
-
-    data2 = data.copy()
-    numlines = len(data) // line_len
-    for line_num in range(16, numlines - 2):
-        advanced1h = data2[(line_num + 1) * line_len : (line_num + 2) * line_len]
-        delayed1h = data2[(line_num - 1) * line_len : (line_num) * line_len]
-        line_slice = data[line_num * line_len : (line_num + 1) * line_len]
-        # Let the delayed signal contribute 1/3.
-        # Could probably make the filtering configurable later.
-        data[line_num * line_len : (line_num + 1) * line_len] = (
-            (line_slice * 2) - advanced1h - delayed1h
-        ) / 4
+    lines = data[: len(data) // line_len * line_len].reshape(-1, line_len)
+    n = len(lines)
+    # The data may be float32; the arithmetic is done in double and rounded on store.
+    orig = lines.astype(np.float64)
+    current = orig[16 : n - 2] * 2
+    delayed = orig[16 - k : n - 2 - k]
+    advanced = orig[16 + k : n - 2 + k]
+    # The subtraction order differs per system to keep the output unchanged.
+    if k == 2:
+        lines[16 : n - 2] = (current - delayed - advanced) / 4
+    else:
+        lines[16 : n - 2] = (current - advanced - delayed) / 4
     return data
 
 
@@ -424,21 +381,12 @@ def _demod_burst(
     fsc
 ):
     # get initial burst measurements
-    I = 0.0
-    Q = 0.0
-    burst_sum = 0.0
-
-    for i in range(burst_len):
-        burst_sample = burst[i]
-        burst_sum += burst_sample
-        carrier_idx = i + burst_start
-        I += burst_sample * burst_cos[carrier_idx]
-        Q += burst_sample * burst_sin[carrier_idx]
-
+    I = np.sum(burst * burst_cos[burst_start : burst_start + burst_len])
+    Q = np.sum(burst * burst_sin[burst_start : burst_start + burst_len])
 
     # build starting point for refinement
     phi_guess = (math.atan2(Q, I) + math.pi) % (2.0 * math.pi) - math.pi
-    dc_guess = burst_sum / burst_len
+    dc_guess = np.mean(burst)
     amp_guess = (2.0 * math.sqrt(I * I + Q * Q)) / burst_len
 
     # refine burst measurements
@@ -481,7 +429,7 @@ def _get_upconverted_burst(
     )
 
     # filter out noise so only the color burst is present
-    filtered_padded = sosfiltfilt_rust(chroma_filter, upconverted_burst)
+    filtered_padded = sps.sosfiltfilt(chroma_filter, upconverted_burst)
     filtered = filtered_padded[burst_filter_padding:-burst_filter_padding]
 
     burst_len = len(filtered)
@@ -886,17 +834,6 @@ def upconvert_chroma_phase_comp(
             chroma_slice[k] = chroma_slice[k] * -np.cos(theta_k) - dc_val
 
 
-@njit(cache=True, nogil=True)
-def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
-    for line in range(lineoffset, linesout + lineoffset):
-        linestart = (line - lineoffset) * outwidth
-        lineend = linestart + outwidth
-
-        chroma[linestart + burstarea[1] + 4 : lineend] *= 2
-
-    return chroma
-
-
 @njit(cache=True, nogil=True, fastmath=False)
 def shift_chroma_and_remove_dc(out_chroma, move):
     n = len(out_chroma)
@@ -930,7 +867,8 @@ def shift_chroma_and_remove_dc(out_chroma, move):
 def chroma_color_under_filter(
     data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None
 ):
-    out_chroma = sosfiltfilt_rust(filter, data[:blocklen])
+    # The raw block is int16, which would overflow in sosfiltfilt's edge padding.
+    out_chroma = sps.sosfiltfilt(filter, data[:blocklen].astype(float))
 
     if audio_notch is not None:
         out_chroma = sps.filtfilt(
@@ -1054,27 +992,17 @@ def measure_secam_under_carrier_offset(
     n_fft = sps_fft.next_fast_len(len(chroma))
     analytic = sps.hilbert(chroma, N=n_fft)[: len(chroma)]
 
-    freqs = []
-    envs = []
-
-    for linenumber in range(SKIP_LINES, linesout - SKIP_LINES):
-        line_start = linenumber * outwidth
-        start = line_start + window_start
-        end = line_start + window_end
-        if start < 0 or end > len(chroma):
-            continue
-
-        window_analytic = analytic[start:end]
-        # Instantaneous frequency; median rejects FM clicks and noise spikes.
-        f_inst = np.diff(np.unwrap(np.angle(window_analytic))) * freq_scale
-        freqs.append(np.median(f_inst))
-        envs.append(np.median(np.abs(window_analytic)))
-
-    if not freqs:
+    # The porch window of every line in one (lines, window) array.
+    windows = analytic[SKIP_LINES * outwidth : (linesout - SKIP_LINES) * outwidth].reshape(
+        -1, outwidth
+    )[:, window_start:window_end]
+    if len(windows) == 0:
         return None
 
-    freqs = np.asarray(freqs)
-    envs = np.asarray(envs)
+    # Instantaneous frequency; median rejects FM clicks and noise spikes.
+    f_inst = np.diff(np.unwrap(np.angle(windows), axis=1), axis=1) * freq_scale
+    freqs = np.median(f_inst, axis=1)
+    envs = np.median(np.abs(windows), axis=1)
 
     # Ignore lines where the porch carrier is too weak to measure
     # (dropouts, colour killed lines).
@@ -1139,7 +1067,7 @@ def upconvert_secam_method1(
     band-passed under-carrier envelope is returned as a third element (used
     by regenerate_secam_blanking for local amplitude matching).
     """
-    filtered = sosfiltfilt_rust(under_bpf, chroma)
+    filtered = sps.sosfiltfilt(under_bpf, chroma)
 
     # Analytic signal over the whole field so short-window edge effects don't
     # bias the phase.
@@ -1621,7 +1549,7 @@ def _secam_method_diagnostic(field, chroma, linesout, outwidth):
             )
 
 
-def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
+def _process_chroma_secam_method1(field, chroma, linesout, outwidth):
     """SECAM method 1 chroma restoration: x4 phase multiplication instead of
     a heterodyne mix, plus BT.470 bell amplitude regeneration."""
     _secam_method_diagnostic(field, chroma, linesout, outwidth)
@@ -1702,59 +1630,15 @@ def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
     uphet = restored[: linesout * outwidth]
 
     # Block-anchored final band-pass (same band as ME-SECAM).
-    uphet = sosfiltfilt_rust(field.rf.Filters["FChromaFinal"], uphet)
+    uphet = sps.sosfiltfilt(field.rf.Filters["FChromaFinal"], uphet)
 
     # No per-line chroma AGC here: the amplitude envelope was synthesised
     # from the BT.470 bell above, and normalizing every line to its porch
     # level would flatten the intended foR/foB rest amplitude difference.
-    # Just blank the vertical interval / colour-killed lines and log the
-    # porch level like acc() does for the other formats.
+    # Just blank the vertical interval / colour-killed lines.
     uphet[: first_line * outwidth] = 0
 
-    porch_rms_total = 0.0
-    for linenumber in range(STARTING_LINE, linesout):
-        linestart = linenumber * outwidth
-        porch_rms_total += lddu.rms(
-            uphet[linestart + burstarea[0] : linestart + burstarea[1]]
-        )
-    field.rf.field_averages.chroma_level.push(
-        porch_rms_total / (linesout - STARTING_LINE)
-    )
-
     return uphet
-
-
-@cache
-def _gen_chroma_fft_filter(
-    filter_len: int,
-    fsc: float,
-    color_under_carrier_f: float,
-    bw_lower_hz: float,
-    heterodyne_attenuation_db: float,
-    order: int,
-) -> np.ndarray:
-    """
-    Generate asymmetric Super-Gaussian bandpass mask in the frequency domain.
-    """
-
-    # calculate upper bandwidth limit that is required to remove the heterodyne up conversion product
-    # at the supplied attenuation
-    A = 10.0 ** (-abs(heterodyne_attenuation_db) / 20.0)
-    delta_f = 2.0 * color_under_carrier_f
-    exponent = 1.0 / (2.0 * order)
-    bw_upper_hz = delta_f / ((-np.log(A)) ** exponent)
-
-    freqs_up = sps_fft.rfftfreq(filter_len, d=1.0 / (fsc * 4.0))
-    mask = np.zeros_like(freqs_up, dtype=np.float64)
-
-    lower_idx = freqs_up <= fsc
-    upper_idx = freqs_up > fsc
-
-    # asymmetric Super-Gaussian evaluation around subcarrier (fsc)
-    mask[lower_idx] = np.exp(-((freqs_up[lower_idx] - fsc) / bw_lower_hz) ** (2 * order))
-    mask[upper_idx] = np.exp(-((freqs_up[upper_idx] - fsc) / bw_upper_hz) ** (2 * order))
-
-    return mask
 
 
 def filter_chroma_fft(
@@ -1783,14 +1667,17 @@ def filter_chroma_fft(
 
     x_padded = np.pad(uphet, (pad_left, pad_right), mode='reflect')
 
-    mask = _gen_chroma_fft_filter(
-        N_up,
-        fsc,
-        color_under_carrier_f,
-        bw_lower_hz,
-        heterodyne_attenuation_db,
-        order
-    )
+    # Asymmetric super-gaussian mask around fsc; the upper bandwidth is chosen so the
+    # heterodyne sum product at 2 * color_under is attenuated by the requested amount.
+    A = 10.0 ** (-abs(heterodyne_attenuation_db) / 20.0)
+    bw_upper_hz = 2.0 * color_under_carrier_f / ((-np.log(A)) ** (1.0 / (2.0 * order)))
+
+    freqs_up = sps_fft.rfftfreq(N_up, d=1.0 / (fsc * 4.0))
+    mask = np.zeros_like(freqs_up, dtype=np.float64)
+    lower_idx = freqs_up <= fsc
+    upper_idx = freqs_up > fsc
+    mask[lower_idx] = np.exp(-((freqs_up[lower_idx] - fsc) / bw_lower_hz) ** (2 * order))
+    mask[upper_idx] = np.exp(-((freqs_up[upper_idx] - fsc) / bw_upper_hz) ** (2 * order))
 
     # apply filter against Forward Real FFT
     F_filtered = sps_fft.rfft(x_padded)
@@ -1837,7 +1724,15 @@ def process_chroma(
         # TODO: shift amount may need tuning / needs validation
         chroma_subcarrier_delay_cycles = field.rf.SysParams['fsc_mhz'] * 1e6 / (2.0 * np.pi * field.rf.DecoderParams["color_under_carrier"])
         chroma_subcarrier_delay_samples = chroma_subcarrier_delay_cycles * 4
-        chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst", shift=chroma_subcarrier_delay_samples * chroma_shift_direction)
+        # downscale() resamples at the pixel positions computewow_scaled() returns, so
+        # hand it pre-shifted positions for this one call.
+        pixel_locs, wowfactors = field.computewow_scaled()
+        pixel_locs += chroma_subcarrier_delay_samples * chroma_shift_direction
+        field.computewow_scaled = lambda: (pixel_locs, wowfactors)
+        try:
+            chroma, _, _ = ldd.Field.downscale(field, channel="demod_burst")
+        finally:
+            del field.computewow_scaled
 
         # If chroma AFC is enabled
         if field.rf.do_cafc:
@@ -1877,7 +1772,7 @@ def process_chroma(
                 field.rf.DecoderParams["color_under_carrier"],
             )
             if carrier_offset is not None:
-                field.rf.secam_servo_avg.push(carrier_offset)
+                field.rf.secam_servo_avg.append(carrier_offset)
                 ldd.logger.debug(
                     "SECAM carrier servo: measured offset %.02f Hz" % carrier_offset
                 )
@@ -1893,14 +1788,13 @@ def process_chroma(
         # Method 1 restores the chroma block by phase multiplication rather
         # than by mixing against a heterodyne, so it skips the shared
         # up-conversion path below entirely.
-        return _process_chroma_secam_method1(
-            field, chroma, linesout, outwidth, burstarea
-        )
+        return _process_chroma_secam_method1(field, chroma, linesout, outwidth)
 
     # For NTSC, the color burst amplitude is doubled when recording, so we have to undo that.
     if field.rf.color_system == "NTSC":
         if not disable_deemph:
-            chroma = burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea)
+            # Boost everything after the burst on each line.
+            chroma[: linesout * outwidth].reshape(linesout, outwidth)[:, burstarea[1] + 4 :] *= 2
 
     if (
         not field.rf.options.disable_phase_correction
@@ -1940,10 +1834,10 @@ def process_chroma(
             lo_trim = 0.0
             # Holds either live servo measurements or a seeded/fixed trim
             # (secam_lo_trim); with the servo disabled and no seed it's empty.
-            if field.rf.secam_servo_avg.has_values():
+            if len(field.rf.secam_servo_avg) > 2:
                 # Quantize so measurement noise doesn't dither the LO.
                 lo_trim = np.clip(
-                    round(field.rf.secam_servo_avg.pull() / 10.0) * 10.0,
+                    round(np.mean(field.rf.secam_servo_avg) / 10.0) * 10.0,
                     -10e3,
                     10e3,
                 )
@@ -1978,7 +1872,7 @@ def process_chroma(
         # sits ~106 kHz high on it and loses the tight top edge that
         # suppresses high-side FM splatter from saturated transitions. Keep
         # the block-anchored Butterworth here.
-        uphet = sosfiltfilt_rust(field.rf.Filters["FChromaFinal"], uphet)
+        uphet = sps.sosfiltfilt(field.rf.Filters["FChromaFinal"], uphet)
     else:
         uphet = filter_chroma_fft(
             uphet,
@@ -1994,10 +1888,7 @@ def process_chroma(
 
     # Basic comb filter for NTSC to calm the color a little.
     if not disable_comb:
-        if field.rf.color_system == "NTSC":
-            uphet = comb_c_ntsc(uphet, outwidth)
-        else:
-            uphet = comb_c_pal(uphet, outwidth)
+        uphet = comb_c(uphet, outwidth, 1 if field.rf.color_system == "NTSC" else 2)
 
     # Chroma AGC
     mean_rms, chroma_noise_floor = chroma_automatic_gain(
@@ -2007,8 +1898,6 @@ def process_chroma(
         field.burst_detected_line,
         math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"]))
     )
-
-    field.rf.field_averages.chroma_level.push(mean_rms)
 
     if field.rf.options.cti_mix != 0:
         chroma_transient_improvement(
@@ -2128,7 +2017,8 @@ def decode_chroma(field, do_chroma_deemphasis=False):
         field.uphet_temp = uphet
         # Release to avoid keeping this im memory - should do this in a cleaner manner.
         field.chroma_tbc_buffer = None
-        return chroma_to_u16(uphet)
+        # Scale to the 16-bit output range, adding in double since uphet may be float32.
+        return (uphet.astype(np.float64) + 32767.0).astype(np.uint16)
 
     return None
 

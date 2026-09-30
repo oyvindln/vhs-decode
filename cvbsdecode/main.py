@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import sys
 import signal
-import traceback
 
-import numpy
-import pyximport; pyximport.install(language_level=3, setup_args={'include_dirs': numpy.get_include()}, reload_support=True)  # noqa: E702
 
 import lddecode.utils as lddu
 from lddecode.utils_logging import init_logging
@@ -15,12 +11,11 @@ from vhsdecode.cmdcommons import (
     common_parser,
     select_sample_freq,
     select_system,
-    get_basics,
+    get_basics_or_exit,
+    check_overwrite,
+    decode_fields,
     get_rf_options,
     get_extra_options,
-    IOArgsException,
-    test_input_file,
-    test_output_file,
 )
 
 
@@ -93,55 +88,12 @@ def main(args=None):
             "\n  If you see vertical brightness variations (banding), setting to a value larger than 0 will smooth the wow adjustment."
         )
     )
-    parser.add_argument(
-        "--wow_interpolation_method",
-        type=str,
-        default="linear",
-        choices=["linear", "quadratic", "cubic"],
-        help=(
-            "Sets the type of interpolation spline used to correct wow."
-            "\n  linear     [default]"
-            "\n  quadratic"
-            "\n  cubic"
-        )
-    )
 
     args = parser.parse_args(args)
-    try:
-        filename, outname, firstframe, req_frames = get_basics(args)
-    except IOArgsException as e:
-        parser.print_help()
-        print(e)
-        print(
-            f"ERROR: input file '{args.infile}' not found"
-            if not test_input_file(args.infile)
-            else "Input file: OK"
-        )
-        print(
-            f"ERROR: output file '{args.outfile}' is not writable"
-            if not test_output_file(args.outfile)
-            else "Output file: OK"
-        )
-        sys.exit(1)
-
+    filename, outname, firstframe, req_frames = get_basics_or_exit(parser, args)
     system = select_system(args)
     sample_freq = select_sample_freq(args)
-
-    if not args.overwrite:
-        conflicts_ext = [".tbc", ".log", ".tbc.json"]
-        conflicts = []
-
-        for ext in conflicts_ext:
-            if os.path.isfile(outname + ext):
-                conflicts.append(outname + ext)
-
-        if conflicts:
-            print(
-                "Existing decode files found, remove them or run command with --overwrite"
-            )
-            for conflict in conflicts:
-                print("\t", conflict)
-            sys.exit(1)
+    check_overwrite(args, outname, [".tbc", ".log", ".tbc.json"])
 
     try:
         loader = lddu.make_loader(filename, sample_freq)
@@ -198,47 +150,7 @@ def main(args=None):
             print("ERROR: Seeking failed", file=sys.stderr)
             sys.exit(1)
 
-    # if args.MTF is not None:
-    #    ldd.rf.mtf_mult = args.MTF
-
-    # if args.MTF_offset is not None:
-    #    ldd.rf.mtf_offset = args.MTF_offset
-
-    done = False
-
-    jsondumper: lddu.JSONDumper = lddu.JSONDumper(vhsd, outname)
-
-    def cleanup(outname):
-        jsondumper.close()
-        vhsd.close()
-
-    while not done and vhsd.fields_written < (req_frames * 2):
-        try:
-            f = vhsd.readfield()
-        except KeyboardInterrupt:
-            print("\nTerminated, saving JSON and exiting")
-            cleanup(outname)
-            sys.exit(1)
-        except Exception as err:
-            print(
-                "\nERROR - please paste the following into a bug report:",
-                file=sys.stderr,
-            )
-            print("current sample:", vhsd.fdoffset, file=sys.stderr)
-            print("arguments:", args, file=sys.stderr)
-            print("Exception:", err, " Traceback:", file=sys.stderr)
-            traceback.print_tb(err.__traceback__)
-            cleanup(outname)
-            sys.exit(1)
-
-        if f is None:
-            # or (args.ignoreleadout == False and vhsd.leadOut == True):
-            done = True
-        else:
-            f.prevfield = None
-
-        if vhsd.fields_written < 100 or ((vhsd.fields_written % 500) == 0):
-            jsondumper.write()
+    cleanup = decode_fields(vhsd, args, outname, req_frames)
 
     if "lowest_agc_gain" in vhsd.rf.DecoderParams:
         print("Automatic gain control statistics:", file=sys.stderr)
@@ -263,5 +175,5 @@ def main(args=None):
             file=sys.stderr,
         )
     print("saving JSON and exiting")
-    cleanup(outname)
+    cleanup()
     sys.exit(0)

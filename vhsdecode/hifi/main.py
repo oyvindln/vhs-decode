@@ -28,6 +28,8 @@ from contextlib import nullcontext
 import numpy as np
 import soundfile as sf
 
+from lddecode import lds
+from lddecode.utils import parse_frequency
 from vhsdecode.hifi.utils import (
     NUMA,
     DecoderSharedMemory,
@@ -35,7 +37,8 @@ from vhsdecode.hifi.utils import (
     PostProcessorSharedMemory,
     PeakGain,
     REAL_DTYPE,
-    cleanup_process
+    cleanup_process,
+    copy_data,
 )
 from vhsdecode.hifi.format_scaling import (
     get_normalizer
@@ -128,25 +131,6 @@ def _sounddevice_available():
 
     return SOUNDDEVICE_AVAILABLE
 
-
-frequency_suffixes = [
-    ("ghz", 1.0e9),
-    ("mhz", 1.0e6),
-    ("khz", 1.0e3),
-    ("hz", 1.0),
-    ("fsc", 315.0e6 / 88.0),
-    ("fscpal", (283.75 * 15625) + 25),
-]
-
-
-def parse_frequency(string):
-    multiplier = 1.0e6
-    for suffix, mult in frequency_suffixes:
-        if string.lower().endswith(suffix):
-            multiplier = mult
-            string = string[: -len(suffix)]
-            break
-    return (multiplier * float(string)) / 1.0e6
 
 try:
     try:
@@ -654,13 +638,9 @@ class BufferedInputStream(io.RawIOBase):
 
 
 class LDToolFileReader(BufferedInputStream):
-    def __init__(self, ld_tool, file_path, input_argument=""):
-        shell_command = [ld_tool]
-        if input_argument:
-            shell_command.append(input_argument)
-        shell_command.append(file_path)
+    def __init__(self, ld_tool, file_path):
         p = subprocess.Popen(
-            shell_command,
+            [ld_tool, file_path],
             shell=False,
             stdout=subprocess.PIPE,
             universal_newlines=False,
@@ -913,7 +893,7 @@ def as_soundfile(pathR, input_format_override: np.dtype = None):
                 )
     elif "ldf" == extension:
         try:
-            for ldf_reader_tool in ("ld-ldf-reader", "ld-ldf-reader-py"):
+            for ldf_reader_tool in ("ld-ldf-reader-py", "ld-ldf-reader"):
                 if test_ld_tools(ldf_reader_tool):
                     return AsyncReader(
                         LDToolFileReader(ldf_reader_tool, pathR),
@@ -946,23 +926,15 @@ def as_soundfile(pathR, input_format_override: np.dtype = None):
             input_format
         )
     elif "lds" == extension:
-        try:
-            for lds_reader_tool, input_arg in (
-                ("ld-lds-reader", ""),
-                ("ld-lds-converter", "-i"),
-            ):
-                if test_ld_tools(lds_reader_tool):
-                    return AsyncReader(
-                        LDToolFileReader(lds_reader_tool, pathR, input_arg),
-                        input_format
-                    )
-            print(
-                "ERROR: Unable to decode LDS without ld-lds-reader or ld-lds-converter. Please install one of them and try again."
-            )
-        except Exception as e:
-            print(
-                "ERROR: Unexpected error opening LDS reader tool", e
-            )
+        # Unpack the 10-bit samples in a thread and stream them through a pipe.
+        read_fd, write_fd = os.pipe()
+
+        def unpack():
+            with open(pathR, "rb") as infile, os.fdopen(write_fd, "wb") as outfile:
+                lds.unpack_stream(infile, outfile)
+
+        threading.Thread(target=unpack, daemon=True).start()
+        return AsyncReader(os.fdopen(read_fd, "rb"), input_format)
     else:
         print("WARN: Unknown file format.")
         print("WARN: Attempting to decode with ffmpeg")
@@ -1304,9 +1276,7 @@ def write_soundfile_process_worker(
 
             if preview_playback_enabled:
                 stereo_copy = np.empty_like(stereo, order="C")
-                DecoderSharedMemory.copy_data_float32(
-                    stereo, stereo_copy, len(stereo_copy)
-                )
+                copy_data(stereo, stereo_copy, len(stereo_copy))
                 player.play(stereo_copy)
 
             buffer.close()
@@ -1518,14 +1488,10 @@ async def decode_parallel(
             buffer = DecoderSharedMemory(decoder_state)
             block = buffer.get_block()
             # copy starting at half the normal read overlap
-            DecoderSharedMemory.copy_data_dst_offset_float32(
-                block_data_read, block, start_overlap_end, len(block_data_read)
-            )
+            copy_data(block_data_read, block, len(block_data_read), dst_offset=start_overlap_end)
 
             # this is the first block, fill in the empty data before half the read overlap, this will be discarded
-            DecoderSharedMemory.copy_data_float32(
-                block_data_read, block, start_overlap_end
-            )
+            copy_data(block_data_read, block, start_overlap_end)
         elif decoder_state.is_last_block and frames_read > 0:
             # shift the read in data to (end - discard overlap)
             block = buffer.get_block()
@@ -1533,36 +1499,26 @@ async def decode_parallel(
             frames_read_with_overlap = frames_read + decoder_state.block_overlap
             block_in_offset = len(block) - frames_read_with_overlap
             block_data_read = block_in[0:frames_read].copy()
-            DecoderSharedMemory.copy_data_dst_offset_float32(
-                block_data_read, block, block_in_offset, frames_read
-            )
+            copy_data(block_data_read, block, frames_read, dst_offset=block_in_offset)
 
             # copy in the entire previous block to use as overlap
             # at the end of this decode worker, only the new audio will be returned
             previous_block_in_offset = len(previous_block) - block_in_offset
-            DecoderSharedMemory.copy_data_src_offset_float32(
-                previous_block, block, previous_block_in_offset, block_in_offset
-            )
+            copy_data(previous_block, block, block_in_offset, src_offset=previous_block_in_offset)
         else:
             # copy the overlapping data from the previous read
             block_in_overlap = buffer.get_block_in_start_overlap()
-            DecoderSharedMemory.copy_data_float32(
-                previous_overlap, block_in_overlap, len(block_in_overlap)
-            )
+            copy_data(previous_overlap, block_in_overlap, len(block_in_overlap))
 
         # copy the the current overlap to use in the next iteration
         current_overlap = buffer.get_block_in_end_overlap()
-        DecoderSharedMemory.copy_data_float32(
-            current_overlap, previous_overlap, len(current_overlap)
-        )
+        copy_data(current_overlap, previous_overlap, len(current_overlap))
 
         if not decoder_state.is_last_block:
             # save the full block for the next iteration, including previous overlap
             # will be used if the next block is the last block
             block = buffer.get_block()
-            DecoderSharedMemory.copy_data_float32(
-                block, previous_block, len(previous_block)
-            )
+            copy_data(block, previous_block, len(previous_block))
 
         buffer.close()
 

@@ -1,6 +1,5 @@
 import numpy as np
-import vhsdecode.utils as utils
-from vhsdecode.linear_filter import FiltersClass
+import scipy.signal as sps
 
 
 class VideoEQ:
@@ -8,17 +7,13 @@ class VideoEQ:
 
     def __init__(self, decoder_params, sharpness_level, freq_hz):
         # sharpness filter / video EQ
-        iir_eq_loband = utils.firdes_highpass(
-            freq_hz,
-            decoder_params["video_eq"]["loband"]["corner"],
-            decoder_params["video_eq"]["loband"]["transition"],
-            decoder_params["video_eq"]["loband"]["order_limit"],
+        corner = decoder_params["video_eq"]["loband"]["corner"]
+        transition = decoder_params["video_eq"]["loband"]["transition"]
+        self._b, self._a = sps.butter(
+            *sps.buttord(corner, corner + transition, 3, 30, fs=freq_hz), "highpass", fs=freq_hz
         )
-
-        self._video_eq_filter = {
-            0: FiltersClass(iir_eq_loband[0], iir_eq_loband[1], freq_hz),
-            # 1: FiltersClass(iir_eq_hiband[0], iir_eq_hiband[1], freq_hz),
-        }
+        # Filter state carried over between calls.
+        self._zi = sps.lfilter_zi(self._b, self._a)
 
         self._gain = decoder_params["video_eq"]["loband"]["order_limit"]
         self._sharpness_level = sharpness_level
@@ -26,8 +21,8 @@ class VideoEQ:
     def filter_video(self, demod):
         """It enhances the upper band of the video signal"""
         overlap = 10  # how many samples the edge distortion produces
-        ha = self._video_eq_filter[0].filtfilt(demod)
-        hb = self._video_eq_filter[0].lfilt(demod[:overlap])
+        ha = sps.filtfilt(self._b, self._a, demod)
+        hb, self._zi = sps.lfilter(self._b, self._a, demod[:overlap], zi=self._zi)
         hc = np.concatenate(
             (hb[:overlap], ha[overlap:])
         )  # edge distortion compensation, needs check

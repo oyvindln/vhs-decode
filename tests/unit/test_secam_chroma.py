@@ -484,7 +484,7 @@ class TestMESECAMDecoderConstruction:
         assert decoder.chroma_afc.conversion_lo == CONVERSION_LO
         # No trim seed given, so the servo average starts empty and no trim
         # is applied until enough fields have been measured.
-        assert not decoder.secam_servo_avg.has_values()
+        assert len(decoder.secam_servo_avg) <= 2
 
     def test_lo_trim_seed(self):
         decoder = process.VHSRFDecode(
@@ -495,5 +495,5 @@ class TestMESECAMDecoderConstruction:
 
         # Seeded (e.g. by the two-pass calibration) so the trim applies from
         # the first field.
-        assert decoder.secam_servo_avg.has_values()
-        np.testing.assert_allclose(decoder.secam_servo_avg.pull(), 2000.0)
+        assert len(decoder.secam_servo_avg) > 2
+        np.testing.assert_allclose(np.mean(decoder.secam_servo_avg), 2000.0)

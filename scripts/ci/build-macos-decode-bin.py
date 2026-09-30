@@ -6,9 +6,6 @@ import PyInstaller.utils.osx as osxutils
 import plistlib
 from pathlib import Path
 from shutil import move
-# Release/performance safety: never default macOS release artifacts to a
-# debug Rust profile when invoked locally outside CI.
-os.environ.setdefault("SETUPTOOLS_RUST_CARGO_PROFILE", "release")
 def _generate_build_version() -> str:
     version_script = Path("scripts/generate_version.py")
     if not version_script.is_file():
@@ -43,8 +40,6 @@ PyInstaller.__main__.run(
     [
         "decode.py",
         "--collect-all",
-        "vhsd_rust",
-        "--collect-all",
         "PyQt6",
         "--collect-all",
         "numba",
@@ -56,8 +51,6 @@ PyInstaller.__main__.run(
         "lddecode",
         "--add-data",
         "assets:assets",
-        "--hidden-import",
-        "vhsdecode.windows_bootstrap",
         "--hidden-import",
         "vhsdecode.decode_launcher",
         "--hidden-import",

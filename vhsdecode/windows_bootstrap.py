@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import os
 import sys
-_DEVNULL_STDIO = None
 
 
 def prepare_frozen_windows_gui_launch() -> None:
@@ -37,25 +34,6 @@ def _detach_explorer_console() -> None:
 
     user32.ShowWindow(console_window, 0)
     kernel32.FreeConsole()
-    _redirect_detached_stdio_to_devnull()
-
-
-def _redirect_detached_stdio_to_devnull() -> None:
-    global _DEVNULL_STDIO
-
-    if _DEVNULL_STDIO is not None:
-        return
-
-    stdin_stream = open(os.devnull, "r", encoding="utf-8", errors="ignore")
-    stdout_stream = open(os.devnull, "w", encoding="utf-8", errors="ignore", buffering=1)
-    stderr_stream = open(os.devnull, "w", encoding="utf-8", errors="ignore", buffering=1)
-
-    _DEVNULL_STDIO = (stdin_stream, stdout_stream, stderr_stream)
-    sys.stdin = stdin_stream
-    sys.stdout = stdout_stream
-    sys.stderr = stderr_stream
-    sys.__stdin__ = stdin_stream
-    sys.__stdout__ = stdout_stream
-    sys.__stderr__ = stderr_stream
-
-
+    sys.stdin = sys.__stdin__ = open(os.devnull, "r", encoding="utf-8", errors="ignore")
+    sys.stdout = sys.__stdout__ = open(os.devnull, "w", encoding="utf-8", errors="ignore", buffering=1)
+    sys.stderr = sys.__stderr__ = open(os.devnull, "w", encoding="utf-8", errors="ignore", buffering=1)

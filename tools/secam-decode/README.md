@@ -23,7 +23,7 @@ Download the Graph & Script here:
   
 - Run graph, adjust `fieldstart` parameter (value 0 or 2) if necessary.
   
-- Use bash script to combine with dropout corrected video file by tbc-video-export tool or gen_chroma_vid script.
+- Use bash script to combine with dropout corrected video file by the tbc-video-export tool.
 
 
 
@@ -56,7 +56,7 @@ If field offset is 0:
 Add -o as parameter if the field offset is 2.
 
 ```
-./secam_to_yuv.sh -l gen_chroma_vid.mkv -c YUV.bin -o
+./secam_to_yuv.sh -l luma.mkv -c YUV.bin -o
 ```
 
 The script also crops the YUV.bin to the same dimensions and cutout as it would be from the exported video. So the chroma and luma planes from the normal ld-chroma-decoder and the gnuradio graph output are aligned.
@@ -70,7 +70,7 @@ Cropping can be omitted if needed.
 ffmpeg -f rawvideo -pixel_format yuv444p -color_range tv -color_primaries "bt470bg" -color_trc "bt709" -colorspace "bt470bg" -video_size 1185x624 -r 25 -i YUV.bin -filter:v "crop=928:576:183:46, setdar=1856/1383" -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 output.mkv
 ```
 
-If you're not able to use the bash script take this one-liner to directly merge the YUV file from Gnuradio with the gen_chroma_vid generated file.
+If you're not able to use the bash script take this one-liner to directly merge the YUV file from Gnuradio with the tbc-video-export generated file.
 
 ```
 ffmpeg -y -f rawvideo -pixel_format yuv444p -color_range tv -color_primaries "bt470bg" -color_trc "bt709" -colorspace "bt470bg" -video_size 1185x624 -r 25 -i "videofromgnuradio" -ss 0.00 -i "videofromgenvidscript" -filter_complex "[0:v]format=yuv444p, crop=928:576:183:46, setdar=1856/1383[chroma]; [1:v]format=yuv422p10le, setdar=1856/1383[luma]; [chroma][luma]mergeplanes=0x100102:yuv422p10le[v]" -map 1:a? -c:a copy -map '[v]' -c:v ffv1 -coder 1 -context 1 -g 25 -level 3 -slices 16 -slicecrc 1 -top 1 "video_merged.mkv"
@@ -79,7 +79,7 @@ ffmpeg -y -f rawvideo -pixel_format yuv444p -color_range tv -color_primaries "bt
 
 **In both cases the -ss option is important to align both files. Set it from 0.00 to 0.04 if your startfield is 2!**
 
-0.04 means 1/25th of a second, representing skipping one frame at the beginning from the gen_chroma_vid generated file.
+0.04 means 1/25th of a second, representing skipping one frame at the beginning from the tbc-video-export generated file.
 
 
 ## Limitations

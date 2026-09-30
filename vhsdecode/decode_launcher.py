@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import logging
 import os
 import shutil
@@ -10,13 +9,12 @@ import shlex
 import subprocess
 import sys
 import sysconfig
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from vhsdecode.drop_paths import extract_dropped_file_paths
 try:
-    from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+    from PyQt6.QtCore import Qt, pyqtSignal
     from PyQt6.QtGui import QColor, QIcon, QPalette
     from PyQt6.QtWidgets import (
         QApplication,
@@ -37,7 +35,7 @@ try:
     )
     ALIGN_TOP = Qt.AlignmentFlag.AlignTop
 except ImportError:
-    from PyQt5.QtCore import QTimer, Qt, pyqtSignal
+    from PyQt5.QtCore import Qt, pyqtSignal
     from PyQt5.QtGui import QColor, QIcon, QPalette
     from PyQt5.QtWidgets import (
         QApplication,
@@ -192,15 +190,6 @@ FILENAME_TAPE_SPEED_HINTS: list[tuple[tuple[str, ...], str]] = [
     (("sp",), "SP"),
 ]
 
-# Filename keyword -> hifi GUI format combo label (used when launching hifi).
-# Mirrors vhsdecode.hifi.HifiUi auto-detect so launcher and hifi GUI agree.
-FILENAME_HIFI_FORMAT_HINTS: list[tuple[tuple[str, ...], str]] = [
-    (("betamax",), "Betamax"),
-    (("betacam",), "Betacam"),
-    (("video8", "hi8", "hi-8"), "Video8/Hi8"),
-    (("svhs", "s-vhs", "supervhs", "super-vhs", "vhs"), "VHS"),
-]
-
 TOOL_ENTRYPOINTS = {
     "hifi": "hifi-decode",
     "filter-tune": "filter-tune",
@@ -244,15 +233,6 @@ def _load_app_icon() -> QIcon:
     return QIcon()
 
 
-def _current_app_icon() -> QIcon:
-    app = QApplication.instance()
-    if app is not None:
-        icon = app.windowIcon()
-        if icon is not None and not icon.isNull():
-            return icon
-    return _load_app_icon()
-
-
 def _split_user_args(extra_args: str, *, strict: bool = True) -> list[str]:
     if not extra_args.strip():
         return []
@@ -273,11 +253,6 @@ def _split_user_args(extra_args: str, *, strict: bool = True) -> list[str]:
 
 def _is_json_file_path(path: str) -> bool:
     return Path(path).suffix.lower() == ".json"
-
-
-def _extract_dropped_file_paths(mime_data) -> list[str]:
-    return extract_dropped_file_paths(mime_data)
-
 
 
 def _candidate_script_directories() -> list[Path]:
@@ -477,16 +452,6 @@ def _build_basic_decoder_args(
     return args
 
 
-def _shell_join(parts: list[str]) -> str:
-    return " ".join(shlex.quote(part) for part in parts)
-
-def _shell_join_windows(parts: list[str]) -> str:
-    return subprocess.list2cmdline(parts)
-
-def _shell_join_platform(parts: list[str]) -> str:
-    return _shell_join_windows(parts) if os.name == "nt" else _shell_join(parts)
-
-
 def _open_linux_terminal(shell_command: str) -> None:
     shell = os.environ.get("SHELL", "/bin/bash")
     shell_args = [shell, "-lc", shell_command]
@@ -525,7 +490,7 @@ def _open_terminal(command_parts: list[str], working_directory: Path) -> None:
         )
         return
 
-    command = _shell_join(command_parts)
+    command = shlex.join(command_parts)
     shell = os.environ.get("SHELL", "/bin/bash")
     shell_command = (
         f"cd {shlex.quote(str(working_directory))} && {command}; "
@@ -573,7 +538,7 @@ class FileDropLineEdit(QLineEdit):
         return None
 
     def dragEnterEvent(self, event) -> None:
-        dropped_paths = _extract_dropped_file_paths(event.mimeData())
+        dropped_paths = extract_dropped_file_paths(event.mimeData())
         if self._matching_path(dropped_paths) is not None:
             event.acceptProposedAction()
             return
@@ -582,18 +547,11 @@ class FileDropLineEdit(QLineEdit):
             return
         super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event) -> None:
-        dropped_paths = _extract_dropped_file_paths(event.mimeData())
-        if self._matching_path(dropped_paths) is not None:
-            event.acceptProposedAction()
-            return
-        if dropped_paths:
-            event.ignore()
-            return
-        super().dragMoveEvent(event)
+    # Cocoa needs dragMoveEvent handled too, or the drop target is invalidated mid-drag.
+    dragMoveEvent = dragEnterEvent
 
     def dropEvent(self, event) -> None:
-        dropped_paths = _extract_dropped_file_paths(event.mimeData())
+        dropped_paths = extract_dropped_file_paths(event.mimeData())
         dropped_path = self._matching_path(dropped_paths)
         if dropped_path is None:
             if dropped_paths:
@@ -611,9 +569,6 @@ class DecodeLauncherWindow(QWidget):
         self.setAcceptDrops(True)
         self._tools = TOOLS
         self.setWindowTitle("Decode Launcher")
-        icon = _current_app_icon()
-        if icon is not None and not icon.isNull():
-            self.setWindowIcon(icon)
         self.resize(720, 280)
 
         self.tool_combo = QComboBox()
@@ -660,8 +615,6 @@ class DecodeLauncherWindow(QWidget):
         self._last_decoder_tbc_path: Optional[Path] = None
         self._has_launched_decoder = False
         self._hosted_launches: list[object] = []
-        self._native_gui_warmup_started = False
-        self._native_gui_warmup_done = threading.Event()
 
         self.launch_button = QPushButton("Launch selected tool")
         self.launch_tbc_tools_button = QPushButton("Launch tbc-tools / ld-analyse")
@@ -670,12 +623,6 @@ class DecodeLauncherWindow(QWidget):
         self._build_layout()
         self._wire_events()
         self._refresh_tool_state()
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        if not self._native_gui_warmup_started:
-            self._native_gui_warmup_started = True
-            QTimer.singleShot(250, self._start_native_gui_warmup)
 
     def _build_layout(self) -> None:
         root = QVBoxLayout()
@@ -768,11 +715,6 @@ class DecodeLauncherWindow(QWidget):
 
         window.destroyed.connect(_cleanup)
 
-    def _delete_on_close_attribute(self):
-        if hasattr(Qt, "WidgetAttribute"):
-            return Qt.WidgetAttribute.WA_DeleteOnClose
-        return Qt.WA_DeleteOnClose
-
     def _params_json_args(self, tool: ToolSpec, *, strict: bool) -> list[str]:
         if tool.subcommand != "vhs" or not self.params_json_check.isChecked():
             return []
@@ -783,24 +725,6 @@ class DecodeLauncherWindow(QWidget):
             return []
         return ["--params_file", params_json]
 
-    def _start_native_gui_warmup(self) -> None:
-        threading.Thread(
-            target=self._warm_native_gui_modules,
-            name="decode_launcher_native_gui_warmup",
-            daemon=True,
-        ).start()
-
-    def _warm_native_gui_modules(self) -> None:
-        try:
-            # Only warm Filter Tune. Importing hifi here can trigger substantial
-            # optional-runtime initialization side effects even when the user is
-            # not launching hifi from the launcher.
-            importlib.import_module("filter_tune.filter_tune")
-        except Exception as exc:
-            print(f"[decode-launcher] native GUI warmup skipped: {exc}")
-        finally:
-            self._native_gui_warmup_done.set()
-
     def _launch_filter_tune_in_process(self, extra: str) -> None:
         extra_args = _split_user_args(extra) if extra else []
         tape_format = extra_args[0] if extra_args else "VHS"
@@ -808,10 +732,7 @@ class DecodeLauncherWindow(QWidget):
         from filter_tune.filter_tune import VHStune
 
         window = VHStune(tape_format, logging.getLogger("vhstune"))
-        icon = _current_app_icon()
-        if icon is not None and not icon.isNull():
-            window.setWindowIcon(icon)
-        window.setAttribute(self._delete_on_close_attribute(), True)
+        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         window.show()
         pos = window.pos()
         if pos.x() < 0 or pos.y() < 0:
@@ -826,10 +747,7 @@ class DecodeLauncherWindow(QWidget):
         from vhsdecode.hifi.main import launch_hosted_ui
 
         controller = launch_hosted_ui(extra_args, app=QApplication.instance())
-        icon = _current_app_icon()
-        if icon is not None and not icon.isNull():
-            controller.window.setWindowIcon(icon)
-        controller.window.setAttribute(self._delete_on_close_attribute(), True)
+        controller.window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._track_hosted_launch(controller, controller.window)
 
     def _launch_native_gui_in_process(
@@ -859,7 +777,8 @@ class DecodeLauncherWindow(QWidget):
         extra = self.extra_args_edit.text().strip()
         if extra:
             basic_args += _split_user_args(extra, strict=False)
-        return _shell_join_platform(base_cmd + basic_args)
+        parts = base_cmd + basic_args
+        return subprocess.list2cmdline(parts) if os.name == "nt" else shlex.join(parts)
 
     def _refresh_tool_state(self) -> None:
         tool = self._selected_tool()
@@ -1006,7 +925,7 @@ class DecodeLauncherWindow(QWidget):
     def _split_window_drop_paths(self, mime_data) -> tuple[Optional[str], Optional[str]]:
         input_path: Optional[str] = None
         params_json_path: Optional[str] = None
-        for dropped_path in _extract_dropped_file_paths(mime_data):
+        for dropped_path in extract_dropped_file_paths(mime_data):
             if _is_json_file_path(dropped_path):
                 if params_json_path is None:
                     params_json_path = dropped_path
@@ -1023,12 +942,7 @@ class DecodeLauncherWindow(QWidget):
             return
         super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event) -> None:
-        input_path, params_json_path = self._split_window_drop_paths(event.mimeData())
-        if input_path or params_json_path:
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
+    dragMoveEvent = dragEnterEvent
 
     def dropEvent(self, event) -> None:
         input_path, params_json_path = self._split_window_drop_paths(event.mimeData())
@@ -1154,7 +1068,7 @@ class DecodeLauncherWindow(QWidget):
             if key not in seen:
                 seen.add(key)
                 deduped_roots.append(root)
-        def root_candidates(root: Path) -> list[Path]:
+        def candidates_in(root: Path) -> list[Path]:
             if os.name == "nt":
                 return [
                     root / "ld-analyse.exe",
@@ -1166,6 +1080,11 @@ class DecodeLauncherWindow(QWidget):
                     root / "release" / "tbc-analyse.exe",
                 ]
             if sys.platform == "darwin":
+                if root.suffix.lower() == ".app":
+                    return [
+                        root / "Contents" / "MacOS" / "ld-analyse",
+                        root / "Contents" / "MacOS" / "tbc-tools",
+                    ]
                 return [
                     root / "tbc-tools.app" / "Contents" / "MacOS" / "ld-analyse",
                     root / "tbc-tools.app" / "Contents" / "MacOS" / "tbc-tools",
@@ -1182,40 +1101,8 @@ class DecodeLauncherWindow(QWidget):
                 root / "tbc-tools" / "ld-analyse",
             ]
 
-        def child_candidates(child: Path) -> list[Path]:
-            if os.name == "nt":
-                return [
-                    child / "ld-analyse.exe",
-                    child / "tbc-analyse.exe",
-                    child / "tbc-tools.exe",
-                    child / "tbc-tools" / "ld-analyse.exe",
-                    child / "tbc-tools" / "tbc-analyse.exe",
-                    child / "release" / "ld-analyse.exe",
-                    child / "release" / "tbc-analyse.exe",
-                ]
-            if sys.platform == "darwin":
-                if child.suffix.lower() == ".app":
-                    return [
-                        child / "Contents" / "MacOS" / "ld-analyse",
-                        child / "Contents" / "MacOS" / "tbc-tools",
-                    ]
-                return [
-                    child / "tbc-tools.app" / "Contents" / "MacOS" / "ld-analyse",
-                    child / "tbc-tools.app" / "Contents" / "MacOS" / "tbc-tools",
-                    child / "ld-analyse.app" / "Contents" / "MacOS" / "ld-analyse",
-                    child / "ld-analyse",
-                ]
-            return [
-                child / "ld-analyse",
-                child / "tbc-tools.AppImage",
-                child / "tbc-tools.appimage",
-                child / "tbc-tools-x86_64.AppImage",
-                child / "tbc-tools-x86_64.appimage",
-                child / "tbc-tools" / "ld-analyse",
-            ]
-
         for root in deduped_roots:
-            candidates = root_candidates(root)
+            candidates = candidates_in(root)
 
             # Also check one level down from the root (common unpack layouts).
             try:
@@ -1225,7 +1112,7 @@ class DecodeLauncherWindow(QWidget):
 
             for child in children:
                 if child.is_dir():
-                    candidates.extend(child_candidates(child))
+                    candidates.extend(candidates_in(child))
 
             for candidate in candidates:
                 if candidate.exists() and candidate.is_file():
@@ -1332,10 +1219,7 @@ class DecodeLauncherWindow(QWidget):
                         return
                 except Exception as hosted_exc:
                     print(f"[decode-launcher] hosted GUI launch fallback: {hosted_exc}")
-                if os.name == "nt":
-                    subprocess.Popen(command, cwd=str(working_directory))
-                else:
-                    subprocess.Popen(command, cwd=str(working_directory))
+                subprocess.Popen(command, cwd=str(working_directory))
             else:
                 _open_terminal(command, working_directory)
         except Exception as exc:
@@ -1349,8 +1233,8 @@ def _apply_fusion_dark_mode(app: QApplication) -> None:
     else:
         app.setStyle("Fusion")
 
-    role = QPalette.ColorRole if hasattr(QPalette, "ColorRole") else QPalette
-    group = QPalette.ColorGroup if hasattr(QPalette, "ColorGroup") else QPalette
+    role = QPalette.ColorRole
+    group = QPalette.ColorGroup
 
     palette = QPalette()
     palette.setColor(role.Window, QColor(53, 53, 53))
@@ -1387,7 +1271,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     _apply_fusion_dark_mode(app)
     window = DecodeLauncherWindow()
     window.show()
-    return app.exec() if hasattr(app, "exec") else app.exec_()
+    return app.exec()
 
 
 if __name__ == "__main__":

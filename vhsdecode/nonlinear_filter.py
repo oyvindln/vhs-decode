@@ -2,8 +2,6 @@ import numpy.fft as npfft
 
 import scipy.signal as sps
 import numpy as np
-import math
-from vhsdecode.rust_utils import sosfiltfilt_rust
 
 
 def _sub_deemphasis_debug(
@@ -26,9 +24,7 @@ def _sub_deemphasis_debug(
         sub_emphasis_params.logistic_mid,
         sub_emphasis_params.logistic_rate,
         sub_emphasis_params.static_factor,
-        # debug_const_amplitude=const_amplitude,
     )
-    # return result
     return npfft.irfft(npfft.rfft(result))
 
 
@@ -61,7 +57,6 @@ def sub_deemphasis_inner(
         _type_: video signal with filtering applied
     """
     hf_part = npfft.irfft(out_video_fft * filters["NLHighPassF"])
-    # hf_part = sps.filtfilt(filters["NLHighPassFB"][0], filters["NLHighPassFB"][1], out_video)
 
     deviation /= 2
 
@@ -73,7 +68,7 @@ def sub_deemphasis_inner(
     # and divide by the formats specified deviation so we get a amplitude compared to the specifications references.
     amplitude = abs(sps.hilbert(hf_part)) / deviation
     # Clip the value after filtering to make sure we don't go negative
-    amplitude = np.clip(sosfiltfilt_rust(filters["NLAmplitudeLPF"], amplitude), 0, None)
+    amplitude = np.clip(sps.sosfiltfilt(filters["NLAmplitudeLPF"], amplitude), 0, None)
     if debug_const_amplitude:
         amplitude = debug_const_amplitude
 
@@ -141,26 +136,6 @@ def sub_deemphasis(
     return ret
 
 
-def _gen_low_shelf_2(w0, gain, fs, is_db=False):
-    import scipy.signal as sps
-
-    b0 = 10 ** (gain / 20) if is_db else gain
-    w0 = w0 * math.tau
-    filts = sps.lti([1, (w0 * (b0 + 1))], [1, b0])
-    filtz = sps.lti(*sps.bilinear(filts.num, filts.den, fs))
-    return filtz.num, filtz.den
-
-
-def _gen_high_shelf_2(w0, gain, fs, is_db=False):
-    import scipy.signal as sps
-
-    b0 = 10 ** (gain / 20) if is_db else gain
-    w0 = w0 * math.tau
-    filts = sps.lti([1, (w0 * (b0 + 1))], [1, b0])
-    filtz = sps.lti(*sps.bilinear(filts.num, filts.den, fs))
-    return filtz.num, filtz.den
-
-
 class NLFilter:
     def __init__(
         self,
@@ -168,14 +143,11 @@ class NLFilter:
         filter_b,
         deviation,
     ):
-        # self._fs = fs
         self._filter_a = filter_a
         self._filter_b = filter_b
         self._deviation = deviation
 
     def filter_in_fft(self, data_fft):
-        # data_raw = npfft.irfft(data_fft).real
-        # data_fb = npfft.irfft(data_fft * self.fb_bpf).real
         filt_a = npfft.irfft(data_fft * self._filter_a).real
         filt_b = npfft.irfft(data_fft * self._filter_b).real
         amplitude = abs(sps.hilbert(filt_b)) / self._deviation
@@ -187,10 +159,6 @@ def to_db(input):
     # Ignore divide by zero errors since filters may have zeroes.
     with np.errstate(divide='ignore'):
         return 20 * np.log10(np.abs(input))
-
-
-def from_db(input):
-    return pow(10, (input / 20))
 
 
 def limiter_filter(
@@ -210,16 +178,11 @@ def limiter_filter(
         hf_part,
         -deviation * clip_fraction,
         deviation * clip_fraction,
-        # out=hf_part,
     )
     if smooth:
         remainder = hf_part - clipped
         remainder *= 0.1
         clipped += remainder
-    # print("clipping: ", deviation * clip_fraction)
-
-    #        self.DecoderParams["nonlinear_highpass_limit_l"],
-    #    self.DecoderParams["nonlinear_highpass_limit_h"],#
 
     # And subtract it from the output signal.
     return out_video - clipped - static_part
@@ -316,12 +279,6 @@ def test_filter(filters, sample_rate, blocklen, deviation, sub_emphasis_params):
 
         plotter = SubEmphPlotter(blocklen, sample_rate, filters, ax[1])
 
-        def _from_freq(freq):
-            return (blocklen / (sample_rate)) * freq
-
-        # w = plotter.chirp_signal
-        # w_fft = plotter.chirp_fft
-
         plotter.plot_sub_emphasis(-20, ax[2], sub_emphasis_params)
 
         plotter.plot_sub_emphasis(-15, ax[2], sub_emphasis_params)
@@ -329,36 +286,10 @@ def test_filter(filters, sample_rate, blocklen, deviation, sub_emphasis_params):
         plotter.plot_sub_emphasis(-6, ax[2], sub_emphasis_params)
         plotter.plot_sub_emphasis(-3, ax[2], sub_emphasis_params, color="#000000")
 
-        # w_a = w * from_db(-3)
-        # w_a_fft = npfft.rfft(w_a)
-
-        # w4 = limiter_filter(
-        #    w_a, w_a_fft, filters, deviation,
-        # )
-        # ax[2].plot(freqs, to_db(npfft.rfft(w4) / w_a_fft), linestyle="dashed")
-
-        # w_b = w * from_db(-20)
-        # w_b_fft = npfft.rfft(w_b)
-
-        # w5 = limiter_filter(
-        #    w_b, w_b_fft, filters, deviation
-        # )
-        # ax[2].plot(freqs, to_db(npfft.rfft(w5) / w_b_fft), linestyle="dashed")
-
-        ##positions = _from_freq(betamax_full_deemp_db_v_freqs).astype(int)
-
-        # for i in range(0, 5):
-        #    ax[2].plot(video8_full_emp_db_v_freqs, -(video8_full_emp_db_v[i]))
-
         for i in range(0, 3):
             ax[2].plot(video8_sub_emp_freqs, -(video8_sub_emp_db_v[i]))
 
-        # ax[2].plot(betamax_full_deemp_db_v_freqs, -betamax_full_deemp_db_v_625[3]  + to_db(filters["FDeemp"][positions]))
-        # ax[2].plot(betamax_full_deemp_db_v_freqs, -betamax_full_deemp_db_v_625[2])
-        # ax[2].plot(betamax_full_deemp_db_v_freqs, -betamax_full_deemp_db_v_625[1])
-        # ax[2].plot(betamax_full_deemp_db_v_freqs, -betamax_full_deemp_db_v_625[0])
         ax[2].plot(freqs, to_db(filters["FDeemp"]), color="#FF0000")
-        # ax[2].plot(betamax_full_deemp_db_v_freqs, betamax_full_deemp_db_v_625)
         ax[2].axhline(to_db(0.5))
         ax[2].axhline(-4.6)
         ax[2].axvline(200000)

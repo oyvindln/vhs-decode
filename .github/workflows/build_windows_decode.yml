@@ -31,8 +31,6 @@ jobs:
             smoke_length_frames: 60
     name: Build decode (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    env:
-        SETUPTOOLS_RUST_CARGO_PROFILE: release
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,74 +43,21 @@ jobs:
           python-version: "3.14"
           architecture: ${{ matrix.python_arch }}
 
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Add Rust x64 target on ARM runner
-        if: matrix.arch == 'arm64' && matrix.python_arch == 'x64'
-        run: rustup target add x86_64-pc-windows-msvc
-
-      - name: Ensure DIA SDK path compatibility for arm64
-        if: matrix.arch == 'arm64' && matrix.python_arch == 'arm64'
-        shell: pwsh
-        run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe not found at $vswhere"
-          }
-
-          $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
-          if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
-            $vsInstallPath = & $vswhere -latest -products * -property installationPath
-          }
-          if ([string]::IsNullOrWhiteSpace($vsInstallPath)) {
-            throw "Unable to locate Visual Studio installation path."
-          }
-
-          $sourceDiaSdk = Join-Path $vsInstallPath "DIA SDK"
-          if (-not (Test-Path $sourceDiaSdk)) {
-            throw "DIA SDK directory not found at $sourceDiaSdk"
-          }
-
-          $communityRoot = "C:\Program Files\Microsoft Visual Studio\2022\Community"
-          $communityDiaSdk = Join-Path $communityRoot "DIA SDK"
-          if (-not (Test-Path $communityDiaSdk)) {
-            New-Item -ItemType Directory -Path $communityRoot -Force | Out-Null
-            Copy-Item -Path $sourceDiaSdk -Destination $communityDiaSdk -Recurse -Force
-          }
-
-          $arm64DiaLib = Join-Path $communityDiaSdk "lib\arm64\diaguids.lib"
-          if (-not (Test-Path $arm64DiaLib)) {
-            throw "Expected DIA SDK library not found at $arm64DiaLib"
-          }
-
       - name: Preinstall numba and llvmlite wheels on ARM runner
         if: matrix.arch == 'arm64'
         run: |
           python -m pip install --upgrade pip "setuptools<82" wheel
           python -m pip install --only-binary=:all: "llvmlite==0.47.0" "numba==0.65.1"
 
-      - name: Configure PyO3 cross-build environment on ARM runner
-        if: matrix.arch == 'arm64' && matrix.python_arch == 'x64'
-        shell: pwsh
-        run: |
-          $pythonBase = python -c "import sys; print(sys.base_prefix)"
-          $pythonVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-          $pythonLibDir = Join-Path $pythonBase "libs"
-          if (-not (Test-Path $pythonLibDir)) {
-            throw "Python libs directory not found at $pythonLibDir"
-          }
-
-          "CARGO_BUILD_TARGET=x86_64-pc-windows-msvc" >> $env:GITHUB_ENV
-          "PYO3_CROSS=1" >> $env:GITHUB_ENV
-          "PYO3_CROSS_PYTHON_IMPLEMENTATION=CPython" >> $env:GITHUB_ENV
-          "PYO3_CROSS_PYTHON_VERSION=$pythonVersion" >> $env:GITHUB_ENV
-          "PYO3_CROSS_LIB_DIR=$pythonLibDir" >> $env:GITHUB_ENV
-
       - name: Build Python module
         run: |
           python -m pip install --upgrade pip "setuptools<82" wheel
           pip install pyinstaller pyinstaller-versionfile
           pip install -e ".[hifi_gui_qt6]"
+
+      - name: Generate version metadata
+        shell: bash
+        run: python scripts/generate_version.py > lddecode/version
 
       - name: Build Windows binary
         run: |

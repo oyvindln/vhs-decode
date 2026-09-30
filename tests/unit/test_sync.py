@@ -6,7 +6,7 @@ import pytest
 
 import lddecode.core as ldd
 import vhsdecode.process as process
-from vhsdecode.field import FieldPALVHS
+from vhsdecode.field import FieldPALTape
 
 @pytest.fixture
 def pal_rfdecoder():
@@ -26,7 +26,7 @@ def _make_field(rfdecoder, filename):
             "demod_05": demod_05_data,
         },
     }
-    return FieldPALVHS(rfdecoder, data_stub)
+    return FieldPALTape(rfdecoder, data_stub)
 
 
 class TestSyncPAL:

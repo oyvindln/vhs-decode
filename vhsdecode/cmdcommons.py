@@ -1,9 +1,12 @@
 import argparse
 import os
+import shutil
+import sys
+import time
+import traceback
 from typing import Optional
 
 import lddecode.utils as lddu
-import sys
 
 DDD_FREQ = 40
 CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
@@ -108,46 +111,7 @@ class TestOutputFile(argparse.Action):
             setattr(namespace, self.dest, values)
 
 
-def add_argument_hidden_in_gui(parser, use_gui, *args, **kwargs):
-    if use_gui:
-        parser.add_argument(*args, **kwargs, gooey_options={"visible": False})
-    else:
-        parser.add_argument(*args, **kwargs)
-
-
-def common_parser(meta_title, use_gui=False):
-    if not use_gui:
-        return common_parser_cli(meta_title)
-    else:
-        return common_parser_gui(meta_title)
-
-
-def common_parser_gui(meta_title):
-    from gooey import Gooey, GooeyParser
-
-    @Gooey(program_name="VHS decode")
-    def common_parser_gui_inner(meta_title):
-        parser = GooeyParser(description=meta_title)
-        parser.add_argument(
-            "infile",
-            metavar="infile",
-            type=str,
-            help="source file",
-            widget="FileChooser",
-        )
-        parser.add_argument(
-            "outfile",
-            metavar="outfile",
-            type=str,
-            help="source file",
-            widget="FileSaver",
-        )
-        return common_parser_inner(parser, True)
-
-    return common_parser_gui_inner(meta_title)
-
-
-def common_parser_cli(meta_title, default_threads=DEFAULT_THREADS + 1):
+def common_parser(meta_title, default_threads=DEFAULT_THREADS + 1):
     parser = argparse.ArgumentParser(
         description=meta_title, formatter_class=argparse.RawTextHelpFormatter
     )
@@ -184,7 +148,7 @@ def common_parser_cli(meta_title, default_threads=DEFAULT_THREADS + 1):
     return common_parser_inner(parser, default_threads=default_threads)
 
 
-def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
+def common_parser_inner(parser, default_threads=DEFAULT_THREADS):
     parser.add_argument(
         "--system",
         metavar="system",
@@ -292,27 +256,21 @@ def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
     )
 
     system_group = parser.add_argument_group("Video system options")
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "-p",
         "--pal",
         dest="pal",
         action="store_true",
         help="source is in PAL format",
     )
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "-n",
         "--ntsc",
         dest="ntsc",
         action="store_true",
         help="source is in NTSC format",
     )
-    add_argument_hidden_in_gui(
-        system_group,
-        use_gui,
+    system_group.add_argument(
         "--pm",
         "--palm",
         dest="palm",
@@ -332,6 +290,18 @@ def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
         action="store_true",
         default=False,
         help="Set log legel to DEBUG.",
+    )
+    parser.add_argument(
+        "--wow_interpolation_method",
+        type=str,
+        default="linear",
+        choices=["linear", "quadratic", "cubic"],
+        help=(
+            "Sets the type of interpolation spline used to correct wow."
+            "\n  linear     [default]"
+            "\n  quadratic"
+            "\n  cubic"
+        ),
     )
     debug_group.add_argument(
         "--skip_hsync_refine",
@@ -383,6 +353,108 @@ def select_system(args):
 
 class IOArgsException(Exception):
     pass
+
+
+def get_basics_or_exit(parser, args):
+    """get_basics(), exiting with the help text and which of the paths failed on error."""
+    try:
+        return get_basics(args)
+    except IOArgsException as e:
+        parser.print_help()
+        print(e)
+        print(
+            f"ERROR: input file '{args.infile}' not found"
+            if not test_input_file(args.infile)
+            else "Input file: OK"
+        )
+        print(
+            f"ERROR: output file '{args.outfile}' is not writable"
+            if not test_output_file(args.outfile)
+            else "Output file: OK"
+        )
+        sys.exit(1)
+
+
+def check_overwrite(args, outname, extensions):
+    """Refuse to clobber existing decode outputs unless --overwrite was given."""
+    if args.overwrite:
+        return
+    conflicts = [outname + ext for ext in extensions if os.path.isfile(outname + ext)]
+    if conflicts:
+        print("Existing decode files found, remove them or run command with --overwrite")
+        for conflict in conflicts:
+            print("\t", conflict)
+        sys.exit(1)
+
+
+def _wait_for_disk_space(outname, cleanup):
+    # 500 fields need around 675MB; leave margin for other writers so the disk can't fill
+    # before the next check.
+    limit = 1024 * 1024 * 1024 * 10
+    output_dir = os.path.dirname(os.path.abspath(outname))
+    try:
+        if shutil.disk_usage(output_dir).free >= limit:
+            return
+        print(
+            "\nLess than 10GB of free disk space is remaining, decoding paused. Decoding will resume once there is more space, or press Ctrl+C to exit.",
+            file=sys.stderr,
+        )
+        while True:
+            try:
+                time.sleep(1)
+                if shutil.disk_usage(output_dir).free >= limit:
+                    print("\nDisk space available, resuming decode.", file=sys.stderr)
+                    break
+            except KeyboardInterrupt:
+                print("\nTerminated, saving JSON and exiting")
+                cleanup()
+                sys.exit(1)
+    except OSError:
+        pass  # Ignore if we can't check disk space
+
+
+def decode_fields(decoder, args, outname, req_frames):
+    """Run the readfield loop, writing the JSON as fields accumulate.
+
+    Exits on interrupt or decoder error and pauses when the output disk runs low.
+    Returns the cleanup function that closes the JSON and the decoder.
+    """
+    jsondumper = lddu.JSONDumper(decoder, outname)
+
+    def cleanup():
+        jsondumper.close()
+        decoder.close()
+
+    done = False
+    while not done and decoder.fields_written < (req_frames * 2):
+        try:
+            f = decoder.readfield()
+        except KeyboardInterrupt:
+            print("\nTerminated, saving JSON and exiting")
+            cleanup()
+            sys.exit(1)
+        except Exception as err:
+            print(
+                "\nERROR - please paste the following into a bug report:",
+                file=sys.stderr,
+            )
+            print("current sample:", decoder.fdoffset, file=sys.stderr)
+            print("arguments:", args, file=sys.stderr)
+            print("Exception:", err, " Traceback:", file=sys.stderr)
+            traceback.print_tb(err.__traceback__)
+            cleanup()
+            sys.exit(1)
+
+        if f is None:
+            done = True
+        else:
+            f.prevfield = None
+
+        if decoder.fields_written < 100 or ((decoder.fields_written % 500) == 0):
+            jsondumper.write()
+            _wait_for_disk_space(outname, cleanup)
+
+    return cleanup
 
 
 def get_basics(args):

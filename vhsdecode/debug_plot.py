@@ -317,48 +317,18 @@ def plot_luma_rf(rf, rf_luma_filter):
     plt.show()
 
 
-def plot_env_filter(env_filter1, env_filter2):
-    #    import math
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    x = np.linspace(0, 40, env_filter1.size)
-
-    mag = 20 * np.log10(np.absolute(env_filter1))
-    mag2 = 20 * np.log10(np.absolute(env_filter2))
-    # ph = np.angle(env_filter1, deg=True)
-
-    fig, ax1 = plt.subplots()
-
-    col = "tab:red"
-    ax1.set_xlabel("Frequenzy (MHz)")
-    ax1.set_ylabel("Magnetude (dB)", color=col)
-    ax1.plot(x, mag, color=col)
-    ax1.tick_params(axis="y", labelcolor=col)
-
-    ax2 = ax1.twinx()
-
-    col = "tab:green"
-    ax2.set_ylabel("Phase (°)", color=col)
-    ax2.plot(x, mag2, color=col)
-    ax2.tick_params(axis="y", labelcolor=col)
-
-    fig.tight_layout()
-    plt.show()
-
-
 def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):
     import math
     import matplotlib.pyplot as plt
     import numpy as np
     import scipy.signal as sps
-    from vhsdecode.addons.FMdeemph import FMDeEmphasisB
+    from vhsdecode.addons.FMdeemph import gen_shelf
 
     corner_freq = 1 / (math.pi * 2 * decoder_params["deemph_tau"])
 
-    db, da = FMDeEmphasisB(
-        rf.freq_hz, decoder_params["deemph_gain"], decoder_params["deemph_mid"]
-    ).get()
+    da, db = gen_shelf(
+        decoder_params["deemph_mid"], decoder_params["deemph_gain"], "high", rf.freq_hz, 1 / 2
+    )
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
 
@@ -486,29 +456,3 @@ def plot_deemphasis(rf, filter_video_lpf, decoder_params, filter_deemp):
     ax3.legend()
     plt.show()
     sys.exit()
-
-
-def plot_final_chroma_field(input_chroma, final_chroma) -> None:
-    import math
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import scipy.signal as sps
-
-    import matplotlib.pyplot as plt
-    from matplotlib import rc_context
-    import numpy as np
-
-    with rc_context(
-        {"figure.figsize": (14, 10), "figure.constrained_layout.use": True}
-    ):
-        fig, (ax1, ax2) = plt.subplots(2, 1)  # , sharex=True)
-
-        ax1.plot(input_chroma)
-        ax1.plot(final_chroma, color="#AA0000")
-        ax2.plot(to_db_power(np.fft.rfft(input_chroma)))
-        ax2.plot(to_db_power(np.fft.rfft(final_chroma)), color="#AA0000")
-
-        ax1.legend()
-        ax2.legend()
-        plt.show()
-        sys.exit()

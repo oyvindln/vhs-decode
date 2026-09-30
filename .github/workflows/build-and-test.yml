@@ -34,39 +34,51 @@ jobs:
             ctest --output-on-failure -V
           '
 
-  vhs-decode-unit-tests:
-    name: vhs-decode Unit Tests
-    uses: ./.github/workflows/vhs-decode-unit-tests.yml
-    secrets: inherit
+  vhs-decode-tests:
+    name: vhs-decode ${{ matrix.suite }} tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, integration]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
 
-  vhs-decode-integration-tests:
-    name: vhs-decode Integration Tests
-    uses: ./.github/workflows/vhs-decode-integration-tests.yml
-    secrets: inherit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y --no-install-recommends libportaudio2
+
+      - name: Install package with test dependencies
+        run: pip install ".[test]"
+
+      - name: Run ${{ matrix.suite }} tests
+        timeout-minutes: 60
+        # Run from /tmp so Python imports the installed package rather than the source tree.
+        run: |
+          cd /tmp
+          $GITHUB_WORKSPACE/tests/run_${{ matrix.suite }}.sh
 
   build-linux-decode:
     name: Build Linux decode binaries
-    needs: 
-    - functional-tests
-    - vhs-decode-unit-tests
-    - vhs-decode-integration-tests
+    needs: [functional-tests, vhs-decode-tests]
     uses: ./.github/workflows/build_linux_decode.yml
     secrets: inherit
 
   build-windows-decode:
     name: Build Windows decode binaries
-    needs:
-    - functional-tests
-    - vhs-decode-unit-tests
-    - vhs-decode-integration-tests
+    needs: [functional-tests, vhs-decode-tests]
     uses: ./.github/workflows/build_windows_decode.yml
     secrets: inherit
 
   build-macos-decode:
     name: Build macOS decode binaries
-    needs:
-    - functional-tests
-    - vhs-decode-unit-tests
-    - vhs-decode-integration-tests
+    needs: [functional-tests, vhs-decode-tests]
     uses: ./.github/workflows/build_macos_decode.yml
     secrets: inherit

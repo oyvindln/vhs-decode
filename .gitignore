@@ -104,18 +104,6 @@ vhsdecode/*.c
 # auto-generated version file
 vhsdecode/_version.py
 
-
-# Added by cargo
-
-/target
-
-
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
-
 # Installation tool things
 ld_decode.egg-info/
 

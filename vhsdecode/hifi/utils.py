@@ -1,14 +1,11 @@
 from multiprocessing.shared_memory import SharedMemory
-from numba import njit
 import numba
 import numpy as np
 from dataclasses import dataclass
 
-import io
 import string
 from random import SystemRandom
 
-from cProfile import Profile
 import ctypes
 import mmap
 import os
@@ -16,71 +13,11 @@ from functools import lru_cache
 from itertools import cycle
 import atexit
 
-from pstats import SortKey, Stats
 
 REAL_DTYPE = np.float32
 ALIGNMENT = 64
 
 NumbaAudioArray = numba.types.Array(numba.types.float32, 1, "C")
-
-# The STREAMINFO total_samples field is 36 bits wide, so captures longer than
-# 2^36 samples (~28.6 minutes at 40 MSps) overflow it and the stored count
-# wraps around modulo 2^36. libsndfile trusts this count and stops reading
-# there, truncating the decode. See parse_flac_streaminfo() below.
-
-
-def parse_flac_streaminfo(file_path):
-    """Parse the FLAC STREAMINFO metadata block directly from the file.
-
-    Returns a dict with the STREAMINFO fields and the offset where the
-    audio frames start, or None if the file could not be parsed as FLAC.
-    """
-    try:
-        with open(file_path, "rb") as f:
-            if f.read(4) != b"fLaC":
-                return None
-
-            streaminfo = None
-            audio_offset = None
-            while True:
-                header = f.read(4)
-                if len(header) != 4:
-                    return None
-                is_last = bool(header[0] & 0x80)
-                block_type = header[0] & 0x7F
-                length = int.from_bytes(header[1:4], "big")
-
-                if block_type == 0 and streaminfo is None:
-                    data = f.read(length)
-                    if len(data) < 34:
-                        return None
-                    streaminfo = data
-                else:
-                    f.seek(length, io.SEEK_CUR)
-
-                if is_last:
-                    audio_offset = f.tell()
-                    break
-
-            if streaminfo is None or audio_offset is None:
-                return None
-
-            d = streaminfo
-            return {
-                "min_blocksize": int.from_bytes(d[0:2], "big"),
-                "max_blocksize": int.from_bytes(d[2:4], "big"),
-                "min_framesize": int.from_bytes(d[4:7], "big"),
-                "max_framesize": int.from_bytes(d[7:10], "big"),
-                "sample_rate": (d[10] << 12) | (d[11] << 4) | (d[12] >> 4),
-                "channels": ((d[12] >> 1) & 0x7) + 1,
-                "bits_per_sample": (((d[12] & 1) << 4) | (d[13] >> 4)) + 1,
-                "total_samples": ((d[13] & 0xF) << 32)
-                | int.from_bytes(d[14:18], "big"),
-                "audio_offset": audio_offset,
-            }
-    except OSError:
-        return None
-
 
 class NUMA:
     # Memory binding is performed via libnuma's numa_tonode_memory wrapper,
@@ -599,65 +536,17 @@ class DecoderSharedMemory:
             order="C"
         )
 
-    @staticmethod
-    @njit(
-        numba.types.void(NumbaAudioArray, NumbaAudioArray, numba.types.int64),
-        cache=True,
-        fastmath=True,
-        nogil=True,
-    )
-    def copy_data_float32(src: np.array, dst: np.array, length: int):
-        # ctypes.memmove(dst.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), src.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), length)
-        for i in range(length):
-            dst[i] = src[i]
+def copy_data(src, dst, length, src_offset=0, dst_offset=0):
+    """Copy length samples, or as many as both buffers hold."""
+    n = min(length, len(src) - src_offset, len(dst) - dst_offset)
+    dst[dst_offset : dst_offset + n] = src[src_offset : src_offset + n]
 
-    @staticmethod
-    @njit(
-        numba.types.void(
-            NumbaAudioArray,
-            NumbaAudioArray,
-            numba.types.int64,
-            numba.types.int64,
-        ),
-        cache=True,
-        fastmath=True,
-        nogil=True,
-    )
-    def copy_data_dst_offset_float32(
-        src: np.array, dst: np.array, dst_offset: int, length: int
-    ):
-        for i in range(length):
-            dst[i + dst_offset] = src[i]
-
-    @staticmethod
-    @njit(
-        numba.types.void(
-            NumbaAudioArray, NumbaAudioArray, numba.types.int64, numba.types.int64
-        ),
-        cache=True,
-        fastmath=True,
-        nogil=True,
-    )
-    def copy_data_src_offset_float32(
-        src: np.array, dst: np.array, src_offset: int, length: int
-    ):
-        for i in range(length):
-            dst[i] = src[i + src_offset]
 
 class PeakGain(ctypes.Structure):
     _fields_ = [
         ("left", ctypes.c_float),
         ("right", ctypes.c_float),
     ]
-
-def profile(function) -> int:
-    def run_profiler(*args, **kwarg):
-        with Profile() as profiler:
-            return_code = function(*args, **kwarg)
-            (Stats(profiler).strip_dirs().sort_stats(SortKey.CUMULATIVE).print_stats())
-        return return_code
-
-    return run_profiler
 
 def cleanup_process(process):
     atexit.unregister(process.terminate)

@@ -3,8 +3,8 @@ import numpy as np
 import scipy.signal as sps
 from collections import namedtuple
 
-from vhsdecode.utils import filtfft
-from vhsdecode.addons.FMdeemph import FMDeEmphasisB, gen_shelf
+from lddecode.utils import filtfft, supergauss
+from vhsdecode.addons.FMdeemph import gen_shelf
 
 NONLINEAR_AMP_LPF_FREQ_DEFAULT = 700000
 NONLINEAR_STATIC_FACTOR_DEFAULT = None
@@ -42,15 +42,10 @@ def gen_video_main_deemp_fft_params(rf_params, freq_hz, block_len):
 
 def gen_video_main_deemp_fft(gain, mid, Q, freq_hz, block_len):
     """Generate real-value fft main video deemphasis filter from parameters"""
-    db, da = FMDeEmphasisB(
-        freq_hz,
-        gain,
-        mid,
-        Q,
-    ).get()
-
-    filter_deemp = filtfft((db, da), block_len, whole=False)
-    return filter_deemp
+    # The de-emphasis is the inverse of the high shelf describing the pre-emphasis,
+    # so the shelf's numerator becomes the denominator and vice versa.
+    da, db = gen_shelf(mid, gain, "high", freq_hz, Q)
+    return filtfft((db, da), block_len)[: block_len // 2 + 1]
 
 
 def gen_analog_filter(zeros_tau, poles_tau, freq_hz, block_len):
@@ -78,16 +73,26 @@ def gen_custom_video_filters(filter_list, freq_hz, block_len):
                     f["zeros_tau"], f["poles_tau"], freq_hz, block_len
                 )
             case "highshelf":
-                db, da = gen_shelf(
-                    f["midfreq"], f["gain"], "high", freq_hz / 2.0, qfactor=f["q"]
-                )
-                ret *= filtfft((db, da), block_len, whole=False)
+                db, da = gen_shelf(f["midfreq"], f["gain"], "high", freq_hz / 2.0, f["q"])
+                ret *= filtfft((db, da), block_len)[: block_len // 2 + 1]
             case "lowshelf":
-                db, da = gen_shelf(
-                    f["midfreq"], f["gain"], "low", freq_hz / 2.0, qfactor=f["q"]
-                )
-                ret *= filtfft((db, da), block_len, whole=False)
+                db, da = gen_shelf(f["midfreq"], f["gain"], "low", freq_hz / 2.0, f["q"])
+                ret *= filtfft((db, da), block_len)[: block_len // 2 + 1]
     return ret
+
+
+def gen_peaking_constq(wn, dbgain, bw):
+    """Constant-Q peaking biquad, wn and bw normalized to nyquist (bw as octaves of that)."""
+    a = 10.0 ** (dbgain / 20.0)
+    q = 1 / (2 * math.sinh(math.log(2) / 2 * bw))
+    return sps.bilinear(
+        *sps.lp2lp(
+            np.array([1, a / q, 1]),
+            np.array([1, 1 / q, 1]),
+            wo=4 * math.tan(math.pi * wn / 2),
+        ),
+        fs=2.0,
+    )
 
 
 def gen_video_lpf(corner_freq, order, nyquist_hz, block_len):
@@ -115,43 +120,14 @@ def gen_video_lpf_supergauss_params(rf_params, nyquist_hz, block_len):
     )
 
 
-def gen_bpf_supergauss(freq_low, freq_high, order, nyquist_hz, block_len):
-    return supergauss(
-        np.linspace(0, nyquist_hz, block_len // 2 + 1),
-        freq_high - freq_low,
-        order,
-        (freq_high + freq_low) / 2.0,
-    )
-
-
-def supergauss(x, freq, order=1, centerfreq=0):
-    return np.exp(
-        -2
-        * np.power(
-            (2 * (x - centerfreq) * (math.log(2.0) / 2.0) ** (1 / (2 * order))) / freq,
-            2 * order,
-        )
-    )
-
-
 def gen_video_lpf_params(rf_params, nyquist_hz, block_len):
     """Generate real-value fir and fft post-demodulation low pass filters from parameters"""
-    if rf_params.get("video_lpf_supergauss", False):
-        return (
-            None,
-            supergauss(
-                np.linspace(0, nyquist_hz, block_len // 2 + 1),
-                rf_params["video_lpf_freq"],
-                rf_params["video_lpf_order"],
-            ),
-        )
-    else:
-        return gen_video_lpf(
-            rf_params["video_lpf_freq"],
-            rf_params["video_lpf_order"],
-            nyquist_hz,
-            block_len,
-        )
+    return gen_video_lpf(
+        rf_params["video_lpf_freq"],
+        rf_params["video_lpf_order"],
+        nyquist_hz,
+        block_len,
+    )
 
 
 def gen_nonlinear_bandpass_params(rf_params, nyquist_hz, block_len):
@@ -182,7 +158,6 @@ def gen_nonlinear_bandpass(upper_freq, lower_freq, order, nyquist_hz, block_len)
                 btype="bandpass",
             ),
             block_len,
-            whole=False,
         )
     else:
         nl_highpass_filter = filtfft(
@@ -192,10 +167,9 @@ def gen_nonlinear_bandpass(upper_freq, lower_freq, order, nyquist_hz, block_len)
                 btype="highpass",
             ),
             block_len,
-            whole=False,
         )
 
-    return nl_highpass_filter
+    return nl_highpass_filter[: block_len // 2 + 1]
 
 
 def gen_fm_audio_notch_params(rf_params, notch_q, nyquist_hz, block_len):
@@ -210,9 +184,7 @@ def gen_fm_audio_notch_params(rf_params, notch_q, nyquist_hz, block_len):
 
 
 def gen_fft_notch(notch_freq, notch_q, nyquist_hz, block_len):
-    return filtfft(
-        sps.iirnotch(notch_freq / nyquist_hz, notch_q), block_len, whole=True
-    )
+    return filtfft(sps.iirnotch(notch_freq / nyquist_hz, notch_q), block_len)
 
 
 def gen_ramp_filter(

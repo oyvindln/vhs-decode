@@ -1,208 +1,93 @@
 cmake_minimum_required(VERSION 3.16)
+project(ld-decode)
 
-project(ld-decode-tools)
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake_modules")
+# Enable testing
 include(CTest)
 
-include(CheckIPOSupported)
-check_ipo_supported(RESULT is_ipo_supported OUTPUT lto_error)
-if(is_ipo_supported)
-  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
-  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
-  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL ON)
-endif()
+# Find Python
+find_package(Python3 3.6 REQUIRED COMPONENTS Interpreter)
 
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Options that can be specified with -D
-
-option(USE_QWT
-    "Use the Qwt library; if OFF, ld-analyse will not be built"
-    ON
-)
-
-# Needed for ezpwd as it uses alternative operators
-if(MSVC)
-    add_compile_options(/permissive-)
-else()
-    add_compile_options(-O3)
-    add_link_options(-O3)
-endif()
-
-set(USE_QT_VERSION "" CACHE STRING
-    "Version of Qt to use, 5 or 6 (Which is used by default can vary due to how cmake find functions work, but will often default to Qt6)"
-)
-
-option(BUILD_LDF_READER
-    "build ld_ldf_reader"
-    ON
-)
-
-option(BUILD_PYTHON
-    "Build and install ld-decode's Python library and tools"
-    OFF
-)
-
-# Check for dependencies
-
-# When using Qt 6.3, you can replace the code block below with qt_standard_project_setup()
-set(CMAKE_AUTOMOC ON)
-include(GNUInstallDirs)
-set(CMAKE_AUTOUIC ON)
-
-set(QT_PACKAGE_NAMES Qt5 Qt6)
-if(USE_QT_VERSION)
-    set(QT_PACKAGE_NAMES Qt${USE_QT_VERSION})
-endif()
-find_package(QT NAMES ${QT_PACKAGE_NAMES} REQUIRED COMPONENTS Core)
-if(USE_QWT)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui Widgets)
-else()
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
-endif()
-message(STATUS "Qt Version: ${QT_VERSION}")
-
-# For Qt < 5.15, emulate 5.15's Qt5CoreConfig.cmake, so we don't have to
-# specify Qt5/Qt6 elsewhere.
-if(QT_VERSION VERSION_LESS 5.15)
-    function(qt_add_resources outfiles)
-        qt5_add_resources("${outfiles}" ${ARGN})
-        set("${outfiles}" "${${outfiles}}" PARENT_SCOPE)
-    endfunction()
-    foreach(library Core Gui Widgets)
-        add_library(Qt::${library} INTERFACE IMPORTED)
-        set_target_properties(Qt::${library} PROPERTIES
-            INTERFACE_LINK_LIBRARIES "Qt5::${library}")
-    endforeach()
-endif()
-
-find_package(PkgConfig REQUIRED)
-if(USE_QWT)
-    # try pkg-config first
-    pkg_check_modules(QWT Qt${QT_VERSION_MAJOR}Qwt6)
-    if(QWT_FOUND)
-        # .....
-        set(QWT_INCLUDE_DIR ${QWT_INCLUDE_DIRS})
-        set(QWT_LIBRARY ${QWT_LIBRARIES})
-    else()
-        find_package(Qwt REQUIRED)
-    endif()
-endif()
-
-if(NOT MSVC)
-    pkg_check_modules(FFTW IMPORTED_TARGET fftw3)
-    if(FFTW_FOUND)
-        # .....
-        set(FFTW_INCLUDE_DIR ${FFTW_INCLUDE_DIRS})
-        set(FFTW_LIBRARY PkgConfig::FFTW)
-    else()
-        find_package(FFTW REQUIRED)
-    endif()
-else()
-    # pkg-config seems to
-    # result in trying to link to m.lib
-    # which breaks build on
-    # MSVC, so just use the cmake.config from
-    # the vcpkg install instead.
-    find_package(FFTW3 REQUIRED)
-    set(FFTW_INCLUDE_DIR ${FFTW3_INCLUDE_DIRS})
-    find_library(FFTW_LIBRARY ${FFTW3_LIBRARIES} ${FFTW3_LIBRARY_DIRS})
-endif()
-
-# Get the Git branch and revision
-
-execute_process(
-    COMMAND git rev-parse --abbrev-ref HEAD
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_BRANCH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-execute_process(
-    COMMAND git log -1 --format=%h
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_COMMIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-add_compile_definitions(APP_BRANCH=\"${GIT_BRANCH}\")
-add_compile_definitions(APP_COMMIT=\"${GIT_COMMIT_HASH}\")
-
-# Subdirectories
-
-if(USE_QWT)
-    add_subdirectory(tools/ld-analyse)
-endif()
-add_subdirectory(tools/ld-chroma-decoder)
-add_subdirectory(tools/ld-chroma-decoder/encoder)
-add_subdirectory(tools/ld-disc-stacker)
-add_subdirectory(tools/ld-discmap)
-add_subdirectory(tools/ld-dropout-correct)
-add_subdirectory(tools/ld-export-metadata)
-add_subdirectory(tools/ld-lds-converter)
-add_subdirectory(tools/ld-process-ac3)
-add_subdirectory(tools/ld-process-efm)
-add_subdirectory(tools/ld-process-vbi)
-add_subdirectory(tools/ld-process-vits)
-add_subdirectory(tools/library)
-add_subdirectory(tools/efm-decoder)
-
-if(BUILD_TESTING)
-    add_subdirectory(tools/library/filter/testfilter)
-    add_subdirectory(tools/library/tbc/testlinenumber)
-    add_subdirectory(tools/library/tbc/testmetadata)
-    add_subdirectory(tools/library/tbc/testvbidecoder)
-    add_subdirectory(tools/library/tbc/testvitcdecoder)
-    include(LdDecodeTests)
-endif()
-
-if(BUILD_LDF_READER)
-    add_subdirectory(tools/ld-ldf-reader)
-endif()
-
-# Python library and tools
-
-if(BUILD_PYTHON)
-    find_package(Python3 3.6 REQUIRED COMPONENTS Interpreter)
-
-    set(PYTHON_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/python-build)
-
-    # python setup.py install seems to behave differently if prefix
-    # is supplied, requiring setting pythonpath after install.
-    # If a custom prefix is not set, don't supply prefix at allocate_lock
-    # /usr/local is the default on linux.
-    # Install not really tested on windows as of yet.
-    if(${CMAKE_INSTALL_PREFIX} STREQUAL "/usr/local")
-        set(PYTHON_PREFIX_LINE "")
-    else()
-        message(STATUS "Custom install prefix supplied - you may have to manually specify PYTHONPATH")
-        set(PYTHON_PREFIX_LINE "--prefix ${CMAKE_INSTALL_PREFIX}")
-    endif()
-
-    add_custom_target(python-build ALL
-        COMMAND ${PYTHON} ./setup.py --quiet
-            build --build-base ${PYTHON_BUILD_DIR}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    # We must run build/egg_info here to specify the directories.
-    install(CODE "
-        if(NOT DEFINED ENV{DESTDIR})
-            set(ENV{DESTDIR} /)
-        endif()
+# Generate version file from git information
+function(generate_version_file)
+    set(VERSION_FILE "${CMAKE_SOURCE_DIR}/lddecode/version")
+    set(DEFAULT_VERSION "main:unknown")
+    
+    # Try to get git information
+    set(BRANCH "release")
+    set(COMMIT "unknown")
+    set(DIRTY "")
+    
+    # Check if we're in a git repository
+    if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+        # Try to get exact tag
         execute_process(
-            COMMAND ${PYTHON} ./setup.py --quiet
-                build --build-base ${PYTHON_BUILD_DIR}
-                egg_info --egg-base ${CMAKE_CURRENT_BINARY_DIR}
-                install ${PYTHON_PREFIX_LINE}
-                        --root \$ENV{DESTDIR}
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMAND git describe --tags --exact-match
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE GIT_TAG
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
         )
-    ")
-endif()
+        
+        if(GIT_TAG)
+            # Remove 'v' prefix if present
+            string(REGEX REPLACE "^v" "" COMMIT "${GIT_TAG}")
+            set(BRANCH "release")
+        else()
+            # Try to get describe output with commits since tag
+            execute_process(
+                COMMAND git describe --tags --always
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                OUTPUT_VARIABLE GIT_DESCRIBE
+                ERROR_QUIET
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            
+            if(GIT_DESCRIBE)
+                string(REGEX REPLACE "^v" "" COMMIT "${GIT_DESCRIBE}")
+            endif()
+            
+            # Get branch name
+            execute_process(
+                COMMAND git rev-parse --abbrev-ref HEAD
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+                OUTPUT_VARIABLE GIT_BRANCH
+                ERROR_QUIET
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            
+            if(GIT_BRANCH)
+                set(BRANCH "${GIT_BRANCH}")
+                if(BRANCH STREQUAL "HEAD")
+                    set(BRANCH "release")
+                endif()
+            endif()
+        endif()
+        
+        # Check if dirty
+        execute_process(
+            COMMAND git status --porcelain
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_VARIABLE GIT_STATUS
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        
+        if(GIT_STATUS)
+            set(DIRTY ":dirty")
+        endif()
+    endif()
+    
+    # Generate version string
+    set(VERSION_STRING "${BRANCH}:${COMMIT}${DIRTY}")
+    
+    # Write to version file
+    file(WRITE "${VERSION_FILE}" "${VERSION_STRING}\n")
+    
+    message(STATUS "Generated version file: ${VERSION_STRING}")
+endfunction()
 
-install(PROGRAMS gen_chroma_vid.sh TYPE BIN)
-install(PROGRAMS scripts/ld-compress TYPE BIN)
+# Generate version file during configuration
+generate_version_file()
+
+# Include test definitions
+include(cmake_modules/LdDecodeTests.cmake)
