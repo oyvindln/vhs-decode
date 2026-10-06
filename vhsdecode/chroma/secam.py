@@ -4,11 +4,12 @@ SECAM tapes carry frequency-modulated chroma rather than the
 quadrature-modulated chroma of the other colour-under formats, recorded
 with one of two mutually incompatible methods (IEC 60774-1): "method 1"
 records the subcarrier through a divide-by-4 counter, while ME-SECAM
-heterodynes it down like the QAM formats do (and therefore rides their
-up-conversion pipeline). This module holds the method 1 restoration
-chain - x4 phase multiplication, BT.470 bell regeneration, blanking
-reference synthesis and line identification - plus the under-carrier
-pair measurement shared with the ME-SECAM carrier servo.
+heterodynes it down like the QAM formats do (and therefore reuses their
+up-conversion pipeline). This module holds the per-field chroma
+processing for both, the method 1 restoration chain - x4 phase
+multiplication, BT.470 bell regeneration, blanking reference synthesis
+and line identification - and the under-carrier pair measurement used
+by the ME-SECAM carrier servo.
 """
 
 import numpy as np
@@ -18,6 +19,12 @@ import scipy.fft as sps_fft
 import lddecode.core as ldd
 import lddecode.utils as lddu
 from vhsdecode.rust_utils import sosfiltfilt_rust
+from vhsdecode.chroma.common import tbc_chroma
+from vhsdecode.chroma.heterodyne import (
+    finish_upconverted_chroma,
+    get_burst_area,
+    upconvert_chroma,
+)
 
 
 def measure_secam_under_carrier_offset(
@@ -596,9 +603,82 @@ def _secam_method_diagnostic(field, chroma, linesout, outwidth):
             )
 
 
-def _process_chroma_secam_method1(field, chroma, linesout, outwidth, burstarea):
+def process_chroma_mesecam(field, disable_tracking_cafc=False):
+    """Up-convert one field of ME-SECAM chroma: the SECAM FM block is mixed
+    back up against the conversion LO like the QAM formats' colour-under."""
+    lineoffset = field.lineoffset + 1
+    linesout = field.outlinecount
+    outwidth = field.outlinelen
+
+    chroma = tbc_chroma(field, disable_tracking_cafc=disable_tracking_cafc)
+
+    if field.rf.options.secam_carrier_servo:
+        # Measure the rest carrier pair on the late back porch,
+        # 3.7 to 0.3 us before active video starts.
+        active_start_px = field.usectooutpx(field.rf.SysParams["activeVideoUS"][0])
+        porch_window = (int(active_start_px) - 65, int(active_start_px) - 5)
+
+        carrier_offset = measure_secam_under_carrier_offset(
+            chroma,
+            linesout,
+            outwidth,
+            porch_window,
+            field.rf.chroma_afc.true_samp_rate,
+            field.rf.DecoderParams["color_under_carrier"],
+        )
+        if carrier_offset is not None:
+            field.rf.secam_servo_avg.push(carrier_offset)
+            ldd.logger.debug(
+                "SECAM carrier servo: measured offset %.02f Hz" % carrier_offset
+            )
+
+    # Explicit conversion LO: trim it by the smoothed measured carrier
+    # offset (cancelling the recording VCR's converter crystal error), and
+    # keep the heterodyne phase continuous across fields.
+    lo_trim = 0.0
+    # Holds either live servo measurements or a seeded/fixed trim
+    # (secam_lo_trim); with the servo disabled and no seed it's empty.
+    if field.rf.secam_servo_avg.has_values():
+        # Quantize so measurement noise doesn't dither the LO.
+        lo_trim = np.clip(
+            round(field.rf.secam_servo_avg.pull() / 10.0) * 10.0,
+            -10e3,
+            10e3,
+        )
+    field.rf.chroma_afc.updateConversion(
+        lo_trim, field.field_number * linesout * outwidth
+    )
+    chroma_heterodyne = field.rf.chroma_afc.getChromaHet()
+
+    uphet = np.zeros((linesout * outwidth), dtype=np.float32)
+    upconvert_chroma(
+        chroma,
+        uphet,
+        lineoffset,
+        outwidth,
+        field.phase_sequence,
+        chroma_heterodyne
+    )
+
+    # The restored SECAM FM block is anchored at conversion_lo -
+    # color_under (4.328125 MHz), not fsc, so the fsc-anchored FFT mask the
+    # QAM formats use would sit ~106 kHz high on it and lose the tight top
+    # edge that suppresses high-side FM splatter from saturated transitions.
+    # Keep the block-anchored Butterworth here.
+    uphet = sosfiltfilt_rust(field.rf.Filters["FChromaFinal"], uphet)
+
+    return finish_upconverted_chroma(field, uphet)
+
+
+def process_chroma_secam(field, disable_tracking_cafc=False):
     """SECAM method 1 chroma restoration: x4 phase multiplication instead of
     a heterodyne mix, plus BT.470 bell amplitude regeneration."""
+    linesout = field.outlinecount
+    outwidth = field.outlinelen
+    burstarea = get_burst_area(field)
+
+    chroma = tbc_chroma(field, disable_tracking_cafc=disable_tracking_cafc)
+
     _secam_method_diagnostic(field, chroma, linesout, outwidth)
 
     afc = field.rf.chroma_afc

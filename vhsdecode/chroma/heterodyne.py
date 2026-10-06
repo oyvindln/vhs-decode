@@ -1,13 +1,16 @@
 """Burst measurement, track phase rotation detection, and the
 heterodyne up-conversion pipeline used by the QAM colour-under
-formats (PAL/NTSC/PAL-M) and by ME-SECAM.
+formats (PAL/NTSC/PAL-M) and by ME-SECAM, plus the QAM formats'
+per-field chroma processing.
 """
 
 import math
 import numpy as np
 import lddecode.core as ldd
 import scipy.fft as sps_fft
+import scipy.signal as sps
 from vhsdecode.rust_utils import sosfiltfilt_rust
+from vhsdecode.chroma.common import tbc_chroma
 
 import numba
 from numba import njit
@@ -1155,3 +1158,137 @@ def get_burst_area(field):
     burst_end = burst_end - ((burst_end - burst_start) % 4)
 
     return burst_start, burst_end
+
+
+def process_chroma_qam(
+    field,
+    disable_deemph=False,
+    disable_tracking_cafc=False,
+    do_chroma_deemphasis=False,
+):
+    """Up-convert one field of QAM colour-under chroma (PAL, NTSC, PAL-M,
+    N-Linha) to its broadcast subcarrier."""
+    lineoffset = field.lineoffset + 1
+    linesout = field.outlinecount
+    outwidth = field.outlinelen
+
+    if (
+        not field.rf.options.disable_phase_correction
+        and field.rf.color_system == "NTSC"
+    ):
+        field.fieldPhaseID, target_phase = ntsc_color_framing_map[
+            (field.isFirstField, (field.field_number // 2) % 2)
+        ]
+        chroma_shift_direction = 1 if target_phase else -1
+    else:
+        chroma_shift_direction = 0
+
+    chroma = tbc_chroma(field, chroma_shift_direction, disable_tracking_cafc)
+
+    burstarea = get_burst_area(field)
+
+    # For NTSC, the color burst amplitude is doubled when recording, so we have to undo that.
+    if field.rf.color_system == "NTSC":
+        if not disable_deemph:
+            chroma = burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea)
+
+    if (
+        not field.rf.options.disable_phase_correction
+        and field.rf.color_system == "NTSC"
+    ):
+        target_phase_even = target_phase
+        target_phase_odd = target_phase
+
+        # TODO: PAL color framing is disabled for now.
+        #       need to find a reliable way to detect if this is field 1,2 vs 3,4
+        # if field.rf.color_system == "PAL":
+        #     line_6_burst_present = field.phase_sequence[4 + lineoffset][3] > field.burst_magnitude_avg / 3
+        #     field.fieldPhaseID, target_phase_even, target_phase_odd = pal_color_framing_map[
+        #         (field.isFirstField, line_6_burst_present, (field.field_number // 4) % 2)
+        #     ]
+
+        # this uses the burst measurements to interpolate the correct phase of the color under heterodyne
+        # phase issues are corrected continiously for each sample using a linear spline interpolated from the burst measurements
+        # the mixing is performed on the upsampled signal to avoid aliasing introduced from the up-heterodyne mixing product
+        upconvert_chroma_phase_comp(
+            chroma, # modifies this in place
+            lineoffset,
+            outwidth,
+            field.phase_sequence,
+            field.rf.DecoderParams["color_under_carrier"],
+            field.rf.SysParams["fsc_mhz"] * 1e6,
+            target_phase_even,
+            target_phase_odd,
+        )
+        uphet = chroma
+    else:
+        chroma_heterodyne = (
+            field.rf.chroma_afc.getChromaHet()
+            if (field.rf.do_cafc and not disable_tracking_cafc)
+            else field.rf.chroma_heterodyne
+        )
+
+        uphet = np.zeros((linesout * outwidth), dtype=np.float32)
+        upconvert_chroma(
+            chroma,
+            uphet,
+            lineoffset,
+            outwidth,
+            field.phase_sequence,
+            chroma_heterodyne
+        )
+
+    # Filter out unwanted frequencies from the final chroma signal.
+    # Mixing the signals will produce waves at the difference and sum of the
+    # frequencies. We only want the difference wave which is at the correct color
+    # carrier frequency here.
+    uphet = filter_chroma_fft(
+        uphet,
+        field.rf.SysParams["fsc_mhz"] * 1e6,
+        field.rf.DecoderParams["color_under_carrier"],
+        1.3e6, # lower chroma bandwidth (roughly this for PAL / NTSC)
+        80.0   # heterodyne up-mixing attenuation
+    )
+
+    return finish_upconverted_chroma(field, uphet, do_chroma_deemphasis)
+
+
+def finish_upconverted_chroma(field, uphet, do_chroma_deemphasis=False):
+    """Deemphasis, comb filter, AGC and CTI for heterodyne up-converted
+    chroma that has already been band-limited to the restored subcarrier."""
+    lineoffset = field.lineoffset + 1
+    outwidth = field.outlinelen
+
+    if do_chroma_deemphasis:
+        b, a = field.rf.Filters["chroma_deemphasis"]
+        uphet = sps.lfilter(b, a, uphet)
+
+    # Basic comb filter for NTSC to calm the color a little.
+    if not field.rf.options.disable_comb:
+        if field.rf.color_system == "NTSC":
+            uphet = comb_c_ntsc(uphet, outwidth)
+        else:
+            uphet = comb_c_pal(uphet, outwidth)
+
+    # Chroma AGC
+    mean_rms, chroma_noise_floor = chroma_automatic_gain(
+        uphet,
+        field.rf.SysParams["burst_abs_ref"],
+        field.phase_sequence,
+        field.burst_detected_line,
+        math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"]))
+    )
+
+    field.rf.field_averages.chroma_level.push(mean_rms)
+
+    if field.rf.options.cti_mix != 0:
+        chroma_transient_improvement(
+            uphet,
+            lineoffset * outwidth,
+            outwidth,
+            chroma_noise_floor,
+            field.rf.options.cti_width,
+            field.rf.options.cti_mix,
+        )
+
+    return uphet
