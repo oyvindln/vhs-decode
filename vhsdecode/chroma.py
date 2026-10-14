@@ -402,11 +402,13 @@ def _tune_burst_measurements(
         dc += delta_dc
         f += delta_f
 
-        # Break early if updates converge to tiny changes
+        # Break early if updates converge to tiny changes. f is in Hz (millions),
+        # so an absolute 1e-10 is below its float64 resolution and never met;
+        # compare its update relative to the subcarrier frequency instead.
         if (abs(delta_A) < max_precision) and \
            (abs(delta_phi) < max_precision) and \
            (abs(delta_dc) < max_precision) and \
-           (abs(delta_f) < max_precision):
+           (abs(delta_f) < max_precision * f_target):
             break
 
     phi = (phi + np.pi) % (2 * np.pi) - np.pi
