@@ -328,7 +328,13 @@ def make_loader(filename, inputfreq=None):
     formats can't represent typical RF sample rates accurately."""
 
     if inputfreq is not None:
-        # We're resampling, so we have to use ffmpeg.
+        # Raw formats are resampled in-process, which is much faster than
+        # piping through ffmpeg; anything else has to go through ffmpeg.
+        for exts, fmt in LoadResampled.EXTENSIONS:
+            if filename.endswith(exts):
+                if inputfreq == 40:
+                    break
+                return LoadResampled(fmt, inputfreq)
 
         if filename.endswith(".s16") or filename.endswith(".raw"):
             input_args = ["-f", "s16le"]
@@ -523,6 +529,98 @@ def load_packed_data_4_40(infile, sample, readlen):
         return None
 
     return unpack_data_4_40(indata, readlen, offset)
+
+
+class LoadResampled:
+    """Load a raw sample file and resample it to 40 MHz in-process.
+
+    Uses a polyphase FIR (scipy's resample_poly with a fixed filter close to
+    ffmpeg's default aresample one). Every call reads enough margin around the
+    requested range that the result does not depend on where the read starts,
+    so overlapping reads return identical samples and blocks join seamlessly.
+
+    Samples are converted the same way ffmpeg converts them to pcm_s16le, and
+    returned as float32 so the filter's overshoot is not clipped.
+    """
+
+    # (extensions, format) - formats are the ones the ffmpeg path handles
+    EXTENSIONS = (
+        ((".s16", ".raw"), "s16"),
+        ((".r16", ".u16", ".tbc"), "u16"),
+        ((".rf",), "f32"),
+        ((".s8",), "s8"),
+        ((".r8", ".u8"), "u8"),
+    )
+
+    # format -> (numpy dtype, offset, scale) giving the s16 range
+    FORMATS = {
+        "s16": ("<i2", 0, 1),
+        "u16": ("<u2", -32768, 1),
+        "f32": ("<f4", 0, 32768),
+        "s8": ("i1", 0, 256),
+        "u8": ("u1", -128, 256),
+    }
+
+    # Filter taps per polyphase branch, cutoff relative to the lower Nyquist
+    # rate, and Kaiser beta. These match ffmpeg's swresample defaults.
+    TAPS_PER_PHASE = 32
+    CUTOFF = 0.97
+    KAISER_BETA = 9.0
+
+    def __init__(self, fmt, inputfreq, outputfreq=40):
+        from fractions import Fraction
+
+        self.dtype, self.offset, self.scale = self.FORMATS[fmt]
+        self.dtype = np.dtype(self.dtype)
+
+        ratio = Fraction(round(outputfreq * 1e6)) / Fraction(round(inputfreq * 1e6))
+        ratio = ratio.limit_denominator(1000)
+        self.up, self.down = ratio.numerator, ratio.denominator
+
+        max_rate = max(self.up, self.down)
+        half_len = (self.TAPS_PER_PHASE // 2) * max_rate
+        self.filter = sps.firwin(
+            2 * half_len + 1,
+            self.CUTOFF / max_rate,
+            window=("kaiser", self.KAISER_BETA),
+        ).astype(np.float32)
+
+        # Output samples affected by one input sample on either side, plus slack
+        self.margin = half_len // self.down + 2
+
+    def _read(self, infile, start, count):
+        itemsize = self.dtype.itemsize
+        infile.seek(start * itemsize, 0)
+        buf = infile.read(count * itemsize)
+        data = np.frombuffer(buf, self.dtype, len(buf) // itemsize)
+        out = data.astype(np.float32)
+        if self.offset:
+            out += self.offset
+        if self.scale != 1:
+            out *= self.scale
+        return out
+
+    def __call__(self, infile, sample, readlen):
+        up, down = self.up, self.down
+
+        # Start the input on a multiple of `down`, so output index 0 of this
+        # chunk lands exactly on a global output sample.
+        j = max((sample - self.margin) // up, 0)
+        in_start = j * down
+        out_start = j * up
+
+        end = sample + readlen
+        in_needed = -(-(end + self.margin) * down // up) - in_start + 1
+
+        x = self._read(infile, in_start, in_needed)
+
+        # Not enough real input to cover the requested range: end of file
+        if (in_start + len(x)) * up < end * down:
+            return None
+
+        y = sps.resample_poly(x, up, down, window=self.filter)
+
+        return y[sample - out_start : end - out_start]
 
 
 class LoadFFmpeg:

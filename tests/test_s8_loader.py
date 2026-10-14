@@ -15,6 +15,7 @@ import numpy as np
 
 from lddecode.utils import (
     LoadFFmpeg,
+    LoadResampled,
     load_unpacked_data_s8,
     make_loader,
 )
@@ -28,12 +29,13 @@ def test_s8_maps_to_its_own_loader_without_a_frequency():
     assert not isinstance(loader, LoadFFmpeg)
 
 
-def test_s8_still_uses_ffmpeg_when_resampling():
-    """With a --frequency, ffmpeg does the reading and must be told the format."""
+def test_s8_is_resampled_in_process_when_resampling():
+    """With a --frequency, .s8 is read and resampled in-process, as s8."""
     loader = make_loader("capture.s8", inputfreq=62.5)
 
-    assert isinstance(loader, LoadFFmpeg)
-    assert loader.input_args == ["-f", "s8"]
+    assert isinstance(loader, LoadResampled)
+    assert loader.dtype == np.int8
+    assert loader.scale == 256
 
 
 def test_s8_samples_are_scaled_to_the_16_bit_range():
