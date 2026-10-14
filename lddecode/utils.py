@@ -228,6 +228,41 @@ sinc_phase_count = 2**16
 #     return table
 
 
+@njit(nogil=True, cache=True)
+def linear_wow(linelocs, inlinelen, outscale, count):
+    """Piecewise-linear map from expected to actual line locations, sampled at
+    count output pixels spaced outscale input samples apart.
+
+    Equivalent to evaluating a k=1 make_interp_spline through the points
+    (i * inlinelen, linelocs[i]) and its first derivative, extrapolating the
+    end segments, but much faster since the knots are evenly spaced.
+    """
+    last_seg = len(linelocs) - 2
+    locs = np.empty(count, dtype=np.float64)
+    wow = np.empty(count, dtype=np.float64)
+
+    # x only increases, so step through the segments instead of searching.
+    # Segment seg covers seg * inlinelen <= x < (seg + 1) * inlinelen, like the
+    # spline's interval search.
+    seg = 0
+    seg_start = 0.0
+    seg_end = inlinelen
+    slope = (linelocs[1] - linelocs[0]) / inlinelen
+
+    for i in range(count):
+        x = i * outscale
+        while x >= seg_end and seg < last_seg:
+            seg += 1
+            seg_start = seg * inlinelen
+            seg_end = (seg + 1) * inlinelen
+            slope = (linelocs[seg + 1] - linelocs[seg]) / inlinelen
+
+        locs[i] = linelocs[seg] + slope * (x - seg_start)
+        wow[i] = slope
+
+    return locs, wow
+
+
 @njit(nogil=True, cache=True, fastmath=True)
 def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift: float = 0.0):
     # average out any unusual spikes in wow that happen on a per line basis

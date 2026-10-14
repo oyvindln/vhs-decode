@@ -34,7 +34,7 @@ from .utils import LRUupdate, clb_findbursts, angular_mean_helper, phase_distanc
 from .utils import build_hilbert, unwrap_hilbert, emphasis_iir, filtfft
 from .utils import fft_do_slice, fft_determine_slices, StridedCollector, hz_to_output_array
 from .utils import Pulse, nb_std, n_ornotrange, gen_bpf_supergauss, FieldInfo
-from .utils import concatenate_blocks
+from .utils import concatenate_blocks, linear_wow
 
 try:
     # If Anaconda's numpy is installed, mkl will use all threads for fft etc
@@ -2744,16 +2744,28 @@ class Field:
            and scale input samples to output samples
         """
         actual_linelocs = np.array(self.linelocs, dtype=np.float64)
-        expected_linelocs = np.array([i * self.inlinelen for i in range(len(actual_linelocs))], dtype=np.float64)
 
         outscale = self.inlinelen / self.outlinelen
         outsamples = self.outlinecount * self.outlinelen
         outline_offset = (self.lineoffset + 1) * self.outlinelen
 
+        # downscale() runs several times per field (luma, burst, chroma), usually
+        # with the same line locations, so reuse the last result when possible.
+        key = (self.wow_interpolation_method, outscale, outsamples + outline_offset)
+        cached = getattr(self, "_wow_cache", None)
+        if cached is not None and cached[0] == key and np.array_equal(cached[1], actual_linelocs):
+            self.interpolated_pixel_locs, self.wowfactors = cached[2]
+            return cached[2]
+
         if self.wow_interpolation_method == 'linear':
-            k=1
-            bc_type=None
-        elif self.wow_interpolation_method == 'quadratic':
+            result = linear_wow(actual_linelocs, self.inlinelen, outscale, outsamples + outline_offset)
+            self.interpolated_pixel_locs, self.wowfactors = result
+            self._wow_cache = (key, actual_linelocs, result)
+            return result
+
+        expected_linelocs = np.array([i * self.inlinelen for i in range(len(actual_linelocs))], dtype=np.float64)
+
+        if self.wow_interpolation_method == 'quadratic':
             k=2
             bc_type=None
         elif self.wow_interpolation_method == 'cubic':
@@ -2771,7 +2783,9 @@ class Field:
         # amount of wow for each scaled pixel
         self.wowfactors = spl(scaled_pixel_locs, 1)
 
-        return self.interpolated_pixel_locs, self.wowfactors
+        result = (self.interpolated_pixel_locs, self.wowfactors)
+        self._wow_cache = (key, actual_linelocs, result)
+        return result
 
     @profile
     def downscale(
