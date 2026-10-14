@@ -156,13 +156,32 @@ class VHSDecode(ldd.LDdecode):
         # Restore init functino now that superclass constructor is finished.
         ldd.DemodCache.__init__ = temp_init
 
-        self.demodcache = DemodCacheTape(
-            self.rf,
-            self.infile,
-            self.freader,
-            self.rf_opts,
-            num_worker_threads=self.numthreads,
-        )
+        self.demodcache = None
+        if extra_options.get("gpu"):
+            from vhsdecode import gpu
+
+            reason = gpu.setup(self.rf)
+            if reason is None:
+                # One worker is enough, the GPU does a whole batch per item.
+                self.demodcache = gpu.DemodCacheGPU(
+                    self.rf,
+                    self.infile,
+                    self.freader,
+                    self.rf_opts,
+                    num_worker_threads=min(self.numthreads, 1),
+                )
+                logger.info("Using the GPU for resampling, demodulation and TBC")
+            else:
+                logger.warning("GPU decoding disabled: %s. Using the CPU.", reason)
+
+        if self.demodcache is None:
+            self.demodcache = DemodCacheTape(
+                self.rf,
+                self.infile,
+                self.freader,
+                self.rf_opts,
+                num_worker_threads=self.numthreads,
+            )
 
         self._db_writer = DBWriter(fname_out) if extra_options.get("write_db") else None
         self.dbconn = None

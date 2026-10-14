@@ -2856,17 +2856,31 @@ class Field:
 
         dsout = np.zeros((linesout * outwidth), dtype=np.float32)
         interpolated_pixel_locs, wowfactors = self.computewow_scaled()
-        scale_field(
-            self.data["video"][channel].astype(np.float32, copy=False),
-            dsout,
-            interpolated_pixel_locs,
-            wowfactors,
-            self.rf.downscale_sinc_lut,
-            self.lineoffset,
-            outwidth,
-            wow_level_adjust_smoothing=self.wow_level_adjust_smoothing,
-            shift=shift
-        )
+        gpu_scaler = getattr(self.rf, "gpu_scaler", None)
+        if gpu_scaler is not None:
+            gpu_scaler.scale_field(
+                self,
+                channel,
+                self.data["video"][channel],
+                dsout,
+                interpolated_pixel_locs,
+                wowfactors,
+                self.lineoffset,
+                outwidth,
+                shift=shift
+            )
+        else:
+            scale_field(
+                self.data["video"][channel].astype(np.float32, copy=False),
+                dsout,
+                interpolated_pixel_locs,
+                wowfactors,
+                self.rf.downscale_sinc_lut,
+                self.lineoffset,
+                outwidth,
+                wow_level_adjust_smoothing=self.wow_level_adjust_smoothing,
+                shift=shift
+            )
 
         if self.rf.decode_digital_audio:
             self.efmout = self.data["efm"][

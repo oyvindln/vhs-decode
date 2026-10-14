@@ -264,7 +264,8 @@ def linear_wow(linelocs, inlinelen, outscale, count):
 
 
 @njit(nogil=True, cache=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift: float = 0.0):
+def wow_level_adjusts(wowfactors, outwidth, wow_level_adjust_smoothing=0, level_adjust_threshold=15):
+    """Per-pixel level adjustment for scale_field, from the wow factors."""
     # average out any unusual spikes in wow that happen on a per line basis
     # this indicates an hsync tbc error vs. being normal wow from playback speed variations
     # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
@@ -286,6 +287,13 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineo
 
         for i in range(1, len(level_adjusts)):
             level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]
+
+    return level_adjusts
+
+
+@njit(nogil=True, cache=True, fastmath=True)
+def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift: float = 0.0):
+    level_adjusts = wow_level_adjusts(wowfactors, outwidth, wow_level_adjust_smoothing, level_adjust_threshold)
 
     half_taps_m1 = (sinc_tap_count // 2) - 1
 
