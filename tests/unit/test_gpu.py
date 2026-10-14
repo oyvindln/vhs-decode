@@ -45,14 +45,11 @@ def test_demod_matches_cpu():
         ref = np.stack([c[name] for c in cpu])
         np.testing.assert_allclose(out[name], ref, rtol=0, atol=atol, err_msg=name)
 
-    # Chroma: the CPU path's per-block DC removal includes sosfiltfilt's edge
-    # transients, so compare after removing each block's mean.
+    # Chroma: the |H|^2 mask equals sosfiltfilt away from the block edges.
     ref = np.stack([c["demod_burst"] for c in cpu]).astype(np.float64)
     got = out["demod_burst"].astype(np.float64)
     mid = slice(4096, -4096)
-    diff = (got - ref)[:, mid]
-    diff -= diff.mean(axis=-1, keepdims=True)
-    assert np.abs(diff).max() < 1e-3 * np.abs(ref[:, mid]).max()
+    assert np.abs(got - ref)[:, mid].max() < 2e-3 * np.abs(ref[:, mid]).max()
 
     # the GPU copy holds the same data
     for name, (dtype, col) in gpu.GPU_CHANNELS.items():

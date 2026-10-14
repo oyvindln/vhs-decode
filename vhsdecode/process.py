@@ -1444,6 +1444,10 @@ class VHSRFDecode(ldd.RFDecode):
                 self._notch,
                 move=int(self.options.chroma_offset),
                 audio_notch=self.Filters.get("FChromaAudioNotch", None),
+                # Leave sosfiltfilt's transients at the block edges out of the
+                # DC estimate. They last longer than the part of the block the
+                # demod cache cuts off, so stay twice that far from the edges.
+                dc_range=(2 * self.blockcut, self.blocklen - 2 * self.blockcut_end),
                 # TODO: Do we need to tweak move elsewhere too?
                 # if cafc is enabled, this filtering will be done after TBC
             )

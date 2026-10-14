@@ -900,11 +900,16 @@ def burst_deemphasis(chroma, lineoffset, linesout, outwidth, burstarea):
 
 
 @njit(cache=True, nogil=True, fastmath=False)
-def shift_chroma_and_remove_dc(out_chroma, move):
+def shift_chroma_and_remove_dc(out_chroma, move, dc_start=0, dc_end=-1):
+    """Shift out_chroma right by move samples (wrapping around) and subtract
+    its mean, in place. The mean is taken over out_chroma[dc_start:dc_end]
+    after the shift (the whole array by default), so that samples which are
+    going to be discarded, such as filter transients at block edges, can be
+    left out of it."""
     n = len(out_chroma)
     move %= n
-    
-    mean_acc = 0
+    if dc_end < 0:
+        dc_end = n
 
     # save wrapped values
     tmp = np.empty(move, dtype=out_chroma.dtype)
@@ -914,23 +919,25 @@ def shift_chroma_and_remove_dc(out_chroma, move):
 
     # single pass shift
     for i in range(n - move - 1, -1, -1):
-        mean_acc += out_chroma[i]
         out_chroma[i + move] = out_chroma[i]
 
     # small wrap-around copy
     for i in range(move):
-        mean_acc += tmp[i]
         out_chroma[i] = tmp[i]
 
-    mean_acc /= n
-
     # crude DC offset removal
+    mean_acc = 0.0
+    for i in range(dc_start, dc_end):
+        mean_acc += out_chroma[i]
+    mean_acc /= dc_end - dc_start
+
     for i in range(n):
         out_chroma[i] -= mean_acc
 
 
 def chroma_color_under_filter(
-    data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None
+    data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None,
+    dc_range=(0, -1),
 ):
     out_chroma = sosfiltfilt_rust(filter, data[:blocklen])
 
@@ -951,7 +958,7 @@ def chroma_color_under_filter(
     # Move chroma to compensate for Y filter delay.
     # value needs tweaking, ideally it should be calculated if possible.
     # TODO: Not sure if we need this after hilbert filter change, needs check.
-    shift_chroma_and_remove_dc(out_chroma, move)
+    shift_chroma_and_remove_dc(out_chroma, move, dc_range[0], dc_range[1])
 
     return out_chroma
 

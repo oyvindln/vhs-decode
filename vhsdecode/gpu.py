@@ -317,7 +317,9 @@ class GPUDemod:
         chroma_src = raw_half if self.rf.options.color_under else demod_fft
         chroma = cp.fft.irfft(chroma_src * self.chroma_mask, n=n, axis=-1)
         chroma = cp.roll(chroma, self.move, axis=-1)
-        chroma -= chroma.mean(axis=-1, keepdims=True)
+        # DC estimate away from the block edges, as on the CPU
+        dc0, dc1 = 2 * self.rf.blockcut, n - 2 * self.rf.blockcut_end
+        chroma -= chroma[:, dc0:dc1].mean(axis=-1, keepdims=True)
         chroma = chroma.astype(cp.float32)
 
         # Pack the channels in the byte layout of self.dtype (two float64 and
