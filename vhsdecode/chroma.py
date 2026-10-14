@@ -935,11 +935,32 @@ def shift_chroma_and_remove_dc(out_chroma, move, dc_start=0, dc_end=-1):
         out_chroma[i] -= mean_acc
 
 
+def sos_power_response(sos, n):
+    """|H|^2 of an sos filter on the rfft grid of an n-sample block. Multiplying
+    a block's rfft by this is the zero-phase filtering sosfiltfilt does, but
+    without start-up transients at the block edges (the block is treated as
+    periodic instead)."""
+    w = np.linspace(0, np.pi, n // 2 + 1)
+    _, h = sps.sosfreqz(sos, worN=w)
+    return np.abs(h) ** 2
+
+
 def chroma_color_under_filter(
     data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None,
-    dc_range=(0, -1),
+    dc_range=(0, -1), fft_mask=None,
 ):
-    out_chroma = sosfiltfilt_rust(filter, data[:blocklen])
+    """Band-pass the colour-under chroma out of data[:blocklen].
+
+    With fft_mask (sos_power_response of filter) the filtering is done in the
+    frequency domain. That is equivalent to sosfiltfilt away from the edges,
+    but sosfiltfilt's edge transients outlast the part of a block the demod
+    cache cuts off for narrow chroma filters, so use it for per-block filtering.
+    """
+    if fft_mask is not None:
+        spectrum = sps_fft.rfft(data[:blocklen].astype(np.float64))
+        out_chroma = sps_fft.irfft(spectrum * fft_mask, n=blocklen).astype(np.float32)
+    else:
+        out_chroma = sosfiltfilt_rust(filter, data[:blocklen])
 
     if audio_notch is not None:
         out_chroma = sps.filtfilt(

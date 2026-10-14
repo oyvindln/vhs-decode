@@ -8,10 +8,10 @@ Three pieces, each falling back to the CPU code when it can't be used:
   one block per worker thread, following VHSRFDecode.demodblock.
 - GPUScaler: the per-pixel TBC resampling done by lddecode.utils.scale_field.
 
-The two sosfiltfilt steps in demodblock (dropout envelope and colour-under
-band-pass) are applied as zero-phase |H|^2 masks in the frequency domain
-instead. Away from the block edges that DemodCache cuts off the result is the
-same, but it is not bit-identical to the CPU path.
+As on the CPU, the colour-under band-pass is applied as a zero-phase |H|^2
+mask in the frequency domain; so is the dropout envelope filter, which the CPU
+does with sosfiltfilt (equivalent away from the block edges). Results are close
+to the CPU path but not bit-identical.
 """
 
 import logging
@@ -22,6 +22,7 @@ import scipy.signal as sps
 
 import lddecode.core as ldd
 from lddecode.utils import LoadResampled, sinc_phase_count, sinc_tap_count, wow_level_adjusts
+from vhsdecode.chroma import sos_power_response
 from vhsdecode.demod import replace_spikes
 from vhsdecode.demodcache import DemodCacheTape
 
@@ -153,14 +154,6 @@ def _launch(kernel, total, args):
     kernel((blocks,), (threads,), args)
 
 
-def _sos_power_response(sos, n):
-    """|H|^2 of an sos filter on the rfft grid of an n-sample block, which is
-    the frequency response of sosfiltfilt(sos, x)."""
-    w = np.linspace(0, np.pi, n // 2 + 1)
-    _, h = sps.sosfreqz(sos, worN=w)
-    return np.abs(h) ** 2
-
-
 class GPUResampler:
     """GPU version of LoadResampled for a run of blocks."""
 
@@ -225,8 +218,8 @@ class GPUDemod:
         self.fvideo = cp.asarray(f["FVideo"])
         self.fvideo05 = cp.asarray(f["FVideo05"])
         self.f05_offset = int(f["F05_offset"])
-        self.env_mask = cp.asarray(_sos_power_response(f["FEnvPost"], n))
-        burst = _sos_power_response(f["FVideoBurst"], n)
+        self.env_mask = cp.asarray(sos_power_response(f["FEnvPost"], n))
+        burst = sos_power_response(f["FVideoBurst"], n)
         if rf.options.color_under:
             self.chroma_mask = cp.asarray(burst)
         else:

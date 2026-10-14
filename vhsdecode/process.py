@@ -16,7 +16,7 @@ import numpy.fft as npfft
 import lddecode.utils as lddu
 import vhsdecode.utils as utils
 from vhsdecode.utils import StackableMA, filtfft
-from vhsdecode.chroma import chroma_color_under_filter
+from vhsdecode.chroma import chroma_color_under_filter, sos_power_response
 
 import vhsdecode.formats as vhs_formats
 
@@ -1291,6 +1291,16 @@ class VHSRFDecode(ldd.RFDecode):
         self.delays["video_sync"] = 0
         self.delays["video_white"] = 0
 
+    def _chroma_fft_mask(self):
+        """sos_power_response of the colour-under band-pass, cached for as long
+        as the filter is unchanged."""
+        sos = self.Filters["FVideoBurst"]
+        cached = getattr(self, "_chroma_fft_mask_cache", None)
+        if cached is None or cached[0] is not sos:
+            cached = (sos, sos_power_response(sos, self.blocklen))
+            self._chroma_fft_mask_cache = cached
+        return cached[1]
+
     def demodblock(
         self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False
     ):
@@ -1444,10 +1454,9 @@ class VHSRFDecode(ldd.RFDecode):
                 self._notch,
                 move=int(self.options.chroma_offset),
                 audio_notch=self.Filters.get("FChromaAudioNotch", None),
-                # Leave sosfiltfilt's transients at the block edges out of the
-                # DC estimate. They last longer than the part of the block the
-                # demod cache cuts off, so stay twice that far from the edges.
+                # Keep the block edges out of the DC estimate.
                 dc_range=(2 * self.blockcut, self.blocklen - 2 * self.blockcut_end),
+                fft_mask=self._chroma_fft_mask(),
                 # TODO: Do we need to tweak move elsewhere too?
                 # if cafc is enabled, this filtering will be done after TBC
             )

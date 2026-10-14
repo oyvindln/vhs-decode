@@ -45,11 +45,9 @@ def test_demod_matches_cpu():
         ref = np.stack([c[name] for c in cpu])
         np.testing.assert_allclose(out[name], ref, rtol=0, atol=atol, err_msg=name)
 
-    # Chroma: the |H|^2 mask equals sosfiltfilt away from the block edges.
-    ref = np.stack([c["demod_burst"] for c in cpu]).astype(np.float64)
-    got = out["demod_burst"].astype(np.float64)
-    mid = slice(4096, -4096)
-    assert np.abs(got - ref)[:, mid].max() < 2e-3 * np.abs(ref[:, mid]).max()
+    # Chroma: both filter with the same frequency-domain mask
+    ref = np.stack([c["demod_burst"] for c in cpu])
+    np.testing.assert_allclose(out["demod_burst"], ref, rtol=0, atol=1e-5 * np.abs(ref).max())
 
     # the GPU copy holds the same data
     for name, (dtype, col) in gpu.GPU_CHANNELS.items():
