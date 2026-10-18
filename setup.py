@@ -49,6 +49,7 @@ setup(
         "lddecode",
         "vhsdecode",
         "vhsdecode/addons",
+        "vhsdecode/chroma",
         "vhsdecode/format_defs",
         "cvbsdecode",
         "vhsdecode/hifi",
