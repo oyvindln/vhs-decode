@@ -407,9 +407,10 @@ def load_unpacked_data(infile, sample, readlen, sampletype):
         # the ffmpeg path (which converts s8 to pcm_s16le the same way).
         indata = np.frombuffer(inbuf, "int8", len(inbuf)).astype(np.int16) * 256
     else:
-        # NOTE(oln): Can probably use frombuffer for other variants too but
-        # didn't have any samples to test with.
-        indata = np.frombuffer(inbuf, "uint8", len(inbuf))
+        # Scale up to the 16-bit range, so that a given .u8 file decodes
+        # identically whether it reaches us through this loader or through
+        # the ffmpeg path (which converts u8 to pcm_s16le the same way).
+        indata = (np.frombuffer(inbuf, "uint8", len(inbuf)).astype(np.int16) - 128) * 256
 
     if len(indata) < readlen:
         return None
