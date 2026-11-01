@@ -41,7 +41,6 @@ def _field(ire0_adjust="backporch,hsync"):
         },
         SysParams={"outputZero": 1024.0},
         options=types.SimpleNamespace(ire0_adjust=ire0_adjust, export_raw_tbc=False),
-        track_phase=None,
     )
     return types.SimpleNamespace(
         rf=rf,
@@ -50,6 +49,7 @@ def _field(ire0_adjust="backporch,hsync"):
         outlinelen=OUTLINELEN,
         out_scale=358.4,
         field_number=0,
+        track_phase=None,
     )
 
 

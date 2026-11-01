@@ -505,6 +505,12 @@ class VHSDecode(ldd.LDdecode):
                 self.threadreturn,
             )
 
+            # The chroma processing of this field below retunes the chroma AFC
+            # while the next field's decode runs its burst lock against it;
+            # latch the heterodyne that burst lock uses before starting the
+            # decode so the result does not depend on which gets there first.
+            self.rf.chroma_afc.latchChromaHet()
+
             # decode the next field in a thread so the result is ready for the next iteration
             if self.numthreads != 0:
                 self.decodethread = threading.Thread(

@@ -1094,9 +1094,9 @@ class FieldShared:
                             )
                             hz_ire = self.rf.DecoderParams["hz_ire"]
 
-                if self.rf.track_phase is not None:
+                if self.track_phase is not None:
                     ire0 += self.rf.DecoderParams["track_ire0_offset"][
-                        self.rf.track_phase ^ (self.field_number % 2)
+                        self.track_phase ^ (self.field_number % 2)
                     ]
 
                 return hz_to_output_array(
@@ -1136,6 +1136,7 @@ class FieldShared:
             chroma_rotation=self.rf.DecoderParams.get("chroma_rotation", None),
             detect_chroma_track_phase=self.rf.options.detect_chroma_track_phase,
         )
+        self.track_phase = self.rf.track_phase
         self.track_phase_set = True
 
     def downscale(self, final=False, *args, **kwargs):
@@ -2144,6 +2145,7 @@ class FieldShared:
 class FieldPALShared(FieldShared, ldd.FieldPAL):
     def __init__(self, *args, **kwargs):
         super(FieldPALShared, self).__init__(*args, **kwargs)
+        self.track_phase = self.rf.track_phase
         self.track_phase_set = False
         self.ire0_backporch = (96, 160)
         self.burst_detected_line = 0
@@ -2232,6 +2234,7 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
 class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
     def __init__(self, *args, **kwargs):
         super(FieldNTSCShared, self).__init__(*args, **kwargs)
+        self.track_phase = self.rf.track_phase
         self.track_phase_set = False
         self.fieldPhaseID = None
         self.ire0_backporch = (74, 124)

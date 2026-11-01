@@ -978,7 +978,7 @@ def decode_chroma_phase_rotation(
     # Video8 NTSC:  Track1 0,   Track2 180
 
     chroma_heterodyne = (
-        field.rf.chroma_afc.getChromaHet()
+        field.rf.chroma_afc.getLatchedChromaHet()
         if (field.rf.do_cafc and not disable_tracking_cafc)
         else field.rf.chroma_heterodyne
     )
