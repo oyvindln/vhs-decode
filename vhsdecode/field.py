@@ -1832,7 +1832,7 @@ class FieldShared:
 
             # Apply outputs to decoder parameters
             if "backporch" in self.rf.options.ire0_adjust:
-                self.rf.DecoderParams["ire0"] = self.sync_tip_level
+                self.rf.DecoderParams["ire0"] = self.blanking_level
             if "hsync" in self.rf.options.ire0_adjust:
                 self.rf.DecoderParams["hz_ire"] = (self.blanking_level - self.sync_tip_level) / -self.rf.DecoderParams["vsync_ire"]
 
