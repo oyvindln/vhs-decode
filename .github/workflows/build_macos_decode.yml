@@ -120,6 +120,14 @@ jobs:
           python3 -m pip install -r ./requirements.txt
           python3 -m pip install "pyinstaller>=6.20"
           python3 -m pip install -e ".[hifi_gui_qt6,hifi_gnuradio]"
+          # Qt 6.12 (PyQt6 6.12.0, currently latest on PyPI) breaks PyInstaller
+          # 6.22.x on macOS: COLLECT fails with FileExistsError while creating
+          # the QtQuickControls2Macos framework symlink (Qt 6.12 ships it as a
+          # proper .framework with a Versions/Current symlink layout).
+          # Stay on the last known-good Qt 6.11 series, which is what the last
+          # passing macOS build used. PyQt6 6.11.0 requires PyQt6-Qt6<6.12.0,
+          # so this pins the Qt runtime as well.
+          python3 -m pip install "PyQt6==6.11.0"
 
       - name: Build binary
         run: |

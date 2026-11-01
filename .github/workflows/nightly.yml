@@ -1,19 +1,26 @@
 name: "Nightly (pre-production)"
 
 # Produces a pre-production (GitHub "pre-release") build from the default
-# branch whenever a pull request is merged into it, or on manual dispatch.
-# It reuses the same reusable build workflows as the production Release
-# pipeline, but publishes a dated `nightly-YYYY-MM-DD` tag marked as a
-# prerelease instead of a draft. Production `v*` tags are untouched.
+# branch whenever a commit lands on it (merged pull request or direct push),
+# or on manual dispatch. It reuses the same reusable build workflows as the
+# production Release pipeline, but publishes a dated `nightly-YYYY-MM-DD` tag
+# marked as a prerelease instead of a draft. Production `v*` tags are untouched.
 
 permissions:
   contents: write
   actions: write
 
 on:
-  pull_request:
-    types:
-      - closed
+  # Deliberately NOT `pull_request`: for pull requests merged from forks,
+  # GitHub runs the workflow with a read-only GITHUB_TOKEN, which made the
+  # publish job fail with "HTTP 403: Resource not accessible by
+  # integration" when creating the release. Push events (fired for every
+  # merge into the default branch, fork-origin or not) come with a writable
+  # token, so publishing actually works.
+  push:
+    branches:
+      # Default branch of oyvindln/vhs-decode
+      - vhs_decode
   workflow_dispatch:
     inputs:
       ref:
@@ -34,10 +41,10 @@ env:
 jobs:
   resolve-nightly:
     name: Resolve nightly tag and ref
-    # Only run for manual dispatch, or for PRs that were MERGED into the
-    # repository's default branch. Skipped (closed-without-merge) PRs and PRs
-    # targeting other branches produce no nightly.
-    if: ${{ (github.event_name == 'workflow_dispatch') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == github.event.repository.default_branch) }}
+    # Only run for manual dispatch, or for pushes to the default branch
+    # (the `on.push.branches` filter above already restricts which pushes
+    # start the workflow at all).
+    if: ${{ (github.event_name == 'workflow_dispatch') || github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     outputs:
       nightly_date: ${{ steps.resolve.outputs.nightly_date }}
@@ -49,7 +56,6 @@ jobs:
         id: resolve
         env:
           DISPATCH_REF: ${{ inputs.ref }}
-          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           EVENT_NAME: ${{ github.event_name }}
           WF_SHA: ${{ github.sha }}
         run: |
@@ -65,12 +71,8 @@ jobs:
               BUILD_REF="${WF_SHA}"
             fi
           else
-            # pull_request merged: build and tag the exact merge commit on the
-            # default branch. Falls back to the workflow SHA if unavailable.
-            BUILD_REF="${PR_MERGE_SHA}"
-            if [ -z "${BUILD_REF}" ]; then
-              BUILD_REF="${WF_SHA}"
-            fi
+            # Push to the default branch: build and tag the pushed commit.
+            BUILD_REF="${WF_SHA}"
           fi
 
           if [ -z "${BUILD_REF}" ]; then
@@ -255,7 +257,7 @@ jobs:
           DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
           if {
             printf '⚠️ **Pre-production nightly build — not a stable release.**\n\n'
-            printf 'This automated build is produced from merged pull requests on the `%s` branch and is intended for testing only. It may be unstable or incomplete.\n\n' "${DEFAULT_BRANCH}"
+            printf 'This automated build is produced from commits landing on the `%s` branch (merged pull requests and direct pushes) and is intended for testing only. It may be unstable or incomplete.\n\n' "${DEFAULT_BRANCH}"
             printf -- '- **Built from:** `%s`\n' "${BUILD_REF}"
             printf -- '- **Generated:** %s\n' "${GENERATION_TIME}"
             printf -- '- **Tag:** `%s`\n\n---\n\n' "${NIGHTLY_TAG}"
