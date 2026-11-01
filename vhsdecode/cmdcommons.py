@@ -271,6 +271,14 @@ def common_parser_inner(parser, use_gui=False, default_threads=DEFAULT_THREADS):
         default=default_threads,
         help="number of CPU threads to use",
     )
+    parser.add_argument(
+        "--gpu",
+        dest="gpu",
+        action="store_true",
+        default=False,
+        help="Use an NVIDIA GPU (needs CuPy) for resampling, demodulation and TBC resampling. "
+        "Falls back to the CPU with a warning if the GPU or some options are unsupported.",
+    )
 
     extra_filtering_group = parser.add_argument_group("Extra filtering")
     extra_filtering_group.add_argument(
@@ -427,7 +435,8 @@ def get_extra_options(args, checkagc=False):
         "debug": args.debug,
         "wow_level_adjust_smoothing": args.wow_level_adjust_smoothing,
         "wow_interpolation_method": args.wow_interpolation_method,
-        "write_db": args.write_db
+        "write_db": args.write_db,
+        "gpu": getattr(args, "gpu", False),
     }
     if checkagc:
         extra_options["useAGC"]: args.AGC and not args.noAGC
