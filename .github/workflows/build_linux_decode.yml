@@ -130,6 +130,11 @@ jobs:
           # Install the original icon as .DirIcon and root icon for
           # taskbar/launcher display. Also install into usr/share/icons
           # so desktop environments can find it via the hicolor theme.
+          # python-appimage removes the base image's python.png but leaves
+          # its .DirIcon symlink dangling, and cp refuses to write through
+          # dangling symlinks — remove the stale links first so real files
+          # are written.
+          rm -f "${APPDIR_OUT}/.DirIcon" "${APPDIR_OUT}/vhs-decode.png"
           cp assets/icons/vhs-decode.png "${APPDIR_OUT}/.DirIcon"
           cp assets/icons/vhs-decode.png "${APPDIR_OUT}/vhs-decode.png"
           mkdir -p "${APPDIR_OUT}/usr/share/icons/hicolor/256x256/apps"
