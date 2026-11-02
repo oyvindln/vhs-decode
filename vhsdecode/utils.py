@@ -13,7 +13,9 @@ def gen_wave_at_frequency(frequency, sample_frequency, num_samples, gen_func=np.
     """Generate a sine wave with the specified parameters."""
     samples = np.arange(num_samples)
     wave_scale = frequency / sample_frequency
-    return gen_func(2 * np.pi * wave_scale * samples, dtype=dtype)
+    # Evaluate in double: the angle reaches a few hundred thousand radians
+    # over a field, where single precision resolves it to about a degree.
+    return gen_func(2 * np.pi * wave_scale * samples).astype(dtype)
 
 
 def gen_compl_wave_at_frequency(frequency, sample_frequency, num_samples):
