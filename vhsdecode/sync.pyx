@@ -1017,10 +1017,10 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
                 # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
                 # TODO: Use correct values for NTSC/PAL here
                 hsync_area = demod_05[
-                    round_to_int(zc - (one_usec * 0.75)) : round_to_int(zc + (one_usec * 3.5))
+                    round_to_int(zc - (sample_rate_mhz * 0.75)) : round_to_int(zc + (sample_rate_mhz * 3.5))
                 ]
                 back_porch = demod_05[
-                    round_to_int(zc + one_usec * 3.5) : round_to_int(zc + (one_usec * 8))
+                    round_to_int(zc + sample_rate_mhz * 3.5) : round_to_int(zc + (sample_rate_mhz * 8))
                 ]
                 if is_out_of_range(hsync_area, ire_n_65, ire_110): # or is_out_of_range(back_porch, ire_n_65, ire_110):
                     # don't use the computed value here if it's bad
@@ -1030,17 +1030,17 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
 
                     if c_max(hsync_area) < ire_30:
                         porch_level = c_median(
-                            demod_05[round_to_int(zc + (one_usec * 8)) : round_to_int(zc + (one_usec * 9))]
+                            demod_05[round_to_int(zc + (sample_rate_mhz * 8)) : round_to_int(zc + (sample_rate_mhz * 9))]
                         )
                     else:
                         if prev_porch_level > 0:
                             porch_level = prev_porch_level
                         else:
                             porch_level = c_median(
-                                demod_05[round_to_int(zc - (one_usec * 1.0)) : round_to_int(zc - (one_usec * 0.5))]
+                                demod_05[round_to_int(zc - (sample_rate_mhz * 1.0)) : round_to_int(zc - (sample_rate_mhz * 0.5))]
                             )
                     sync_level = c_median(
-                        demod_05[round_to_int(zc + (one_usec * 1)) : round_to_int(zc + (one_usec * 2.5))]
+                        demod_05[round_to_int(zc + (sample_rate_mhz * 1)) : round_to_int(zc + (sample_rate_mhz * 2.5))]
                     )
 
                     # Re-calculate the crossing point using the mid point between the measured sync
@@ -1053,7 +1053,7 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
                     )
 
                     # any wild variation here indicates a failure
-                    if not is_none_double(zc2) and c_abs(zc2 - zc) < (one_usec / 2.0):
+                    if not is_none_double(zc2) and c_abs(zc2 - zc) < (sample_rate_mhz / 2.0):
                         linelocs_refined[i] = zc2
                         prev_porch_level = porch_level
                     else:
@@ -1070,7 +1070,7 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
                                 (prev_porch_level + sync_level) / 2.0,
                                 count=400,
                             )
-                            if not is_none_double(zc2) and c_abs(zc2 - zc) < (one_usec / 2.0):
+                            if not is_none_double(zc2) and c_abs(zc2 - zc) < (sample_rate_mhz / 2.0):
                                 linelocs_refined[i] = zc2
                             else:
                                 linebad[i] = True
@@ -1089,18 +1089,18 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
                 # The hsync area, burst, and porches should not leave -50 to 30 IRE (on PAL or NTSC)
                 # NOTE: This is more than hsync area, might wanna also check max levels of level in hsync
                 hsync_area = demod_05[
-                    round_to_int(zc_fr - (one_usec * 0.75)) : round_to_int(zc_fr + (one_usec * 8))
+                    round_to_int(zc_fr - (sample_rate_mhz * 0.75)) : round_to_int(zc_fr + (sample_rate_mhz * 8))
                 ]
 
                 if not is_out_of_range(hsync_area, ire_n_65, ire_30):
 
                     porch_level = c_median(
-                        demod_05[round_to_int(zc_fr + normal_hsync_length + (one_usec * 1)) : round_to_int(zc_fr + normal_hsync_length + (one_usec * 2))]
+                        demod_05[round_to_int(zc_fr + normal_hsync_length + (sample_rate_mhz * 1)) : round_to_int(zc_fr + normal_hsync_length + (sample_rate_mhz * 2))]
                     )
 
                     sync_level = c_median(
                         demod_05[
-                            round_to_int(zc_fr + (one_usec * 1)) : round_to_int(zc_fr + (one_usec * 2.5))
+                            round_to_int(zc_fr + (sample_rate_mhz * 1)) : round_to_int(zc_fr + (sample_rate_mhz * 2.5))
                         ]
                     )
 
@@ -1114,13 +1114,13 @@ def refine_linelocs_hsync(field, stdint.uint8_t[::1] linebad, double hsync_thres
                     )
 
                     # any wild variation here indicates a failure
-                    if not is_none_double(zc2) and c_abs(zc2 - right_cross) < (one_usec / 2.0):
+                    if not is_none_double(zc2) and c_abs(zc2 - right_cross) < (sample_rate_mhz / 2.0):
                         # TODO: Magic value here, this seem to give be approximately correct results
                         # but may not be ideal for all inputs.
                         # Value based on default sample rate so scale if it's different.
                         refined_from_right_lineloc = right_cross - normal_hsync_length + (2.25 * (sample_rate_mhz / 40.0))
                         # Don't use if it deviates too much which could indicate a false positive or non-standard hsync length.
-                        if c_abs(refined_from_right_lineloc - linelocs_refined[i]) < (one_usec * 2):
+                        if c_abs(refined_from_right_lineloc - linelocs_refined[i]) < (sample_rate_mhz * 2):
                             right_cross = zc2
                             right_cross_refined = True
                             prev_porch_level = porch_level
