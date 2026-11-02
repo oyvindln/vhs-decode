@@ -8,7 +8,6 @@ import shutil
 import tempfile
 import time
 import faulthandler
-import math
 
 import numpy
 
@@ -614,14 +613,10 @@ def main(args=None, use_gui=False):
         print(e)
         sys.exit(1)
 
-    dod_threshold_p = f.DEFAULT_THRESHOLD_P_DDD
-    # Guesstimate a sample rate of around 28 is cx card and use different doc threshold
-    # may want to change this now that people use amps.
-    if math.floor(sample_freq) == 28:
-        dod_threshold_p = f.DEFAULT_THRESHOLD_P_CXADC
-
     rf_options = get_rf_options(args)
-    rf_options["dod_threshold_p"] = dod_threshold_p
+    rf_options["dod_threshold_p"] = (
+        args.dod_threshold_p if args.dod_threshold_p is not None else f.DEFAULT_THRESHOLD_P_DDD
+    )
     rf_options["dod_threshold_a"] = args.dod_threshold_a
     rf_options["dod_hysteresis"] = args.dod_hysteresis
     rf_options["track_phase"] = args.track_phase
