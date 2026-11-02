@@ -34,6 +34,8 @@ def chroma_automatic_gain(
     phase_sequence,
     burst_detected_line,
     sync_tip_len,
+    lineoffset,
+    outwidth,
     smoothing_window=8,
     k=2.0
 ):
@@ -82,10 +84,10 @@ def chroma_automatic_gain(
     noise_samples = 0
     for i in range(burst_count):
         current_burst = phase_sequence[i]
-        current_burst_start = current_burst.start
+        current_burst_start = (current_burst.line_number - lineoffset) * outwidth
 
         if i < burst_count - 1:
-            next_burst_start = phase_sequence[i + 1].start
+            next_burst_start = (phase_sequence[i + 1].line_number - lineoffset) * outwidth
         else:
             next_burst_start = len(chroma)
 
@@ -2016,7 +2018,9 @@ def process_chroma(
         field.rf.SysParams["burst_abs_ref"],
         field.phase_sequence,
         field.burst_detected_line,
-        math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"]))
+        math.floor(field.usectooutpx(field.rf.SysParams["hsyncPulseUS"])),
+        lineoffset,
+        outwidth,
     )
 
     field.rf.field_averages.chroma_level.push(mean_rms)
