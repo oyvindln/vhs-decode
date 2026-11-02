@@ -10,19 +10,20 @@ import numpy as np
 import pytest
 from numba.typed import List
 
-from vhsdecode.chroma import BurstInfo, upconvert_chroma
+from vhsdecode.chroma import BurstInfo, chroma_automatic_gain, upconvert_chroma
 
 OUTWIDTH = 1135
 LINESOUT = 313
 LOCK_LINEOFFSET = 1  # field.lineoffset (0) + 1 when the burst lock runs
 
 
-def _phase_sequence(amplitude=1.0):
+def _phase_sequence(amplitude=1.0, vbi_lines=0, vbi_amplitude=0.01):
     seq = List()
     for line in range(LOCK_LINEOFFSET, LOCK_LINEOFFSET + LINESOUT):
+        amplitude_here = vbi_amplitude if line <= vbi_lines else amplitude
         start = (line - LOCK_LINEOFFSET) * OUTWIDTH
         burst = BurstInfo(
-            line, start, start + 60, start + 30, 0.0, amplitude, amplitude, 0.0, 4.43361875e6, 0.0, 0.0
+            line, start, start + 60, start + 30, 0.0, amplitude_here, amplitude_here, 0.0, 4.43361875e6, 0.0, 0.0
         )
         burst.phase_rotation = line % 4
         seq.append(burst)
@@ -51,3 +52,32 @@ def test_upconvert_chroma_does_not_wrap_early_bursts(lineoffset):
     # real field they are inside the burst blanking around vsync) and must not
     # pick up the up-conversion of the entries above the first output line.
     assert not rows[last_row + 1 :].any()
+
+
+BURST_REF = 8.0
+
+
+def _gained_rows(lineoffset, burst_detected_line):
+    chroma = np.ones(LINESOUT * OUTWIDTH, dtype=np.float32)
+    # The first entries fall inside the burst blanking around vsync on a real
+    # field, so their measured amplitude is tiny and their gain hits the clamp.
+    seq = _phase_sequence(amplitude=1.0, vbi_lines=3)
+    chroma_automatic_gain(chroma, BURST_REF, seq, burst_detected_line, 50, lineoffset, OUTWIDTH)
+    return chroma.reshape(LINESOUT, OUTWIDTH)
+
+
+@pytest.mark.parametrize("lineoffset", [3, 4])
+def test_chroma_agc_does_not_regain_bottom_rows(lineoffset):
+    rows = _gained_rows(lineoffset, burst_detected_line=0)
+    # Every row gets the single clamped gain of BURST_REF / 1.0; wrapped
+    # entries used to apply a second gain on top to the bottom rows.
+    np.testing.assert_allclose(rows, BURST_REF, rtol=1e-5)
+
+
+@pytest.mark.parametrize("lineoffset", [3, 4])
+def test_chroma_agc_colour_killer_does_not_blank_bottom_rows(lineoffset):
+    burst_detected_line = 6
+    rows = _gained_rows(lineoffset, burst_detected_line)
+    first_coloured_row = burst_detected_line - lineoffset
+    assert not rows[:first_coloured_row].any()
+    np.testing.assert_allclose(rows[first_coloured_row:], BURST_REF, rtol=1e-5)

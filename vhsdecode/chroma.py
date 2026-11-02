@@ -84,6 +84,11 @@ def chroma_automatic_gain(
     noise_samples = 0
     for i in range(burst_count):
         current_burst = phase_sequence[i]
+        # Entries for lines above the first output line would index backwards
+        # from the end of the field (see upconvert_chroma).
+        if current_burst.line_number < lineoffset:
+            continue
+
         current_burst_start = (current_burst.line_number - lineoffset) * outwidth
 
         if i < burst_count - 1:
