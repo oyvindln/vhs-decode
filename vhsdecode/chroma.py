@@ -927,6 +927,17 @@ def shift_chroma_and_remove_dc(out_chroma, move):
         out_chroma[i] -= mean_acc
 
 
+def chroma_block_filter(data, fft_gain, blocklen, move):
+    """Zero-phase chroma filtering of one demod block through its |H|^2 spectrum gain."""
+    out_chroma = sps_fft.irfft(sps_fft.rfft(data[:blocklen]) * fft_gain, n=blocklen).astype(
+        np.float32
+    )
+
+    shift_chroma_and_remove_dc(out_chroma, move)
+
+    return out_chroma
+
+
 def chroma_color_under_filter(
     data, filter, blocklen, notch, do_notch=None, move=10, audio_notch=None
 ):
