@@ -284,9 +284,6 @@ class VHSDecode(ldd.LDdecode):
                 and prevfi_2["detectedFirstField"] == prevfi_1["detectedFirstField"]
                 # and this field is within a reasonable distance to be valid
                 and lddu.inrange(distance_from_previous_field, 0.9, 1.1)
-                # Skip on TYPEC since we expect to have missing vsync there and we don't
-                # expect progressive video.
-                and self.rf.options.tape_format != "TYPEC"
             ):
                 # treat this as progressive, and manually flip the field order
                 ldd.logger.error(
