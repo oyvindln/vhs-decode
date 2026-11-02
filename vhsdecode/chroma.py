@@ -803,6 +803,12 @@ def upconvert_chroma(
     chroma_heterodyne,
 ):
     for burst in phase_rotation_sequence:
+        # The burst lock runs before PAL fields get their lineoffset, so the
+        # sequence starts with entries for lines above the first output line.
+        # Those would index backwards from the end of the field.
+        if burst.line_number < lineoffset:
+            continue
+
         linestart = (burst.line_number - lineoffset) * outwidth
         lineend = linestart + outwidth
 
@@ -841,6 +847,11 @@ def upconvert_chroma_phase_comp(
 
     for idx in range(num_bursts):
         current_burst = phase_rotation_sequence[idx]
+
+        # Entries for lines above the first output line would index backwards
+        # from the end of the field (see upconvert_chroma).
+        if current_burst.line_number < lineoffset:
+            continue
 
         # Solve for current line's active het_hz
         k_current = current_burst.frequency / fsc
