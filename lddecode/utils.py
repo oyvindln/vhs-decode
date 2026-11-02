@@ -229,50 +229,56 @@ sinc_phase_count = 2**16
 
 
 @njit(nogil=True, cache=True, fastmath=True)
-def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineoffset, outwidth, wow_level_adjust_smoothing = 0, level_adjust_threshold = 15, shift: float = 0.0):
-    # average out any unusual spikes in wow that happen on a per line basis
-    # this indicates an hsync tbc error vs. being normal wow from playback speed variations
-    # in this case for level adjusting we just want to fallback to the average wow to avoid a bright or dark line
-    median = np.median(wowfactors)
-    mad = np.median(np.abs(wowfactors - median)) # median absolute deviation
-    threshold = level_adjust_threshold * mad if mad > 0 else 0.001  # fallback for no variance
+def scale_field_prepare(
+    wowfactors, outwidth, wow_level_adjust_smoothing=0, level_adjust_threshold=15
+):
+    """Prepare per-pixel level adjustments for reuse with the same wow map.
 
-    level_adjusts = np.where(
-        np.abs(wowfactors - median) > threshold,
-        median,
-        wowfactors
-    )
+    Replace outliers using the median absolute deviation, then optionally
+    smooth the adjustments. The returned array can be shared by luma and
+    chroma resampling after the field's line locations have been finalized.
+    """
+    median = np.median(wowfactors)
+    abs_deviation = np.abs(wowfactors - median)
+    mad = np.median(abs_deviation)
+    threshold = level_adjust_threshold * mad if mad > 0 else 0.001
+
+    level_adjusts = np.where(abs_deviation > threshold, median, wowfactors)
 
     if wow_level_adjust_smoothing > 0:
-        # removes oscillating brightness variations for video with lots of noise around the hsync pulses, i.e. noisy line locations result in noisy wow calculations
-        # applies a low pass filter that smooths any sudden brightness variations while still being reactive enough to compensate for low frequency wow
         alpha = 1 / (wow_level_adjust_smoothing * outwidth)
         one_minus_alpha = 1 - alpha
 
         for i in range(1, len(level_adjusts)):
-            level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i-1]
+            level_adjusts[i] = alpha * level_adjusts[i] + one_minus_alpha * level_adjusts[i - 1]
 
+    return level_adjusts
+
+
+@njit(nogil=True, cache=True, fastmath=True)
+def scale_field_apply(
+    buf,
+    dsout,
+    interpolated_pixel_locs,
+    level_adjusts,
+    sinc_lut,
+    lineoffset,
+    outwidth,
+    shift: float = 0.0,
+):
+    """Resample into dsout using prepared coordinates and level adjustments."""
     half_taps_m1 = (sinc_tap_count // 2) - 1
 
     dsout_start = outwidth * (lineoffset + 1)
     dsout_end = len(dsout) + dsout_start
     for i in range(dsout_start, dsout_end):
-        # compensates for the amplitude/frequency shift caused by FM demodulation under varying playback speed.
         level_adjust = level_adjusts[i]
 
-        # Adding the positive shift pulls future (late) samples backward into alignment.
-        # TODO: THIS NEEDS TO BE PUSHED UPSTREAM NOT HERE!!!11
         coord = np.float32(interpolated_pixel_locs[i] + shift)
         coord_int = int(coord)
 
-        # fractional phase
         frac = coord - coord_int
 
-        # sinc_phase_count is 2**16, so the nearest tabulated phase is already
-        # accurate far below float32 precision. Interpolating between two
-        # adjacent phases would double LUT reads and add per-tap math in the
-        # innermost loop of the decoder for no change in output.
-        # If the LUT gets smaller, consider adding linear interpolation.
         phase = int(frac * sinc_phase_count + np.float32(0.5))
         w = sinc_lut[phase]
 
@@ -283,6 +289,38 @@ def scale_field(buf, dsout, interpolated_pixel_locs, wowfactors, sinc_lut, lineo
             result += buf[start + t] * w[t]
 
         dsout[i - dsout_start] = level_adjust * result
+
+
+@njit(nogil=True, cache=True, fastmath=True)
+def scale_field(
+    buf,
+    dsout,
+    interpolated_pixel_locs,
+    wowfactors,
+    sinc_lut,
+    lineoffset,
+    outwidth,
+    wow_level_adjust_smoothing=0,
+    level_adjust_threshold=15,
+    shift: float = 0.0,
+):
+    """Prepare level adjustments and resample using the original entry point."""
+    level_adjusts = scale_field_prepare(
+        wowfactors,
+        outwidth,
+        wow_level_adjust_smoothing,
+        level_adjust_threshold,
+    )
+    scale_field_apply(
+        buf,
+        dsout,
+        interpolated_pixel_locs,
+        level_adjusts,
+        sinc_lut,
+        lineoffset,
+        outwidth,
+        shift,
+    )
 
 
 frequency_suffixes = [
