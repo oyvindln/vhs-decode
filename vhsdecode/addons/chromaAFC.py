@@ -94,6 +94,7 @@ class ChromaAFC:
                 self.on_linearization = False
 
         self.setCC(color_under_carrier_f)
+        self.latchChromaHet()
 
         self.cc_wave = np.array([])
 
@@ -285,6 +286,15 @@ class ChromaAFC:
     # Returns the chroma heterodyning wave table/array computed after genHetC()
     def getChromaHet(self):
         return self.chroma_heterodyne
+
+    # Freezes the current heterodyne for the burst lock of the field whose decode
+    # is dispatched next, so that the chroma processing of the field before it,
+    # which retunes the AFC while that decode runs, cannot change it underneath.
+    def latchChromaHet(self):
+        self.latched_chroma_heterodyne = self.chroma_heterodyne
+
+    def getLatchedChromaHet(self):
+        return self.latched_chroma_heterodyne
 
     def getFSCWaves(self):
         return self.fsc_wave, self.fsc_cos_wave

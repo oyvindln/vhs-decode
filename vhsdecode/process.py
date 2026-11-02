@@ -16,7 +16,7 @@ import numpy.fft as npfft
 import lddecode.utils as lddu
 import vhsdecode.utils as utils
 from vhsdecode.utils import StackableMA, filtfft
-from vhsdecode.chroma import chroma_color_under_filter
+from vhsdecode.chroma import chroma_block_filter
 
 import vhsdecode.formats as vhs_formats
 
@@ -284,9 +284,6 @@ class VHSDecode(ldd.LDdecode):
                 and prevfi_2["detectedFirstField"] == prevfi_1["detectedFirstField"]
                 # and this field is within a reasonable distance to be valid
                 and lddu.inrange(distance_from_previous_field, 0.9, 1.1)
-                # Skip on TYPEC since we expect to have missing vsync there and we don't
-                # expect progressive video.
-                and self.rf.options.tape_format != "TYPEC"
             ):
                 # treat this as progressive, and manually flip the field order
                 ldd.logger.error(
@@ -504,6 +501,12 @@ class VHSDecode(ldd.LDdecode):
                 False,
                 self.threadreturn,
             )
+
+            # The chroma processing of this field below retunes the chroma AFC
+            # while the next field's decode runs its burst lock against it;
+            # latch the heterodyne that burst lock uses before starting the
+            # decode so the result does not depend on which gets there first.
+            self.rf.chroma_afc.latchChromaHet()
 
             # decode the next field in a thread so the result is ready for the next iteration
             if self.numthreads != 0:
@@ -927,6 +930,15 @@ class VHSRFDecode(ldd.RFDecode):
                     CHROMA_AUDIO_NOTCH_Q,
                 )
 
+        if not self._do_cafc:
+            # The block-level chroma chain (burst bandpass plus the optional
+            # notches) as the zero-phase |H|^2 gain filtfilt would apply, on
+            # the rfft grid of a block. Applied in the spectrum it has no
+            # edge transients, which with filtfilt biased the block mean that
+            # the DC removal subtracts and left each block's chroma with its
+            # own offset.
+            self.Filters["FVideoBurstF"] = self._chroma_block_fft_gain()
+
         # The following filters are for post-TBC:
         # The output sample rate is 4fsc
         self.Filters["FChromaFinal"] = self._chroma_afc.get_chroma_bandpass_final(
@@ -1023,6 +1035,18 @@ class VHSRFDecode(ldd.RFDecode):
     @compute_linelocs_issues.setter
     def compute_linelocs_issues(self, value):
         self._compute_linelocs_issues = value
+
+    def _chroma_block_fft_gain(self):
+        _, response = sps.sosfreqz(self.Filters["FVideoBurst"], worN=self.blocklen, whole=True)
+        gain = np.abs(response) ** 2
+        for ba in (
+            self.Filters.get("FChromaAudioNotch", None),
+            self.Filters["FVideoNotch"] if self._notch is not None else None,
+        ):
+            if ba is not None:
+                _, response = sps.freqz(ba[0], ba[1], worN=self.blocklen, whole=True)
+                gain *= np.abs(response) ** 2
+        return gain[: self.blocklen // 2 + 1]
 
     def computefilters(self):
         # Override the stuff used in lddecode to skip generating filters we don't use.
@@ -1417,18 +1441,14 @@ class VHSRFDecode(ldd.RFDecode):
         # Filter out the color-under signal from the raw data.
         chroma_source = data if self.options.color_under else out_video
         out_chroma = (
-            chroma_color_under_filter(
+            chroma_block_filter(
                 chroma_source,
-                self.Filters["FVideoBurst"],
+                self.Filters["FVideoBurstF"],
                 self.blocklen,
-                self.Filters["FVideoNotch"],
-                self._notch,
                 move=int(self.options.chroma_offset),
-                audio_notch=self.Filters.get("FChromaAudioNotch", None),
-                # TODO: Do we need to tweak move elsewhere too?
-                # if cafc is enabled, this filtering will be done after TBC
             )
             if not self._do_cafc
+            # if cafc is enabled, this filtering will be done after TBC
             else data[: self.blocklen]
         )
 

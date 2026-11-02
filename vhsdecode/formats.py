@@ -7,7 +7,6 @@ from lddecode.core import (
 
 # Default thresholds for rf dropout detection.
 DEFAULT_THRESHOLD_P_DDD = 0.18
-DEFAULT_THRESHOLD_P_CXADC = 0.35
 DEFAULT_HYSTERESIS = 1.25
 # Merge dropouts if they there is less than this number of samples between them.
 DOD_MERGE_THRESHOLD = 30

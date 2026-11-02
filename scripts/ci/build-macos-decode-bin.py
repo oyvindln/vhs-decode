@@ -64,6 +64,32 @@ def _collect_static_ffmpeg_binaries() -> list[str]:
     return extra_args
 
 
+# --- Workaround for PyInstaller COLLECT duplicate framework symlinks --------
+# Qt 6.12 introduced the QtQuickControls2Macos framework, and with
+# `--collect-all PyQt6` PyInstaller (6.22.x) ends up collecting the same
+# framework symlink twice. The second os.symlink() call in COLLECT.assemble()
+# then aborts the build with:
+#   FileExistsError: [Errno 17] File exists:
+#     'Versions/Current/QtQuickControls2Macos' ->
+#     '.../PyQt6/Qt6/lib/QtQuickControls2Macos.framework/QtQuickControls2Macos'
+# Recreating an identical symlink is a no-op, so make os.symlink idempotent
+# for the duration of the PyInstaller run. Conflicting symlinks (different
+# target) still raise, so genuine problems are not masked.
+_real_os_symlink = os.symlink
+
+
+def _idempotent_symlink(src, dst, target_is_directory=False, *, dir_fd=None):
+    try:
+        _real_os_symlink(src, dst, target_is_directory=target_is_directory, dir_fd=dir_fd)
+    except FileExistsError:
+        if os.path.islink(dst) and os.readlink(dst) == src:
+            return  # identical symlink already in place
+        raise
+
+
+os.symlink = _idempotent_symlink
+
+
 PyInstaller.__main__.run(
     [
         "decode.py",

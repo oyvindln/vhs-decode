@@ -97,60 +97,79 @@ jobs:
           rm -f "${FFMPEG_ARCHIVE}"
           rm -rf "${FFMPEG_EXTRACT}"
 
-          # Build the AppImage normally (without -x flags, which are unreliable)
+          # Build the AppDir WITHOUT python-appimage's packaging step
+          # (--no-packaging). python-appimage 1.4.6 packages via an unpinned
+          # appimagetool downloaded from AppImage/appimagetool 'continuous';
+          # appimagetool builds since 2026-11-01 fatal-error on the 0700-mode
+          # directories that --appimage-extract always produces
+          # ("this directory has mode 0700 ... needs at least 0755"), so
+          # `python-appimage build app` fails before it ever produces an
+          # AppImage. --no-packaging skips that appimagetool call entirely and
+          # copies the finished AppDir out as ./vhs-decode-<machine> instead.
           python-appimage build app -p 3.12 \
+            --no-packaging \
             -- \
             _build_appimage
-          APPIMAGE_SRC="$(find . -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
-          if [ -z "${APPIMAGE_SRC}" ]; then
-            echo "Failed to locate generated AppImage."
+          APPDIR_OUT="vhs-decode-$(uname -m)"
+          if [ ! -d "${APPDIR_OUT}" ]; then
+            echo "ERROR: expected AppDir output at ${APPDIR_OUT} not found."
             exit 1
           fi
 
-          # Post-build patching: extract the AppImage, add ffmpeg/portaudio,
-          # and repackage with appimagetool. python-appimage doesn't reliably
-          # bundle extra files via -x flags or template subdirectories.
-          echo "Patching AppImage with ffmpeg/portaudio..."
-          rm -rf squashfs-root
-          "${APPIMAGE_SRC}" --appimage-extract 2>/dev/null || {
-            dnf install --assumeyes squashfs-tools 2>/dev/null || true
-            unsquashfs -d squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: could not extract AppImage for patching"; exit 1; }
-          }
-          mkdir -p squashfs-root/usr/bin squashfs-root/usr/lib
-          cp /tmp/ffmpeg-bundled squashfs-root/usr/bin/ffmpeg
-          cp /tmp/ffprobe-bundled squashfs-root/usr/bin/ffprobe
-          cp /tmp/libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so.2
-          ln -sf libportaudio.so.2 squashfs-root/usr/lib/libportaudio.so
-          chmod +x squashfs-root/usr/bin/ffmpeg squashfs-root/usr/bin/ffprobe
+          # Patch the AppDir directly. (Previously the intermediate AppImage
+          # was extracted and repackaged; patching the AppDir skips that
+          # round-trip. python-appimage doesn't reliably bundle extra files
+          # via -x flags or template subdirectories.)
+          echo "Patching AppDir with ffmpeg/portaudio..."
+          mkdir -p "${APPDIR_OUT}/usr/bin" "${APPDIR_OUT}/usr/lib"
+          cp /tmp/ffmpeg-bundled "${APPDIR_OUT}/usr/bin/ffmpeg"
+          cp /tmp/ffprobe-bundled "${APPDIR_OUT}/usr/bin/ffprobe"
+          cp /tmp/libportaudio.so.2 "${APPDIR_OUT}/usr/lib/libportaudio.so.2"
+          ln -sf libportaudio.so.2 "${APPDIR_OUT}/usr/lib/libportaudio.so"
+          chmod +x "${APPDIR_OUT}/usr/bin/ffmpeg" "${APPDIR_OUT}/usr/bin/ffprobe"
           # Install the original icon as .DirIcon and root icon for
           # taskbar/launcher display. Also install into usr/share/icons
           # so desktop environments can find it via the hicolor theme.
-          cp assets/icons/vhs-decode.png squashfs-root/.DirIcon
-          cp assets/icons/vhs-decode.png squashfs-root/vhs-decode.png
-          mkdir -p squashfs-root/usr/share/icons/hicolor/256x256/apps
-          cp assets/icons/vhs-decode.png squashfs-root/usr/share/icons/hicolor/256x256/apps/vhs-decode.png
+          # python-appimage removes the base image's python.png but leaves
+          # its .DirIcon symlink dangling, and cp refuses to write through
+          # dangling symlinks — remove the stale links first so real files
+          # are written.
+          rm -f "${APPDIR_OUT}/.DirIcon" "${APPDIR_OUT}/vhs-decode.png"
+          cp assets/icons/vhs-decode.png "${APPDIR_OUT}/.DirIcon"
+          cp assets/icons/vhs-decode.png "${APPDIR_OUT}/vhs-decode.png"
+          mkdir -p "${APPDIR_OUT}/usr/share/icons/hicolor/256x256/apps"
+          cp assets/icons/vhs-decode.png "${APPDIR_OUT}/usr/share/icons/hicolor/256x256/apps/vhs-decode.png"
           # Install the desktop file
-          mkdir -p squashfs-root/usr/share/applications
+          mkdir -p "${APPDIR_OUT}/usr/share/applications"
           cp resources/appimage/decode/vhs-decode.desktop \
-             squashfs-root/usr/share/applications/vhs-decode.desktop
-          ln -sf usr/share/applications/vhs-decode.desktop squashfs-root/vhs-decode.desktop
+             "${APPDIR_OUT}/usr/share/applications/vhs-decode.desktop"
+          ln -sf usr/share/applications/vhs-decode.desktop "${APPDIR_OUT}/vhs-decode.desktop"
           # Replace AppRun with one that does desktop integration on first
           # run. python-appimage generates a bare AppRun that just calls
           # python directly — it never registers the .desktop file or icon
           # with the user's desktop environment, so the taskbar shows a
           # generic icon and pinning doesn't work.
-          cp resources/appimage/decode/AppRun squashfs-root/AppRun
-          chmod +x squashfs-root/AppRun
-          # Download appimagetool for repackaging
+          cp resources/appimage/decode/AppRun "${APPDIR_OUT}/AppRun"
+          chmod +x "${APPDIR_OUT}/AppRun"
+          # --appimage-extract (used by python-appimage above) creates every
+          # directory with mode 0700, and AppImages are extracted and run by
+          # users other than the packager. Make the whole tree world-readable
+          # and traversable so the final AppImage works for everyone and the
+          # strict permission check in current appimagetool passes.
+          chmod -R a+rX "${APPDIR_OUT}"
+
+          # Package the patched AppDir ourselves. Use the maintained
+          # AppImage/appimagetool repo (AppImageKit/continuous still serves a
+          # 2023 build). --no-appstream skips the appstreamcli metadata
+          # validation that current appimagetool builds run (our appdata.xml
+          # uses a non-rdns component id, which fails it); python-appimage
+          # itself always passed --no-appstream for the same reason.
           AIT_ARCH="x86_64"
           [ "${{ matrix.arch }}" = "arm64" ] && AIT_ARCH="aarch64"
-          curl -fsSL "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${AIT_ARCH}.AppImage" -o /tmp/appimagetool || { echo "ERROR: failed to download appimagetool"; exit 1; }
+          curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${AIT_ARCH}.AppImage" -o /tmp/appimagetool || { echo "ERROR: failed to download appimagetool"; exit 1; }
           chmod +x /tmp/appimagetool
-          rm -f "${APPIMAGE_SRC}"
-          ARCH=${AIT_ARCH} /tmp/appimagetool squashfs-root "${APPIMAGE_SRC}" || { echo "ERROR: failed to repackage AppImage"; exit 1; }
-          rm -rf squashfs-root /tmp/appimagetool
-
-          mv "${APPIMAGE_SRC}" "./decode-${{ matrix.arch }}.AppImage"
+          ARCH=${AIT_ARCH} /tmp/appimagetool --no-appstream "${APPDIR_OUT}" "./decode-${{ matrix.arch }}.AppImage" || { echo "ERROR: failed to package AppImage"; exit 1; }
+          rm -rf "${APPDIR_OUT}" /tmp/appimagetool
 
       - name: Smoke test AppImage binary startup (crash regression)
         run: |
