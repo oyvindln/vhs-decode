@@ -1,11 +1,9 @@
 import argparse
 import os
-import shutil
-import subprocess
-import sys
 from typing import Optional
 
 import lddecode.utils as lddu
+import sys
 
 DDD_FREQ = 40
 CXADC_FREQ = (8 * 315.0) / 88.0  # 28.636363636
@@ -32,21 +30,6 @@ def sizeof_fmt(num: int, suffix: str = "B") -> str:
             return f"{num:3.1f} {unit}{suffix}"
         num /= 1024.0
     return f"{num:.1f} Yi{suffix}"
-
-
-def get_free_space(path: str) -> int:
-    # statvfs() can under-report free space on some macOS SMB mounts; df is correct there.
-    free_space = shutil.disk_usage(path).free
-    if sys.platform == "darwin":
-        try:
-            out = subprocess.run(
-                ["df", "-k", path], capture_output=True, text=True, timeout=5
-            ).stdout.strip().splitlines()
-            df_free = int(out[-1].split()[3]) * 1024
-            free_space = max(free_space, df_free)
-        except Exception:
-            pass
-    return free_space
 
 
 # checks if the input file can be read
@@ -81,12 +64,13 @@ def test_output_file(output_file: Optional[str]) -> bool:
 
     # get the free space in the output file directory
     try:
-        free_space = get_free_space(output_file_dir)
+        statvfs = os.statvfs(output_file_dir)
+        free_space = statvfs.f_frsize * statvfs.f_bavail
         if free_space < 1024 * 1024 * 1024:
             print(
                 f"WARN: output file directory {output_file_dir} has {sizeof_fmt(free_space)} free space"
             )
-    except (AttributeError, BlockingIOError, OSError):
+    except (AttributeError, BlockingIOError):
         pass
 
     try:
