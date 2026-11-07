@@ -540,6 +540,13 @@ def main(args=None, use_gui=False):
         ),
     )
     dodgroup.add_argument(
+        "--skip_vbi_dod",
+        dest="skip_vbi_dod",
+        action="store_true",
+        default=False,
+        help="Don't run dropout detection on VBI lines (useful e.g. for Type C recordings).",
+    )
+    dodgroup.add_argument(
         "--gnrc",
         "--gnuradio_rf_afe",
         dest="gnrc_afe",
@@ -619,6 +626,7 @@ def main(args=None, use_gui=False):
     )
     rf_options["dod_threshold_a"] = args.dod_threshold_a
     rf_options["dod_hysteresis"] = args.dod_hysteresis
+    rf_options["skip_vbi_dod"] = args.skip_vbi_dod
     rf_options["track_phase"] = args.track_phase
     rf_options["high_boost"] = args.high_boost
     rf_options["disable_diff_demod"] = args.disable_diff_demod
