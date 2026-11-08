@@ -74,18 +74,16 @@ setup(
         Extension(
             "vhsdecode.sync",
             ["vhsdecode/sync.pyx"],
-            language_level=3,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args
         ),
         Extension(
             "vhsdecode.linear_filter",
             ["vhsdecode/linear_filter.pyx"],
-            language_level=3,
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args
         )
-    ]),
+    ], compiler_directives={"language_level": 3}),
     # Needed for using numpy in cython.
     include_dirs=[numpy.get_include()],
     # These are just the minimal runtime dependencies for the Python scripts --
