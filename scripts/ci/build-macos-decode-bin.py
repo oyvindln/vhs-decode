@@ -37,6 +37,10 @@ def _ensure_lddecode_version_file() -> None:
 
 
 print("Building macOS binary version")
+
+# The Rust crates compiled into vhsd_rust require their licence texts to ship
+# with the binaries.
+subprocess.check_call([sys.executable, "scripts/generate_rust_licenses.py", "THIRD_PARTY_LICENSES_RUST.txt"])
 _ensure_lddecode_version_file()
 
 
@@ -113,6 +117,8 @@ PyInstaller.__main__.run(
         "lddecode",
         "--add-data",
         "assets:assets",
+        "--add-data",
+        "THIRD_PARTY_LICENSES_RUST.txt:.",
         *_collect_static_ffmpeg_binaries(),
         "--hidden-import",
         "vhsdecode.windows_bootstrap",

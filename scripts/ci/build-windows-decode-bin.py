@@ -1,5 +1,7 @@
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 import PyInstaller.__main__
 import PyQt6
@@ -9,6 +11,10 @@ from pyinstaller_versionfile import create_versionfile
 os.environ.setdefault("SETUPTOOLS_RUST_CARGO_PROFILE", "release")
 
 print("Building Windows binary")
+
+# The Rust crates compiled into vhsd_rust require their licence texts to ship
+# with the binaries.
+subprocess.check_call([sys.executable, "scripts/generate_rust_licenses.py", "THIRD_PARTY_LICENSES_RUST.txt"])
 
 # Make sure build directory exists since we place versionfile.txt there.
 build_path = ".\\build"
@@ -95,6 +101,8 @@ PyInstaller.__main__.run(
         "vhsdecode/format_defs;vhsdecode/format_defs",
         "--add-data",
         "assets/icons;assets/icons",
+        "--add-data",
+        "THIRD_PARTY_LICENSES_RUST.txt;.",
         "--collect-data",
         "lddecode",
         "--collect-all",
@@ -131,7 +139,9 @@ PyInstaller.__main__.run(
         "assets\\icons\\vhs-decode.ico",
         "--version-file",
         "build\\versionfile.txt",
-        "--onefile",
+        # A one-file build unpacks itself to a temp folder on every launch,
+        # which adds 15+ seconds before each decode starts.
+        "--onedir",
         "--name",
         "decode",
     ]
