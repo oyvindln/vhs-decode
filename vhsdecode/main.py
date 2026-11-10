@@ -30,7 +30,6 @@ from vhsdecode.cmdcommons import (
     IOArgsException,
     test_input_file,
     test_output_file,
-    get_free_space,
 )
 from vhsdecode.formats import TAPE_SPEEDS
 from vhsd_rust import check_debug
@@ -810,7 +809,7 @@ def main(args=None, use_gui=False):
             # Check free disk space
             output_dir = os.path.dirname(os.path.abspath(outname))
             try:
-                free_space = get_free_space(output_dir)
+                free_space = shutil.disk_usage(output_dir).free
                 if (
                     free_space < 1024 * 1024 * 1024 * 10
                 ):  # 10GB, 500 fields_written needs around 675MB, 1G0B for some margin because there can be other things writing to the disk as well, the disk might fill before the next check otherwise.
@@ -821,7 +820,7 @@ def main(args=None, use_gui=False):
                     while True:
                         try:
                             time.sleep(1)
-                            free_space = get_free_space(output_dir)
+                            free_space = shutil.disk_usage(output_dir).free
                             if free_space >= 1024 * 1024 * 1024 * 10:  # 10GB
                                 print("\nDisk space available, resuming decode.", file=sys.stderr)
                                 break
