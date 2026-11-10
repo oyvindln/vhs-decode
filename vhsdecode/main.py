@@ -389,6 +389,15 @@ def main(args=None, use_gui=False):
         help="Disable internal chroma comb filter.",
     )
     chroma_group.add_argument(
+        "--chroma_offset",
+        dest="chroma_offset",
+        type=int,
+        default=5,
+        help=(
+            "Shifts chroma by specified number of microseconds (positive values shift to the right, negative to the left)."
+        ),
+    )
+    chroma_group.add_argument(
         "--skip_chroma",
         dest="skip_chroma",
         action="store_true",
@@ -648,6 +657,7 @@ def main(args=None, use_gui=False):
     rf_options["secam_carrier_servo"] = args.secam_servo_passes >= 1
     rf_options["secam_lo_trim"] = args.secam_lo_trim
     rf_options["gnrc_afe"] = args.gnrc_afe
+    rf_options["chroma_offset"] = args.chroma_offset
 
     extra_options = get_extra_options(args, not use_gui)
     extra_options["params_file"] = args.params_file
