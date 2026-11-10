@@ -1348,6 +1348,9 @@ def LRUupdate(l, k):
 
 def concatenate_blocks(blocks):
     """Concatenate demodulator cache blocks, being sensitive to performance"""
+    if isinstance(blocks[0], dict):
+        return {k: np.concatenate([b[k] for b in blocks]) for k in blocks[0]}
+
     dtype = blocks[0].dtype
     if dtype.names is None:
         return np.concatenate(blocks)

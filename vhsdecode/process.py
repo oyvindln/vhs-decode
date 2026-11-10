@@ -1296,12 +1296,70 @@ class VHSRFDecode(ldd.RFDecode):
         self.delays["video_sync"] = 0
         self.delays["video_white"] = 0
 
-    def demodblock(
-        self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False
-    ):
-        rv = {}
-        demod_block_debug = False
-        demod_start_time = time.time()
+    def _analytic_filter(self):
+        """Positive-frequency half of RFVideo * hilbert (* notch), cached per filter set."""
+        notch = self.Filters["FVideoNotchF"] if self._notch is not None else None
+        key = (id(self.Filters["RFVideo"]), id(self.Filters["hilbert"]), id(notch))
+        cached = getattr(self, "_analytic_filter_cache", None)
+        if cached is None or cached[0] != key:
+            filt = self.Filters["RFVideo"] * self.Filters["hilbert"]
+            if notch is not None:
+                filt = filt * notch
+            cached = (key, np.ascontiguousarray(filt[: self.blocklen // 2 + 1]))
+            self._analytic_filter_cache = cached
+        return cached[1]
+
+    def _demod_cpu_analytic(self, data):
+        """FM demodulate one block on the CPU without high boost or debug plots.
+
+        The hilbert mask zeroes negative frequencies, so the spectrum is only
+        needed up to n/2: a real FFT gives that half directly, and one inverse
+        FFT serves both the envelope and the demodulator.
+        """
+        n = self.blocklen
+        half = n // 2 + 1
+        spectrum = np.zeros(n, dtype=np.complex128)
+        spectrum[:half] = npfft.rfft(data[:n])
+        spectrum[:half] *= self._analytic_filter()
+        hilbert = npfft.ifft(spectrum)
+        del spectrum
+
+        # Envelope of the signal strength from the real part of the analytic
+        # signal, rolled a bit to compensate for filter delay.
+        raw_env = np.abs(hilbert.real.astype(np.single))
+        raw_env = np.roll(raw_env, 4)
+        env = sosfiltfilt_rust(self.Filters["FEnvPost"], raw_env)
+        del raw_env
+        env_mean = np.mean(env)
+        if len(np.where(env == 0)[0]) != 0:
+            ldd.logger.warning("RF signal is weak. Is your deck tracking properly?")
+
+        demod = unwrap_hilbert(hilbert, self.freq_hz)
+
+        # If there are obviously out of bounds values, do an extra demod on a diffed waveform and
+        # replace the spikes with data from the diffed demod. (Which in practice is an extra EQed signal)
+        if not self._disable_diff_demod:
+            check_value = self.options.diff_demod_check_value
+            if np.max(demod[20:-20]) > check_value:
+                demod_b = unwrap_hilbert(np.ediff1d(hilbert, to_begin=0), self.freq_hz).real
+                demod = replace_spikes(demod, demod_b, check_value)
+
+        return data, demod, env, env_mean, None, None
+
+    def _demod_cpu(self, data, fftdata, demod_block_debug):
+        """FM demodulate one block on the CPU.
+
+        Returns (data, demod, env, env_mean, indata_fft, indata_fft_copy); the
+        last two are only kept for debug plots.
+        """
+        if (
+            data is not None
+            and fftdata is None
+            and self._high_boost is None
+            and not self.debug_plot
+        ):
+            return self._demod_cpu_analytic(data)
+
         if fftdata is not None:
             indata_fft = fftdata
         elif data is not None:
@@ -1312,8 +1370,8 @@ class VHSRFDecode(ldd.RFDecode):
         if data is None:
             data = npfft.ifft(indata_fft).real
 
-        if self.debug_plot and self.debug_plot.is_plot_requested("demodblock"):
-            demod_block_debug = True
+        indata_fft_copy = None
+        if demod_block_debug:
             # If we're doing a plot make a copy of the input to be able to plot it since we
             # are modifying the data in place.
             indata_fft_copy = indata_fft.copy()
@@ -1356,7 +1414,7 @@ class VHSRFDecode(ldd.RFDecode):
         hilbert = npfft.ifft(indata_fft * self.Filters["hilbert"])
 
         if not demod_block_debug:
-            del indata_fft
+            indata_fft = None
 
         # FM demodulator
         # test1 = np.angle(hilbert)
@@ -1383,6 +1441,20 @@ class VHSRFDecode(ldd.RFDecode):
                 # more
                 if False:
                     demod = smooth_spikes(demod, check_value * 2.2)
+
+        return data, demod, env, env_mean, indata_fft, indata_fft_copy
+
+    def demodblock(
+        self, data=None, mtf_level=0, fftdata=None, cut=False, thread_benchmark=False
+    ):
+        rv = {}
+        demod_start_time = time.time()
+        demod_block_debug = bool(
+            self.debug_plot and self.debug_plot.is_plot_requested("demodblock")
+        )
+        data, demod, env, env_mean, indata_fft, indata_fft_copy = self._demod_cpu(
+            data, fftdata, demod_block_debug
+        )
 
         # Disabled if sharpness level is zero (default).
         # TODO: This should be done after the deemphasis steps
@@ -1483,14 +1555,19 @@ class VHSRFDecode(ldd.RFDecode):
             out_video = demod
 
         # demod_burst is a bit misleading, but keeping the naming for compatability.
-        video_out = np.rec.array(
-            [out_video, out_video05, out_chroma, env],
-            names=["demod", "demod_05", "demod_burst", "envelope"],
-        )
-
-        rv["video"] = (
-            video_out[self.blockcut : -self.blockcut_end] if cut else video_out
-        )
+        # A dict of contiguous arrays rather than a record array: field code reads
+        # the channels one at a time, and record fields are slow strided views.
+        video_out = {
+            "demod": out_video,
+            "demod_05": out_video05,
+            "demod_burst": out_chroma,
+            "envelope": env,
+        }
+        if cut:
+            video_out = {
+                k: v[self.blockcut : -self.blockcut_end] for k, v in video_out.items()
+            }
+        rv["video"] = video_out
 
         demod_end_time = time.time()
         if thread_benchmark:
