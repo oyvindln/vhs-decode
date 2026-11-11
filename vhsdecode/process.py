@@ -655,6 +655,7 @@ class VHSRFDecode(ldd.RFDecode):
             dod_hysteresis=rf_options.get(
                 "dod_hysteresis", vhs_formats.DEFAULT_HYSTERESIS
             ),
+            skip_vbi=rf_options.get("skip_vbi_dod", False),
         )
 
         self._chroma_trap = rf_options.get("chroma_trap", False)
