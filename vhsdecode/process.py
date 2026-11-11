@@ -807,7 +807,7 @@ class VHSRFDecode(ldd.RFDecode):
             # channel. May want to enable for video8 as well.
             rf_options.get("fm_audio_notch", 0) or (tape_format == "HI8"),
             self.DecoderParams.get("chroma_audio_notch_freq", 0) > 0,
-            int(self.DecoderParams.get("chroma_offset", 5) * (self.freq / 40.0)),
+            rf_options.get("chroma_offset", int(5 * (self.freq / 40.0))),
             rf_options.get("cti_mix", 1),
             rf_options.get("cti_width", 2),
             ire0_adjust,
