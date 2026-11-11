@@ -1165,6 +1165,8 @@ class DemodCache:
 
         self.request         = 0
         self.ended           = False
+        # Set by a worker thread that raised, so readers fail instead of waiting forever.
+        self.worker_error    = None
 
         self.loader_lock   = threading.Lock()
 
@@ -1173,7 +1175,7 @@ class DemodCache:
 
         for i in range(num_worker_threads):
             t = threading.Thread(
-                target=self.worker, daemon=True, args=()
+                target=self._run_worker, daemon=True, args=()
             )
             t.start()
             self.threads.append(t)
@@ -1199,6 +1201,19 @@ class DemodCache:
 
     def __del__(self):
         self.end()
+
+    def _run_worker(self):
+        try:
+            self.worker()
+        except BaseException as e:
+            traceback.print_exc()
+            with self.q_out_cv:
+                self.worker_error = e
+                self.q_out_cv.notify_all()
+
+    def _raise_worker_error(self):
+        if self.worker_error is not None:
+            raise RuntimeError("a demodulation worker thread failed") from self.worker_error
 
     def prune_cache(self):
         """ Prune the LRU cache.  Typically run when a new field is loaded """
@@ -1412,6 +1427,7 @@ class DemodCache:
             with self.q_out_cv:
                 if not any(blocknum in self.sync_waiting for blocknum in blocknums):
                     break
+                self._raise_worker_error()
                 self.q_out_cv.wait()
 
         with self.lock:
@@ -1531,6 +1547,7 @@ class DemodCache:
 
             with self.q_out_cv:
                 while self.waiting:
+                    self._raise_worker_error()
                     self.q_out_cv.wait()
 
             need_blocks = self.doread(toread, MTF)
