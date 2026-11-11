@@ -145,3 +145,4 @@ squashfs-root/
 # Nix build files
 result/
 result
+THIRD_PARTY_LICENSES_RUST.txt

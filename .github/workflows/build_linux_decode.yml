@@ -139,6 +139,9 @@ jobs:
           cp assets/icons/vhs-decode.png "${APPDIR_OUT}/vhs-decode.png"
           mkdir -p "${APPDIR_OUT}/usr/share/icons/hicolor/256x256/apps"
           cp assets/icons/vhs-decode.png "${APPDIR_OUT}/usr/share/icons/hicolor/256x256/apps/vhs-decode.png"
+          # Licence texts of the Rust crates compiled into vhsd_rust.
+          mkdir -p "${APPDIR_OUT}/usr/share/doc/vhs-decode"
+          python3 scripts/generate_rust_licenses.py              "${APPDIR_OUT}/usr/share/doc/vhs-decode/THIRD_PARTY_LICENSES_RUST.txt"
           # Install the desktop file
           mkdir -p "${APPDIR_OUT}/usr/share/applications"
           cp resources/appimage/decode/vhs-decode.desktop \
