@@ -331,16 +331,22 @@ def make_loader(filename, inputfreq=None):
     if inputfreq is not None:
         # We're resampling, so we have to use ffmpeg.
 
+        raw_sample_bytes = None
         if filename.endswith(".s16") or filename.endswith(".raw"):
             input_args = ["-f", "s16le"]
+            raw_sample_bytes = 2
         elif filename.endswith(".r16") or filename.endswith(".u16") or filename.endswith(".tbc"):
             input_args = ["-f", "u16le"]
+            raw_sample_bytes = 2
         elif filename.endswith(".rf"):
             input_args = ["-f", "f32le"]
+            raw_sample_bytes = 4
         elif filename.endswith(".s8"):
             input_args = ["-f", "s8"]
+            raw_sample_bytes = 1
         elif filename.endswith(".r8") or filename.endswith(".u8"):
             input_args = ["-f", "u8"]
+            raw_sample_bytes = 1
         elif filename.endswith(".lds") or filename.endswith(".r30"):
             raise ValueError("File format not supported when resampling: " + filename)
         else:
@@ -356,7 +362,13 @@ def make_loader(filename, inputfreq=None):
                 "asetrate=" + str(inputfreq * 1e6) + ",aresample=" + str(40e6),
             ]
 
-        return LoadFFmpeg(input_args=input_args, output_args=output_args)
+        return LoadFFmpeg(
+            input_args=input_args,
+            output_args=output_args,
+            filename=filename,
+            inputfreq=inputfreq,
+            raw_sample_bytes=raw_sample_bytes,
+        )
 
     elif filename.endswith(".lds"):
         return load_packed_data_4_40
@@ -529,9 +541,27 @@ def load_packed_data_4_40(infile, sample, readlen):
 class LoadFFmpeg:
     """Load samples from a wide variety of formats using ffmpeg."""
 
-    def __init__(self, input_args=[], output_args=[]):
+    def __init__(self, input_args=[], output_args=[], filename=None, inputfreq=None, raw_sample_bytes=None):
         self.input_args = input_args
         self.output_args = output_args
+
+        # With filename and inputfreq set, a read far ahead of ffmpeg restarts
+        # it at the new position instead of reading and discarding everything
+        # in between. Only done when 40 MHz is a whole multiple of inputfreq:
+        # then an output sample falls exactly on an input sample, and the
+        # resampler gives the same output after a seek as when run from the
+        # start.
+        self.filename = filename
+        self.raw_sample_bytes = raw_sample_bytes
+        self.upsample = None
+        if filename is not None and inputfreq:
+            ratio = 40 / inputfreq
+            if abs(ratio - round(ratio)) < 1e-9 and round(ratio) >= 1:
+                self.upsample = int(round(ratio))
+        self.seek_threshold = 64 * 1024 * 1024
+        # Output samples decoded before the requested position after a seek,
+        # so the resampler has settled and the rewind buffer is full.
+        self.seek_preroll = 8 * 1024 * 1024
 
         # ffmpeg subprocess
         self.ffmpeg = None
@@ -566,19 +596,68 @@ class LoadFFmpeg:
 
         return data
 
+    def _seek_input_sample(self, out_sample):
+        """Return the input sample to restart ffmpeg at, or None to not seek."""
+        if self.upsample is None:
+            return None
+        in_sample = max(0, out_sample - self.seek_preroll) // self.upsample
+        if self.raw_sample_bytes is None:
+            # Containers are seeked by time, which ffmpeg resolves in whole
+            # microseconds; round down to a sample that is exact in those.
+            rate = self._declared_rate()
+            if rate is None:
+                return None
+            step = rate // math.gcd(rate, 1_000_000)
+            in_sample -= in_sample % step
+        return in_sample
+
+    def _declared_rate(self):
+        try:
+            import av
+
+            with av.open(self.filename) as container:
+                return int(container.streams.audio[0].sample_rate)
+        except Exception:
+            return None
+
+    def _start(self, infile, in_sample):
+        """Start ffmpeg so its first output sample is input sample in_sample."""
+        self._close()
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "quiet"]
+        stdin = infile
+        if in_sample and self.raw_sample_bytes is not None:
+            infile.seek(in_sample * self.raw_sample_bytes)
+            command += self.input_args + ["-i", "-"]
+        elif in_sample:
+            rate = self._declared_rate()
+            stdin = subprocess.DEVNULL
+            command += ["-ss", f"{in_sample * 1_000_000 // rate}us"]
+            command += self.input_args + ["-i", self.filename]
+        else:
+            command += self.input_args + ["-i", "-"]
+        command += self.output_args
+        command += ["-c:a", "pcm_s16le", "-f", "s16le", "-"]
+        self.ffmpeg = subprocess.Popen(command, stdin=stdin, stdout=subprocess.PIPE)
+        self.position = in_sample * (self.upsample or 1) * 2
+        self.rewind_buf = bytearray()
+
     def read(self, infile, sample, readlen):
         sample_bytes = sample * 2
         readlen_bytes = readlen * 2
 
-        if self.ffmpeg is None:
-            command = ["ffmpeg", "-hide_banner", "-loglevel", "quiet"]
-            command += self.input_args
-            command += ["-i", "-"]
-            command += self.output_args
-            command += ["-c:a", "pcm_s16le", "-f", "s16le", "-"]
-            self.ffmpeg = subprocess.Popen(
-                command, stdin=infile, stdout=subprocess.PIPE
-            )
+        behind_rewind = sample_bytes < self.position - len(self.rewind_buf)
+        if (
+            self.ffmpeg is None
+            or sample_bytes - self.position > self.seek_threshold
+            or behind_rewind
+        ):
+            in_sample = None
+            if sample_bytes > self.seek_threshold or behind_rewind:
+                in_sample = self._seek_input_sample(sample)
+            if in_sample is not None:
+                self._start(infile, in_sample)
+            elif self.ffmpeg is None:
+                self._start(infile, 0)
 
         if sample_bytes < self.position:
             # Seeking backwards - use data from rewind_buf

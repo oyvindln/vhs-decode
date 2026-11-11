@@ -549,6 +549,24 @@ def main(args=None, use_gui=False):
             " measurements. (WIP)\nYou might want to use this with -t 1"
         ),
     )
+    parser.add_argument(
+        "--parallel",
+        dest="parallel",
+        metavar="processes",
+        type=int,
+        default=1,
+        help=(
+            "Decode with this many processes at once, each working on a different"
+            " stretch of the capture, and stitch their output together. Each"
+            " process uses -t threads (2 if -t is not given)."
+        ),
+    )
+    parser.add_argument(
+        "--parallel_worker",
+        dest="parallel_worker",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
 
     raw_args = list(args) if args is not None else sys.argv[1:]
     normalized_args = _normalize_ire0_adjust_args(raw_args)
@@ -587,6 +605,11 @@ def main(args=None, use_gui=False):
 
     system = select_system(args)
     sample_freq = select_sample_freq(args)
+
+    if args.parallel > 1:
+        from vhsdecode.parallel import run_parallel
+
+        sys.exit(run_parallel(args, normalized_args, system, sample_freq))
 
     loader_input_freq = sample_freq if not args.no_resample else None
     if sample_freq == 40 and (filename.endswith(".lds") or filename.endswith(".ldf")):
@@ -739,22 +762,34 @@ def main(args=None, use_gui=False):
     # Initialize VHS decoder
     # Note, we pass 40 as sample frequency, as any other will be resampled by the
     # loader function.
-    vhsd = VHSDecode(
-        filename,
-        outname,
-        loader,
-        logger,
-        system=system,
-        tape_format=tape_format,
-        doDOD=not args.nodod,
-        threads=args.threads if not debug_plot else 0,
-        inputfreq=sample_freq,
-        level_adjust=args.level_adjust,
-        rf_options=rf_options,
-        extra_options=extra_options,
-        debug_plot=debug_plot,
-        field_order_action=args.field_order_action,
-    )
+    def make_decoder(out, decoder_loader):
+        decoder = VHSDecode(
+            filename,
+            out,
+            decoder_loader,
+            logger,
+            system=system,
+            tape_format=tape_format,
+            doDOD=not args.nodod,
+            threads=args.threads if not debug_plot else 0,
+            inputfreq=sample_freq,
+            level_adjust=args.level_adjust,
+            rf_options=rf_options,
+            extra_options=extra_options,
+            debug_plot=debug_plot,
+            field_order_action=args.field_order_action,
+        )
+        if system == "NTSC" and not args.ntscj:
+            decoder.blackIRE = 7.5
+        return decoder
+
+    if args.parallel_worker:
+        from vhsdecode.parallel import run_worker
+
+        signal.signal(signal.SIGINT, original_sigint_handler)
+        sys.exit(run_worker(args.parallel_worker, lambda out: make_decoder(out, build_loader())))
+
+    vhsd = make_decoder(outname, loader)
 
     if check_debug():
         logger.warning("Rust modules are compiled in debug mode! vhs-decode will run slower.")
@@ -765,9 +800,6 @@ def main(args=None, use_gui=False):
         vhsd.roughseek(args.start_fileloc, False)
     else:
         vhsd.roughseek(firstframe * 2)
-
-    if system == "NTSC" and not args.ntscj:
-        vhsd.blackIRE = 7.5
 
     done = False
 

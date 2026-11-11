@@ -545,6 +545,8 @@ Useful to recover decoding after a crash, or for limiting processing time by pro
 
 `-t` Defines the number of processing threads to use during demodulation, decode cant use more then 6-8 threads per decode currently so using 8 threads is the practical limit as its mostly a single core task.
 
+`--parallel` Decodes with *n* processes at once, each working a few seconds ahead of the last, and stitches their output together where they agree. Where they don't (a recording gap, say), the earlier process carries on alone for a while, so the decode only slows down there. Each process uses `-t` threads (2 if `-t` is not given) and about 2 GB of memory; fewer processes are started if free memory is short. A quarter of your CPU threads is a good starting point.
+
 > [!CAUTION]  
 > Upon crashing, vhs-decode automatically dumps the last known sample location in the terminal output.
 
