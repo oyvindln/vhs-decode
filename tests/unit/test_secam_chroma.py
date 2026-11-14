@@ -20,7 +20,7 @@ import scipy.signal as sps
 import vhsdecode.process as process
 import vhsdecode.formats as vhs_formats
 from vhsdecode.addons.chromaAFC import ChromaAFC
-from vhsdecode.chroma import (
+from vhsdecode.chroma.secam import (
     measure_secam_under_carrier_offset,
     secam_bell_gain,
     upconvert_secam_method1,
@@ -297,7 +297,7 @@ class TestSECAMMethod1Upconversion:
         )
 
     def test_blanking_regeneration(self):
-        from vhsdecode.chroma import (
+        from vhsdecode.chroma.secam import (
             fit_secam_line_alternation,
             regenerate_secam_blanking,
         )
@@ -379,7 +379,7 @@ class TestSECAMMethod1Upconversion:
         np.testing.assert_allclose(np.median(edge_even), FOB, atol=8000)
 
     def test_alternation_fit_rejects_nonalternating(self):
-        from vhsdecode.chroma import (
+        from vhsdecode.chroma.secam import (
             fit_secam_line_alternation,
             SECAM_IDENT_MIN_CONFIDENCE,
             SecamParityFlywheel,
@@ -405,7 +405,7 @@ class TestSECAMMethod1Upconversion:
         assert source == "unlocked"
 
     def test_parity_flywheel_predicts_and_resets(self):
-        from vhsdecode.chroma import SecamParityFlywheel
+        from vhsdecode.chroma.secam import SecamParityFlywheel
 
         # dr_on_even walks base ^ (((n + 1) >> 1) & 1) across consecutive
         # fields (the 312.5-line field offset; TFFT observed on all fixture
