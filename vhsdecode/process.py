@@ -440,6 +440,13 @@ class VHSDecode(ldd.LDdecode):
             )
             return None
 
+    def _decodefield_thread(self, *args):
+        """Run decodefield, keeping any exception for readfield to raise."""
+        try:
+            self.decodefield(*args)
+        except BaseException as e:
+            args[-1]["error"] = e
+
     def readfield(self, initphase=False):
         done = False
         adjusted = False
@@ -478,6 +485,9 @@ class VHSDecode(ldd.LDdecode):
 
                 # In non-threaded mode self.threadreturn was filled earlier...
                 # ... but if the first call, this is empty
+                if "error" in self.threadreturn:
+                    raise RuntimeError("field decode failed") from self.threadreturn["error"]
+
                 if len(self.threadreturn) > 0:
                     f, offset = self.threadreturn["field"], self.threadreturn["offset"]
 
@@ -511,7 +521,7 @@ class VHSDecode(ldd.LDdecode):
             # decode the next field in a thread so the result is ready for the next iteration
             if self.numthreads != 0:
                 self.decodethread = threading.Thread(
-                    target=self.decodefield, args=df_args
+                    target=self._decodefield_thread, args=df_args
                 )
                 self.decodethread.start()
             else:

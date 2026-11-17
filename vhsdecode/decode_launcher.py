@@ -430,6 +430,7 @@ def _build_basic_decoder_args(
     tape_format: str,
     tape_speed: str,
     threads: int,
+    parallel: int = 1,
 ) -> list[str]:
     if tool.subcommand == "hifi":
         args: list[str] = []
@@ -469,6 +470,8 @@ def _build_basic_decoder_args(
     if tool.subcommand == "vhs":
         args += ["--tape_format", tape_format]
         args += ["--tape_speed", tape_speed.lower()]
+        if parallel > 1:
+            args += ["--parallel", str(parallel)]
 
     if tool.subcommand in {"vhs", "cvbs"}:
         if system == "NTSCJ":
@@ -663,6 +666,14 @@ class DecodeLauncherWindow(QWidget):
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, 64)
         self.threads_spin.setValue(4)
+        # Each vhs-decode process keeps about two to three cores busy.
+        self.parallel_spin = QSpinBox()
+        self.parallel_spin.setRange(1, 64)
+        self.parallel_spin.setValue(max(1, (os.cpu_count() or 4) // 4))
+        self.parallel_spin.setToolTip(
+            "Decode with this many processes at the same time (VHS decoder only)."
+            " Each one decodes a different stretch of the capture."
+        )
         self._output_manually_set = False
         self._last_decoder_tbc_path: Optional[Path] = None
         self._has_launched_decoder = False
@@ -716,6 +727,8 @@ class DecodeLauncherWindow(QWidget):
 
         launch_layout.addWidget(QLabel("Threads"), 6, 0)
         launch_layout.addWidget(self.threads_spin, 6, 1)
+        launch_layout.addWidget(QLabel("Parallel processes"), 6, 2)
+        launch_layout.addWidget(self.parallel_spin, 6, 3)
 
         launch_layout.addWidget(QLabel("Extra arguments"), 7, 0)
         launch_layout.addWidget(self.extra_args_edit, 7, 1, 1, 3)
@@ -755,6 +768,7 @@ class DecodeLauncherWindow(QWidget):
         self.tape_format_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.tape_speed_combo.currentIndexChanged.connect(self._refresh_tool_state)
         self.threads_spin.valueChanged.connect(self._refresh_tool_state)
+        self.parallel_spin.valueChanged.connect(self._refresh_tool_state)
         self.force_terminal_check.toggled.connect(self._on_force_terminal_toggled)
         self.params_json_browse_button.clicked.connect(self._browse_params_json_file)
         self.input_browse_button.clicked.connect(self._browse_input_file)
@@ -868,6 +882,7 @@ class DecodeLauncherWindow(QWidget):
             tape_format=self._selected_tape_format_value(),
             tape_speed=self.tape_speed_combo.currentText(),
             threads=self.threads_spin.value(),
+            parallel=self.parallel_spin.value(),
         )
         basic_args += self._params_json_args(tool, strict=False)
         extra = self.extra_args_edit.text().strip()
@@ -911,6 +926,7 @@ class DecodeLauncherWindow(QWidget):
         self.tape_format_combo.setEnabled(tool.subcommand == "vhs")
         self.tape_speed_combo.setEnabled(tool.subcommand == "vhs")
         self.threads_spin.setEnabled(decoder_selected or hifi_selected)
+        self.parallel_spin.setEnabled(tool.subcommand == "vhs")
 
     def _sync_system_options_for_tool(self, tool: ToolSpec) -> None:
         current = self.system_combo.currentText()
@@ -1328,6 +1344,7 @@ class DecodeLauncherWindow(QWidget):
                 tape_format=self._selected_tape_format_value(),
                 tape_speed=self.tape_speed_combo.currentText(),
                 threads=self.threads_spin.value(),
+                parallel=self.parallel_spin.value(),
             )
 
             if tool.subcommand in DECODER_SUBCOMMANDS:
