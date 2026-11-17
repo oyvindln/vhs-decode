@@ -18,7 +18,6 @@ prune tools
 prune notebooks
 prune scripts
 include scripts/cx-expander
-prune vhs_scripts
 prune cmake_modules
 prune docs
 prune assets
