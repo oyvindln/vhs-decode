@@ -11,6 +11,7 @@ class DodOptions:
     dod_threshold_p: float
     dod_threshold_a: float
     dod_hysteresis: float
+    skip_vbi: bool = False
 
 
 @njit(cache=True)
@@ -84,6 +85,12 @@ def detect_dropouts_rf(field, dod_options):
 
     start_line = field.lineoffset + 1
     end_line = min(len(field.linelocs) - 1, field.linecount + start_line + 1)
+    if dod_options.skip_vbi:
+        # Start detection at the first active field line (23 for 625-line, 21 for 525-line)
+        # so VBI lines (sync/equalization pulses, test signals) are not flagged as dropouts.
+        # end_line is computed beforehand so the detection window end is unchanged.
+        first_active_line = 23 if field.rf.SysParams["frame_lines"] == 625 else 21
+        start_line = field.lineoffset + first_active_line
 
     start_rf = math.floor(field.linelocs[start_line])
     end_rf = min(len(env), math.ceil(field.linelocs[end_line]))
