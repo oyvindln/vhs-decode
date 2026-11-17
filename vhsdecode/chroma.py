@@ -9,6 +9,11 @@ from vhsdecode.rust_utils import sosfiltfilt_rust
 import numba
 from numba import njit
 from numba.experimental import jitclass
+
+try:
+    from vhsd_rust import burst_phase_sequence
+except ImportError:
+    burst_phase_sequence = None
 from functools import cache
 
 
@@ -27,7 +32,6 @@ def chroma_to_u16(chroma):
         
     return out
 
-@njit(cache=False, nogil=True, fastmath=True)
 def chroma_automatic_gain(
     chroma,
     burst_abs_ref,
@@ -39,7 +43,34 @@ def chroma_automatic_gain(
     smoothing_window=8,
     k=2.0
 ):
-    burst_count = len(phase_sequence)
+    return _chroma_automatic_gain(
+        chroma,
+        burst_abs_ref,
+        phase_sequence.line_number,
+        phase_sequence.amplitude,
+        burst_detected_line,
+        sync_tip_len,
+        lineoffset,
+        outwidth,
+        smoothing_window,
+        k,
+    )
+
+
+@njit(cache=True, nogil=True, fastmath=True)
+def _chroma_automatic_gain(
+    chroma,
+    burst_abs_ref,
+    line_numbers,
+    amplitudes,
+    burst_detected_line,
+    sync_tip_len,
+    lineoffset,
+    outwidth,
+    smoothing_window,
+    k,
+):
+    burst_count = len(line_numbers)
 
     raw_gains = np.empty(burst_count, dtype=np.float64)
     valid_gains = np.empty(burst_count, dtype=np.float64)
@@ -48,13 +79,12 @@ def chroma_automatic_gain(
 
     # extract gain values and track valid amplitudes
     for i in range(burst_count):
-        current_burst = phase_sequence[i]
-        current_amp = current_burst.amplitude if current_burst.amplitude != 0 else 1e-8
+        current_amp = amplitudes[i] if amplitudes[i] != 0 else 1e-8
 
         raw_gain = burst_abs_ref / current_amp
         raw_gains[i] = raw_gain
 
-        if current_burst.line_number >= burst_detected_line:
+        if line_numbers[i] >= burst_detected_line:
             valid_gains[valid_count] = raw_gain
             valid_amps[valid_count] = current_amp
             valid_count += 1
@@ -83,20 +113,19 @@ def chroma_automatic_gain(
     noise_sum = 0
     noise_samples = 0
     for i in range(burst_count):
-        current_burst = phase_sequence[i]
         # Entries for lines above the first output line would index backwards
         # from the end of the field (see upconvert_chroma).
-        if current_burst.line_number < lineoffset:
+        if line_numbers[i] < lineoffset:
             continue
 
-        current_burst_start = (current_burst.line_number - lineoffset) * outwidth
+        current_burst_start = (line_numbers[i] - lineoffset) * outwidth
 
         if i < burst_count - 1:
-            next_burst_start = (phase_sequence[i + 1].line_number - lineoffset) * outwidth
+            next_burst_start = (line_numbers[i + 1] - lineoffset) * outwidth
         else:
             next_burst_start = len(chroma)
 
-        if current_burst.line_number < burst_detected_line:
+        if line_numbers[i] < burst_detected_line:
             chroma[current_burst_start:next_burst_start] = 0.0
         else:
             gain_start = smoothed_gains[i]
@@ -240,6 +269,49 @@ class BurstInfo:
         self.Q = Q
         self.phase_rotation = -1 # this is set later
         self.phase_correction = 0.0 # radians, fine heterodyne phase shift on top of phase_rotation
+
+
+_BURST_FIELDS = (
+    "line_number", "start", "end", "center", "phase_deg", "amplitude", "magnitude",
+    "dc", "frequency", "I", "Q", "phase_rotation",
+)
+_BURST_INT_DTYPES = {
+    "line_number": np.int32, "start": np.int32, "end": np.int32, "center": np.int64,
+    "phase_rotation": np.int8,
+}
+
+
+class BurstSequence:
+    """Colour burst measurements for each line of a field, one array per value."""
+
+    def __init__(self, arrays):
+        for name in _BURST_FIELDS:
+            setattr(self, name, arrays[name])
+        count = len(self.line_number)
+        self.phase_offset_deg = np.zeros(count, dtype=np.float64)
+        # radians, fine heterodyne phase shift on top of phase_rotation
+        self.phase_correction = arrays.get("phase_correction", np.zeros(count, dtype=np.float64))
+
+    @classmethod
+    def from_bursts(cls, bursts):
+        arrays = {
+            name: np.array(
+                [getattr(b, name) for b in bursts],
+                dtype=_BURST_INT_DTYPES.get(name, np.float64),
+            )
+            for name in _BURST_FIELDS
+        }
+        arrays["phase_correction"] = np.array([b.phase_correction for b in bursts], dtype=np.float64)
+        return cls(arrays)
+
+    def set_burst(self, index, burst):
+        """Replace the measurements of one line with those in a BurstInfo."""
+        for name in _BURST_FIELDS:
+            getattr(self, name)[index] = getattr(burst, name)
+        self.phase_correction[index] = burst.phase_correction
+
+    def __len__(self):
+        return len(self.line_number)
 
 
 @njit(nogil=True, inline='always')
@@ -539,15 +611,15 @@ def _fit_head_switch_rotation(
     Returns the rotation index of the track active at the end of the field.
     """
     line_count = len(phase_sequence)
-    lines = np.array([b.line_number for b in phase_sequence])
+    lines = phase_sequence.line_number.astype(np.int64)
     region_start = int(np.searchsorted(lines, rotation_check_start_line))
     region_len = line_count - region_start
     if region_len < 2 or region_start < reference_lines:
         return chroma_rotation_index
 
-    phase = np.radians([b.phase_deg for b in phase_sequence])
-    rotation = np.array([b.phase_rotation for b in phase_sequence])
-    magnitude = np.array([b.magnitude for b in phase_sequence])
+    phase = np.radians(phase_sequence.phase_deg)
+    rotation = phase_sequence.phase_rotation.astype(np.int64)
+    magnitude = phase_sequence.magnitude
 
     reference = np.arange(region_start - reference_lines, region_start)
     magnitude_ref = np.median(magnitude[reference])
@@ -642,7 +714,7 @@ def _fit_head_switch_rotation(
             burstarea,
             burst_sin,
             burst_cos,
-            lines[idx],
+            int(lines[idx]),
             lineoffset,
             outwidth,
             fsc,
@@ -650,7 +722,7 @@ def _fit_head_switch_rotation(
         burst.phase_rotation = next_phase
         if j >= switch:
             burst.phase_correction = phase_correction
-        phase_sequence[idx] = burst
+        phase_sequence.set_burst(idx, burst)
 
     return next_rotation_index
 
@@ -673,16 +745,151 @@ def _get_phase_sequence(
     track_change_threshold,
     color_system
 ):
+    """Measure the colour burst of each line. Returns (rotation index, BurstSequence)."""
+    # PAL uses a model fit over the whole head switching area instead of the line by line check
+    fit_head_switch = (
+        detect_chroma_track_phase
+        and chroma_rotation is not None
+        and chroma_heterodyne is not None
+        and color_system == "PAL"
+    )
+    measure_args = (
+        chroma,
+        chroma_heterodyne,
+        chroma_filter,
+        chroma_rotation,
+        chroma_rotation_starting_index,
+        burstarea,
+        burst_sin,
+        burst_cos,
+        fsc,
+        lineoffset,
+        outwidth,
+        last_line,
+        detect_chroma_track_phase and not fit_head_switch,
+        rotation_check_start_line,
+        track_change_threshold,
+        color_system,
+    )
+    index, sequence = _measure_phase_sequence(*measure_args)
+    if fit_head_switch:
+        # Without the line by line check the measured track keeps its starting rotation
+        # index; the index returned above already accounts for the switch to the next field.
+        _fit_head_switch_rotation(
+            sequence,
+            chroma,
+            chroma_heterodyne,
+            chroma_filter,
+            chroma_rotation,
+            chroma_rotation_starting_index or 0,
+            burstarea,
+            burst_sin,
+            burst_cos,
+            fsc,
+            lineoffset,
+            outwidth,
+            rotation_check_start_line,
+        )
+    return index, sequence
+
+
+def _measure_phase_sequence(
+    chroma,
+    chroma_heterodyne,
+    chroma_filter,
+    chroma_rotation,
+    chroma_rotation_starting_index,
+    burstarea,
+    burst_sin,
+    burst_cos,
+    fsc,
+    lineoffset,
+    outwidth,
+    last_line,
+    detect_chroma_track_phase,
+    rotation_check_start_line,
+    track_change_threshold,
+    color_system
+):
+    if (
+        burst_phase_sequence is not None
+        and isinstance(chroma_heterodyne, np.ndarray)
+        and chroma_heterodyne.ndim == 2
+        and all(
+            isinstance(a, np.ndarray) and a.dtype == np.float32
+            for a in (chroma, chroma_heterodyne, burst_sin, burst_cos)
+        )
+        and burstarea[0] > 0
+    ):
+        do_phase_rotation_check = (
+            detect_chroma_track_phase
+            and chroma_rotation is not None
+            and chroma_heterodyne is not None
+        )
+        index, arrays = burst_phase_sequence(
+            np.ascontiguousarray(chroma),
+            np.ascontiguousarray(chroma_heterodyne),
+            np.ascontiguousarray(chroma_filter, dtype=np.float64).ravel(),
+            tuple(chroma_rotation) if chroma_rotation else None,
+            chroma_rotation_starting_index,
+            (int(burstarea[0]), int(burstarea[1])),
+            np.ascontiguousarray(burst_sin),
+            np.ascontiguousarray(burst_cos),
+            float(fsc),
+            int(lineoffset),
+            int(outwidth),
+            int(last_line),
+            bool(do_phase_rotation_check),
+            int(rotation_check_start_line),
+            float(track_change_threshold),
+            color_system == "NTSC",
+        )
+        return index, BurstSequence(arrays)
+
+    index, bursts = _get_phase_sequence_py(
+        chroma,
+        chroma_heterodyne,
+        chroma_filter,
+        chroma_rotation,
+        chroma_rotation_starting_index,
+        burstarea,
+        burst_sin,
+        burst_cos,
+        fsc,
+        lineoffset,
+        outwidth,
+        last_line,
+        detect_chroma_track_phase,
+        rotation_check_start_line,
+        track_change_threshold,
+        color_system,
+    )
+    return index, BurstSequence.from_bursts(bursts)
+
+
+def _get_phase_sequence_py(
+    chroma,
+    chroma_heterodyne,
+    chroma_filter,
+    chroma_rotation,
+    chroma_rotation_starting_index,
+    burstarea,
+    burst_sin,
+    burst_cos,
+    fsc,
+    lineoffset,
+    outwidth,
+    last_line,
+    detect_chroma_track_phase,
+    rotation_check_start_line,
+    track_change_threshold,
+    color_system
+):
     do_phase_rotation_check = (
         detect_chroma_track_phase
         and chroma_rotation is not None
         and chroma_heterodyne is not None
     )
-
-    # PAL uses a model fit over the whole head switching area instead of the line by line check below
-    fit_head_switch = do_phase_rotation_check and color_system == "PAL"
-    if fit_head_switch:
-        do_phase_rotation_check = False
 
     phase_sequence = []
 
@@ -783,23 +990,6 @@ def _get_phase_sequence(
         current_burst.phase_rotation = current_phase
         phase_sequence.append(current_burst)
 
-    if fit_head_switch:
-        chroma_rotation_index = _fit_head_switch_rotation(
-            phase_sequence,
-            chroma,
-            chroma_heterodyne,
-            chroma_filter,
-            chroma_rotation,
-            chroma_rotation_index,
-            burstarea,
-            burst_sin,
-            burst_cos,
-            fsc,
-            lineoffset,
-            outwidth,
-            rotation_check_start_line,
-        )
-
     if chroma_rotation and chroma_rotation_index == chroma_rotation_starting_index:
         # rotate the phase for the next field, if rotation was not detected
         chroma_rotation_index = (chroma_rotation_index + 1) % 2
@@ -866,12 +1056,11 @@ def get_phase_rotation_sequence(
         delta_180 = 0
         delta_270 = 0
 
+        line_numbers = phase_sequence.line_number.tolist()
+        phases = phase_sequence.phase_deg.tolist()
         for i in range(1, len(phase_sequence)):
-            previous_burst = phase_sequence[i-1]
-            current_burst = phase_sequence[i]
-
-            if current_burst.line_number > burst_check_start and current_burst.line_number < burst_check_end:
-                delta = (current_burst.phase_deg - previous_burst.phase_deg) % 360
+            if line_numbers[i] > burst_check_start and line_numbers[i] < burst_check_end:
+                delta = (phases[i] - phases[i - 1]) % 360
                 bucket = int((delta + 45) // 90) % 4
 
                 if bucket == 0:
@@ -927,31 +1116,33 @@ def get_phase_rotation_sequence(
     avg_count = 0
     burst_magnitude_avg = 0
 
-    for burst in phase_sequence:
-        if burst.line_number > burst_check_start and burst.line_number < burst_check_end:
-            I = burst.I
-            Q = burst.Q
-
-            if burst.magnitude != 0:
-                I /= burst.magnitude
-                Q /= burst.magnitude
+    for line_number, I, Q, magnitude in zip(
+        phase_sequence.line_number.tolist(),
+        phase_sequence.I.tolist(),
+        phase_sequence.Q.tolist(),
+        phase_sequence.magnitude.tolist(),
+    ):
+        if line_number > burst_check_start and line_number < burst_check_end:
+            if magnitude != 0:
+                I /= magnitude
+                Q /= magnitude
 
                 avg_count += 1
-                burst_magnitude_avg += burst.magnitude
+                burst_magnitude_avg += magnitude
 
                 if enable_color_killer:
                     # find the first line that might have a valid burst if the previous field had the burst disabled
                     # broadcasters would sometime turn on the burst mid-field, so attempt to detect that transition here
                     if (
                         prev_burst_detected_line == -1 # previous field had color killer activated
-                        and burst_detected_line == 0 and burst.magnitude > burst_magnitude_threshold # first burst that exceeds threshold
+                        and burst_detected_line == 0 and magnitude > burst_magnitude_threshold # first burst that exceeds threshold
                     ):
                         # first burst that exceeds threshold
                         # color killer will be active until this line, then it deactivates
                         # it is only reactivated after an entire field is without color (below)
-                        burst_detected_line = burst.line_number
+                        burst_detected_line = line_number
             
-                if burst.line_number % 2:
+                if line_number % 2:
                     odd_I_total += I
                     odd_Q_total += Q
                 else:
@@ -972,7 +1163,6 @@ def get_phase_rotation_sequence(
     return chroma_rotation_index, phase_sequence, burst_detected_line, burst_magnitude_avg, burst_phase_avg, even_burst_phase_avg, odd_burst_phase_avg
 
 
-@njit(cache=False, nogil=True, fastmath=False)
 def upconvert_chroma(
     chroma,
     uphet,
@@ -981,35 +1171,89 @@ def upconvert_chroma(
     phase_rotation_sequence,
     chroma_heterodyne,
 ):
-    for burst in phase_rotation_sequence:
+    _upconvert_chroma(
+        chroma,
+        uphet,
+        lineoffset,
+        outwidth,
+        phase_rotation_sequence.line_number,
+        phase_rotation_sequence.phase_rotation,
+        phase_rotation_sequence.phase_correction,
+        chroma_heterodyne,
+    )
+
+
+@njit(cache=True, nogil=True, fastmath=False)
+def _upconvert_chroma(
+    chroma,
+    uphet,
+    lineoffset,
+    outwidth,
+    line_numbers,
+    phase_rotations,
+    phase_corrections,
+    chroma_heterodyne,
+):
+    for i in range(len(line_numbers)):
         # The burst lock runs before PAL fields get their lineoffset, so the
         # sequence starts with entries for lines above the first output line.
         # Those would index backwards from the end of the field.
-        if burst.line_number < lineoffset:
+        if line_numbers[i] < lineoffset:
             continue
 
-        linestart = (burst.line_number - lineoffset) * outwidth
+        linestart = (line_numbers[i] - lineoffset) * outwidth
         lineend = linestart + outwidth
 
-        heterodyne = chroma_heterodyne[burst.phase_rotation][linestart:lineend]
+        heterodyne = chroma_heterodyne[phase_rotations[i]][linestart:lineend]
         c = chroma[linestart:lineend]
-        if burst.phase_correction != 0.0:
+        if phase_corrections[i] != 0.0:
             # the next heterodyne phase is 90 degrees further, mix both for the fractional step
-            quadrature = chroma_heterodyne[(burst.phase_rotation + 1) % 4][linestart:lineend]
+            quadrature = chroma_heterodyne[(phase_rotations[i] + 1) % 4][linestart:lineend]
             uphet[linestart:lineend] = c * (
-                heterodyne * math.cos(burst.phase_correction)
-                + quadrature * math.sin(burst.phase_correction)
+                heterodyne * math.cos(phase_corrections[i])
+                + quadrature * math.sin(phase_corrections[i])
             )
         else:
             uphet[linestart:lineend] = c * heterodyne
 
 
-@njit(nogil=True, cache=False, fastmath=False)
 def upconvert_chroma_phase_comp(
     chroma,
     lineoffset,
     outwidth,
     phase_rotation_sequence,
+    color_under_carrier_fs,
+    fsc,
+    target_phase_even,
+    target_phase_odd
+):
+    seq = phase_rotation_sequence
+    _upconvert_chroma_phase_comp(
+        chroma,
+        lineoffset,
+        outwidth,
+        seq.line_number,
+        seq.phase_rotation,
+        seq.phase_deg,
+        seq.frequency,
+        seq.dc,
+        color_under_carrier_fs,
+        fsc,
+        target_phase_even,
+        target_phase_odd,
+    )
+
+
+@njit(nogil=True, cache=True, fastmath=False)
+def _upconvert_chroma_phase_comp(
+    chroma,
+    lineoffset,
+    outwidth,
+    line_numbers,
+    phase_rotations,
+    phase_degs,
+    frequencies,
+    dcs,
     color_under_carrier_fs,
     fsc,
     target_phase_even,
@@ -1024,7 +1268,7 @@ def upconvert_chroma_phase_comp(
 
     target_phase_even_rad = target_phase_even * deg2rad_scale
     target_phase_odd_rad = target_phase_odd * deg2rad_scale
-    num_bursts = len(phase_rotation_sequence)
+    num_bursts = len(line_numbers)
 
     coeff_step_factor = pi_over_two / (fsc * outwidth)
 
@@ -1033,46 +1277,43 @@ def upconvert_chroma_phase_comp(
     local_idx = np.arange(outwidth, dtype=np.float64)
 
     for idx in range(num_bursts):
-        current_burst = phase_rotation_sequence[idx]
-
         # Entries for lines above the first output line would index backwards
         # from the end of the field (see upconvert_chroma).
-        if current_burst.line_number < lineoffset:
+        if line_numbers[idx] < lineoffset:
             continue
 
         # Solve for current line's active het_hz
-        k_current = current_burst.frequency / fsc
+        k_current = frequencies[idx] / fsc
         het_hz_current = k_current * color_under_carrier_fs
 
         # Solve for next line's active het_hz
         if idx < num_bursts - 1:
-            next_burst = phase_rotation_sequence[idx + 1]
-            k_next = next_burst.frequency / fsc
+            k_next = frequencies[idx + 1] / fsc
             het_hz_next = k_next * color_under_carrier_fs
         else:
             het_hz_next = het_hz_current
 
-        linestart = (current_burst.line_number - lineoffset) * outwidth
+        linestart = (line_numbers[idx] - lineoffset) * outwidth
         lineend = linestart + outwidth
 
         # Determine target phase
-        if current_burst.line_number % 2 != 0:
+        if line_numbers[idx] % 2 != 0:
             target_phase_rad = target_phase_odd_rad
         else:
             target_phase_rad = target_phase_even_rad
 
         # Initial starting phase
         theta_0 = het_coefficient * linestart + (
-            current_burst.phase_rotation * pi_over_two
+            phase_rotations[idx] * pi_over_two
             + target_phase_rad 
-            + current_burst.phase_deg * deg2rad_scale
+            + phase_degs[idx] * deg2rad_scale
         )
 
         # Coefficient step parameters
         alpha = pi_over_two * (1.0 + het_hz_current / fsc)
         delta_coeff = (het_hz_next - het_hz_current) * coeff_step_factor
         beta = 0.5 * delta_coeff
-        dc_val = current_burst.dc
+        dc_val = dcs[idx]
 
         # Slice target and source arrays to provide direct contiguous memory views
         chroma_slice = chroma[linestart:lineend]

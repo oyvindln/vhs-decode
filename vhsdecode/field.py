@@ -2168,17 +2168,22 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
         inv_fsc = 1.0 / fsc
         phase_to_samples_factor = fsc_ratio / 360.0
 
+        line_numbers = phase_sequence.line_number.tolist()
+        phase_degs = phase_sequence.phase_deg.tolist()
+        phase_offsets = phase_sequence.phase_offset_deg.tolist()
+        frequencies = phase_sequence.frequency.tolist()
+        centers = phase_sequence.center.tolist()
         for idx in range(burst_tbc_start, len(phase_sequence)):
-            burst = phase_sequence[idx]
+            line_number = line_numbers[idx]
 
             # Select PAL target phase based on line polarity (even/odd)
-            target_phase = odd_burst_avg_phase if burst.line_number % 2 else even_burst_avg_phase
+            target_phase = odd_burst_avg_phase if line_number % 2 else even_burst_avg_phase
 
             # Calculate phase delta including the PAL line offset
-            phase_delta = (target_phase - burst.phase_deg + burst.phase_offset_deg + 180.0) % 360.0 - 180.0
+            phase_delta = (target_phase - phase_degs[idx] + phase_offsets[idx] + 180.0) % 360.0 - 180.0
 
-            line_start = linelocs[burst.line_number]
-            line_end = linelocs[burst.line_number + 1]
+            line_start = linelocs[line_number]
+            line_end = linelocs[line_number + 1]
             line_length = line_end - line_start
             
             scale = line_length * inv_outlinelen
@@ -2187,15 +2192,15 @@ class FieldPALShared(FieldShared, ldd.FieldPAL):
             line_adjust = phase_delta * phase_to_samples_factor
 
             # Frequency Drift Tracking
-            f_offset = burst.frequency - fsc
-            burst_center_distance = burst.center - line_start
+            f_offset = frequencies[idx] - fsc
+            burst_center_distance = centers[idx] - line_start
             accumulated_drift_samples = (f_offset * burst_center_distance) * inv_fsc
 
             # Combine phase offset and subcarrier drift adjustments
             corrected_adjust = line_adjust - accumulated_drift_samples
 
             # Shift the HSync location 
-            linelocs[burst.line_number] += corrected_adjust * scale
+            linelocs[line_number] += corrected_adjust * scale
 
     def refine_linelocs_pilot(self, linelocs=None):
         if linelocs is None:
@@ -2253,14 +2258,18 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
         inv_fsc = 1.0 / fsc
         phase_to_samples_factor = fsc_ratio / 360.0
 
+        line_numbers = phase_sequence.line_number.tolist()
+        phase_degs = phase_sequence.phase_deg.tolist()
+        frequencies = phase_sequence.frequency.tolist()
+        centers = phase_sequence.center.tolist()
         for idx in range(burst_tbc_start, len(phase_sequence)):
-            burst = phase_sequence[idx]
+            line_number = line_numbers[idx]
 
             # Phase difference at the burst center
-            phase_delta = (burst_avg_phase - burst.phase_deg + 180.0) % 360.0 - 180.0
+            phase_delta = (burst_avg_phase - phase_degs[idx] + 180.0) % 360.0 - 180.0
 
-            line_start = linelocs[burst.line_number]
-            line_end = linelocs[burst.line_number + 1]
+            line_start = linelocs[line_number]
+            line_end = linelocs[line_number + 1]
             line_length = line_end - line_start
             scale = line_length * inv_outlinelen
 
@@ -2268,14 +2277,14 @@ class FieldNTSCShared(FieldShared, ldd.FieldNTSC):
             line_adjust = phase_delta * phase_to_samples_factor
 
             # Calculate the subcarrier cycle frequency drift as samples:
-            f_offset = burst.frequency - fsc
-            burst_center_distance = burst.center - line_start
+            f_offset = frequencies[idx] - fsc
+            burst_center_distance = centers[idx] - line_start
             accumulated_drift_samples = (f_offset * burst_center_distance) * inv_fsc
 
             # Subtract frequency drift and scale the shift
             corrected_adjust = line_adjust - accumulated_drift_samples
 
-            linelocs[burst.line_number] += corrected_adjust * scale
+            linelocs[line_number] += corrected_adjust * scale
 
     def refine_linelocs_burst(self, linelocs=None):
         if linelocs is None:

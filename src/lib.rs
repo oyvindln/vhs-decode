@@ -1,3 +1,4 @@
+mod burst;
 mod filters;
 mod levels;
 mod ported;
@@ -221,5 +222,6 @@ fn vhsd_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sosfiltfilt, m)?)?;
     m.add_function(wrap_pyfunction!(sosfiltfilt_f32, m)?)?;
     m.add_function(wrap_pyfunction!(check_debug, m)?)?;
+    m.add_function(wrap_pyfunction!(burst::burst_phase_sequence, m)?)?;
     Ok(())
 }

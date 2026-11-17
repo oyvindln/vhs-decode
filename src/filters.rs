@@ -21,7 +21,7 @@ fn from_scipy_dyn_slice<F: RealField + Copy>(order: usize, sos: &[F]) -> Vec<Sos
 /// Clone of upstream function just with slice param instead of vector.
 /// converts from f64 to f32 param for f32 sosfilt.
 /// TODO: Maybe we could just store as f32 python side.
-fn f32_sos_from_scipy_dyn_slice(order: usize, sos: &[f64]) -> Vec<Sos<f32>> {
+pub(crate) fn f32_sos_from_scipy_dyn_slice(order: usize, sos: &[f64]) -> Vec<Sos<f32>> {
     assert!(order * 6 == sos.len());
 
     sos.iter()

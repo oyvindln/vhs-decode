@@ -8,9 +8,7 @@ negative rows, which numba (like numpy) wraps around to the bottom of the field.
 
 import numpy as np
 import pytest
-from numba.typed import List
-
-from vhsdecode.chroma import BurstInfo, chroma_automatic_gain, upconvert_chroma
+from vhsdecode.chroma import BurstInfo, BurstSequence, chroma_automatic_gain, upconvert_chroma
 
 OUTWIDTH = 1135
 LINESOUT = 313
@@ -18,7 +16,7 @@ LOCK_LINEOFFSET = 1  # field.lineoffset (0) + 1 when the burst lock runs
 
 
 def _phase_sequence(amplitude=1.0, vbi_lines=0, vbi_amplitude=0.01):
-    seq = List()
+    seq = []
     for line in range(LOCK_LINEOFFSET, LOCK_LINEOFFSET + LINESOUT):
         amplitude_here = vbi_amplitude if line <= vbi_lines else amplitude
         start = (line - LOCK_LINEOFFSET) * OUTWIDTH
@@ -27,7 +25,7 @@ def _phase_sequence(amplitude=1.0, vbi_lines=0, vbi_amplitude=0.01):
         )
         burst.phase_rotation = line % 4
         seq.append(burst)
-    return seq
+    return BurstSequence.from_bursts(seq)
 
 
 @pytest.mark.parametrize("lineoffset", [3, 4])
